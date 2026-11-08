@@ -61,19 +61,63 @@ def test_check_reports_update(client_for, tmp_path, monkeypatch):
     assert r == {"ok": True, "current": "a" * 40, "latest": "b" * 40, "up_to_date": False}
 
 
-def test_update_runs_one_at_a_time(client_for, tmp_path, monkeypatch):
-    script = tmp_path / "update.sh"
-    script.write_text('echo "args: $*"; sleep 1\n')
+@pytest.fixture
+def update_files(tmp_path, monkeypatch):
+    for name, attr in ((".update.json", "UPDATE_STATE"), (".update.log", "UPDATE_LOG"), (".update.env", "UPDATE_ENV")):
+        monkeypatch.setattr(system, attr, tmp_path / name)
+    monkeypatch.setattr(system, "_start_update_unit", lambda: False)  # exercise the in-process fallback
+    return tmp_path
+
+
+def _wait_final(client, timeout=5.0):
+    deadline = time.time() + timeout
+    while (s := client.get("/api/system/update").get_json())["running"] and time.time() < deadline:
+        time.sleep(0.1)
+    return s
+
+
+def test_update_runs_one_at_a_time_and_reports_state(client_for, update_files, monkeypatch):
+    script = update_files / "update.sh"
+    # Stands in for deploy/update.sh: same env contract, same state file.
+    script.write_text(
+        'echo "remote=$UPDATE_REMOTE branch=$UPDATE_BRANCH"; sleep 1\n'
+        'printf \'{"state": "up_to_date", "message": "already at abc", "pid": %d, "time": %d}\' $$ $(date +%s)'
+        f' > {system.UPDATE_STATE}\n'
+    )
     monkeypatch.setattr(system, "UPDATE_SCRIPT", script)
-    monkeypatch.setattr(system, "UPDATE_LOG", tmp_path / "update.log")
     client = client_for(None)
+    assert client.get("/api/system/update").get_json()["state"] == "idle"
 
     assert client.post("/api/system/update").status_code == 202
     assert client.post("/api/system/update").status_code == 409
     assert client.get("/api/system/update").get_json()["running"]
 
-    deadline = time.time() + 5
-    while (s := client.get("/api/system/update").get_json())["running"] and time.time() < deadline:
-        time.sleep(0.1)
-    assert s["exit_code"] == 0
-    assert "args: https://github.com/hcs-auditoriums/tf-daemon.git main" in s["log"]
+    s = _wait_final(client)
+    assert (s["state"], s["message"], s["running"]) == ("up_to_date", "already at abc", False)
+    assert "remote=https://github.com/hcs-auditoriums/tf-daemon.git branch=main" in s["log"]
+    assert "UPDATE_BRANCH=main" in system.UPDATE_ENV.read_text()
+
+
+def test_update_that_dies_is_reported_failed(client_for, update_files, monkeypatch):
+    script = update_files / "update.sh"
+    script.write_text(f'printf \'{{"state": "running", "message": "x", "pid": %d, "time": 0}}\' $$ > {system.UPDATE_STATE}\n')
+    monkeypatch.setattr(system, "UPDATE_SCRIPT", script)
+    client = client_for(None)
+    assert client.post("/api/system/update").status_code == 202
+    s = _wait_final(client)
+    assert s["state"] == "failed" and "stopped unexpectedly" in s["message"]
+
+
+def test_restart_handoff_is_settled_by_the_new_process(update_files):
+    system._write_state(state="restarting", message="restarting into bbb", pid=1, to="b" * 40)
+    old = system.Updater("r", "main", running_revision="a" * 40)
+    assert old.status()["state"] == "restarting"  # the old process is still the one running
+
+    new = system.Updater("r", "main", running_revision="b" * 40)
+    s = new.status()
+    assert (s["state"], s["running"]) == ("done", False) and s["message"] == "updated to bbbbbbb"
+    assert system._read_state()["state"] == "done"  # persisted
+
+    system._write_state(state="restarting", message="", pid=1, to="b" * 40, time=0)
+    s = system.Updater("r", "main", running_revision="a" * 40).status()
+    assert s["state"] == "failed" and "not running the update" in s["message"]

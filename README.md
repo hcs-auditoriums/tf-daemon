@@ -74,11 +74,18 @@ never overwritten by a deploy, so edit it there.
 Or update from the server itself: the **Config** page (`/config`) has an
 **Update now** button that runs `deploy/update.sh`, which pulls `update.branch`
 from `update.remote` (default: this repo's `main`), reinstalls the package and
-restarts the service. The first run turns a `deploy.sh` copy into a git
-checkout. The same page edits `config.toml` (validated before it is saved) and
-restarts the service to apply it. The restart relies on the sudoers rule that
-`install-service.sh` adds. There is no login on these pages, so keep the server
-on a trusted network.
+restarts the service. It runs in its own `tf-daemon-update` systemd unit, so it
+outlives that restart and waits for the new version to answer. If the install
+fails or the new version doesn't come up within 90 s, it puts the previous
+revision back and restarts that, and the page says so. Progress is kept in
+`.update.json` and `.update.log`, so the page shows the result even across the
+restart. (Before `install-service.sh` has installed that unit, the button falls
+back to running the script inside the service; updates still work but can't be
+rolled back automatically.) The first run turns a `deploy.sh` copy into a git
+checkout, and the server's `config.toml` is always kept. The same page edits
+`config.toml` (validated before it is saved) and restarts the service to apply
+it. The restart and update rely on the sudoers rules that `install-service.sh`
+adds. There is no login on these pages, so keep the server on a trusted network.
 
 Useful on the server: `journalctl -u tf-daemon -f`,
 `~/tf-daemon/.venv/bin/python -m tf_daemon --list-devices`.
