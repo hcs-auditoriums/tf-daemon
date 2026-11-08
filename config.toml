@@ -37,10 +37,15 @@ tone_db = -15.0             # relative to speech_db
 seed = 1
 
 [rf]
-# tinySA RF spectrum page (/rf). The device is only opened when someone clicks Connect.
+# tinySA RF spectrum page (/rf).
 enabled = true
 source = "device"           # device (tinySA over USB, needs: pip install -e '.[rf]') | demo
-# Default sweep; the page can change it per scan.
+# Keep the tinySA connected and sweeping from startup, reconnecting if it is
+# unplugged, whether or not anyone has the page open. The range defaults to the
+# span of the QLX-D receivers (Wireless page) when any are known, else the
+# start/stop below. Stop / Disconnect on the page pause this until Start / Connect.
+auto_connect = true
+# Default sweep (when no receivers are known); the page can change it.
 start_hz = 88000000
 stop_hz = 108000000
 points = 290                # max 450

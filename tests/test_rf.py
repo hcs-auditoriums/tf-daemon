@@ -6,8 +6,9 @@ import pytest
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError, load_config
+from tf_daemon.rf import engine as engine_mod
 from tf_daemon.rf.devices import DemoDevice, RFDeviceError, parse_scan
-from tf_daemon.rf.engine import RFEngine, SweepSettings
+from tf_daemon.rf.engine import RFEngine, SweepSettings, fit_span
 
 
 def test_parse_scan_handles_firmware_bug_and_junk():
@@ -46,6 +47,7 @@ def _wait_state(engine, pred, timeout=5.0):
 def test_rf_module_end_to_end_with_demo():
     cfg = load_config(None)
     cfg["rf"]["interval_s"] = 0.1
+    cfg["rf"]["auto_connect"] = False  # manual: nothing happens until Connect
     modules = build_modules(cfg, "synth", rf_source="demo", qlxd_source="off")
     app = create_app(cfg, modules)
     try:
@@ -108,3 +110,96 @@ def test_rf_off_and_sweep_failure():
     s = _wait_state(engine, lambda s: s["error"] is not None)
     assert "USB unplugged" in s["error"] and not s["scanning"]
     engine.stop()
+
+
+def test_fit_span():
+    assert fit_span([]) is None
+    assert fit_span([482.425, 607.7]) == (480_000_000, 610_000_000)
+    assert fit_span([578.35]) == (573_000_000, 584_000_000)  # one receiver: at least 10 MHz wide
+    assert fit_span([1.0])[0] == 0
+
+
+@pytest.fixture
+def auto_cfg(monkeypatch):
+    monkeypatch.setattr(engine_mod, "SUPERVISE_INTERVAL_S", 0.05)
+    cfg = load_config(None)
+    cfg["rf"].update(auto_connect=True, interval_s=0.1)
+    return cfg
+
+
+def _until(pred, timeout=5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if pred():
+            return
+        time.sleep(0.02)
+    raise AssertionError("condition not met in time")
+
+
+def test_auto_mode_connects_and_sweeps_the_receiver_range(auto_cfg):
+    hint = [(480_000_000, 610_000_000)]
+    dev = DemoDevice()
+    dev.max_points = 290
+    engine = RFEngine(auto_cfg, dev, range_hint=lambda: hint[0])
+    engine.start()
+    try:
+        _until(lambda: engine.status()["sweeps"] >= 2)
+        st = engine.status()
+        assert st["connected"] and st["scanning"] and st["auto"]
+        assert (st["settings"]["start_hz"], st["settings"]["stop_hz"], st["settings"]["points"]) == \
+            (480_000_000, 610_000_000, 290)
+
+        hint[0] = (470_000_000, 610_000_000)  # a receiver was added: auto range follows
+        _until(lambda: engine.status()["settings"]["start_hz"] == 470_000_000)
+
+        engine.stop_scan(by_user=True)  # a user's Stop is respected...
+        time.sleep(0.3)
+        assert not engine.status()["scanning"] and engine.status()["paused"]
+
+        engine.start_scan({"start_hz": 500_000_000, "stop_hz": 520_000_000}, by_user=True)  # ...until Start
+        hint[0] = (460_000_000, 610_000_000)
+        time.sleep(0.3)
+        st = engine.status()
+        assert st["scanning"] and not st["paused"]
+        assert st["settings"]["start_hz"] == 500_000_000  # a hand-picked range is kept
+
+        engine.disconnect(by_user=True)
+        time.sleep(0.3)
+        assert not engine.status()["connected"]
+        engine.connect(by_user=True)
+        _until(lambda: engine.status()["scanning"])
+    finally:
+        engine.stop()
+
+
+def test_auto_mode_waits_for_and_recovers_the_device(auto_cfg):
+    class Unpluggable(DemoDevice):
+        present, fail_next = False, False
+
+        def open(self):
+            if not self.present:
+                raise RFDeviceError("tinySA not found. Is it plugged in?")
+            return super().open()
+
+        def sweep(self, *a):
+            if self.fail_next:
+                self.fail_next = False
+                raise RFDeviceError("USB unplugged")
+            return super().sweep(*a)
+
+    dev = Unpluggable()
+    engine = RFEngine(auto_cfg, dev)  # no receivers: falls back to the configured range
+    engine.start()
+    try:
+        _until(lambda: engine.status()["error"] is not None)
+        assert not engine.status()["connected"]  # keeps retrying while absent
+
+        dev.present = True
+        _until(lambda: engine.status()["sweeps"] >= 1)
+        assert engine.status()["settings"]["start_hz"] == auto_cfg["rf"]["start_hz"]
+
+        n = engine.status()["sweeps"]
+        dev.fail_next = True  # yanked mid-sweep: closed, reopened, sweeping again
+        _until(lambda: engine.status()["sweeps"] > n + 1 and engine.status()["error"] is None)
+    finally:
+        engine.stop()

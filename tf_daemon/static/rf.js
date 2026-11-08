@@ -31,6 +31,7 @@
     dbMax: -10,
     wfRows: [],        // newest first, Float32Array each
     inputsLoaded: false,
+    settingsKey: "",   // last server settings shown in the inputs
     dirty: true,
     hover: null,
   };
@@ -65,9 +66,11 @@
   $("fit-rx").onclick = () => {
     const f = state.receivers.map((r) => r.frequency_mhz);
     if (!f.length) return;
-    const lo = Math.max(0, Math.floor(Math.min(...f) - 1)), hi = Math.ceil(Math.max(...f) + 1);
-    $("start").value = lo;
-    $("stop").value = hi > lo ? hi : lo + 1;
+    // Same span as the server's auto range (rf/engine.py fit_span): ±2 MHz, whole MHz, ≥ 10 MHz.
+    let lo = Math.floor(Math.min(...f) - 2), hi = Math.ceil(Math.max(...f) + 2);
+    if (hi - lo < 10) { const mid = (Math.min(...f) + Math.max(...f)) / 2; lo = Math.floor(mid - 5); hi = Math.ceil(mid + 5); }
+    $("start").value = Math.max(0, lo);
+    $("stop").value = hi;
     if (state.snap && state.snap.scanning) post("/api/rf/scan/start", readInputs());  // apply right away
   };
 
@@ -106,7 +109,11 @@
 
   function onState(s) {
     state.snap = s;
-    if (!state.inputsLoaded) loadInputs(s);
+    // Follow the server's settings (auto mode retargets the range as receivers change,
+    // other viewers may start sweeps), except while this user is editing them.
+    const key = JSON.stringify(s.settings);
+    if (!state.inputsLoaded || (key !== state.settingsKey && !editingInputs())) loadInputs(s);
+    state.settingsKey = key;
     $("points").max = s.max_points;  // drops to 290 once an original tinySA connects
     if (s.sweep && s.sweeps !== state.lastSweeps) {
       const sw = s.sweep;
@@ -127,9 +134,14 @@
 
   // ------------------------------------------------------------------ controls
 
+  const SETTING_INPUTS = ["start", "stop", "points", "rbw", "interval"];
+  const editingInputs = () => SETTING_INPUTS.includes(document.activeElement && document.activeElement.id);
+
   function loadInputs(s) {
     const rbw = $("rbw");
-    rbw.replaceChildren(...s.rbw_choices.map((v) => new Option(v === "auto" ? "auto" : `${v} kHz`, v)));
+    if (rbw.options.length !== s.rbw_choices.length) {
+      rbw.replaceChildren(...s.rbw_choices.map((v) => new Option(v === "auto" ? "auto" : `${v} kHz`, v)));
+    }
     const st = s.settings;
     $("start").value = +(st.start_hz / 1e6).toFixed(6);
     $("stop").value = +(st.stop_hz / 1e6).toFixed(6);
@@ -156,8 +168,10 @@
     el.classList.toggle("ok", wsOpen && connected);
     if (!wsOpen) el.textContent = "server disconnected";
     else if (!s) el.textContent = "connecting…";
-    else if (!connected) el.textContent = `${s.device} · not connected`;
-    else el.textContent = `${s.device} · ${scanning ? "sweeping" : "idle"} · ${s.sweeps} sweeps`;
+    else if (!connected) el.textContent = s.auto && !s.paused ? `${s.device} · waiting for device…` : `${s.device} · not connected`;
+    else el.textContent = `${s.device} · ${scanning ? "sweeping" : s.paused ? "paused" : "idle"} · ${s.sweeps} sweeps`;
+    el.title = !s ? "Connection" : s.auto ? (s.paused ? "Auto mode paused by Stop/Disconnect; press Start or Connect to resume"
+      : "Auto mode: connects and sweeps on its own") : "Connection";
 
     $("connect").textContent = connected ? "Disconnect" : "Connect";
     $("connect").classList.toggle("primary", !connected);
