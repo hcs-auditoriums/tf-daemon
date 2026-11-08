@@ -289,3 +289,39 @@ main.page {
   .console-panel { width: 100%; min-width: 0; max-height: 45vh; border-left: 0; border-top: 1px solid var(--border); }
   .workspace > main { min-height: 260px; }
 }
+
+/* ---------------------------------------------------------------- rings (audio page) */
+
+.ring-alert {
+  font: inherit; font-weight: 700; font-size: 13px; letter-spacing: 0.02em;
+  border-radius: 6px; padding: 5px 12px; min-height: 32px; cursor: pointer;
+  color: #06131d; border: 0;
+}
+.ring-alert[hidden] { display: none; }
+.ring-alert.ring { background: #ff9f43; }
+.ring-alert.feedback { background: var(--bad); animation: ring-pulse 0.8s ease-in-out infinite alternate; }
+@keyframes ring-pulse { to { filter: brightness(1.35); } }
+@media (prefers-reduced-motion: reduce) { .ring-alert.feedback { animation: none; } }
+
+.ring-list {
+  position: absolute; bottom: 34px; left: 52px; width: 260px; max-width: calc(100% - 64px);
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  background: rgba(13, 16, 20, 0.88); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.ring-list[hidden] { display: none; }
+.rl-head { display: flex; justify-content: space-between; align-items: center; padding: 0 2px 4px; font-weight: 600; }
+.rl-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; border-top: 1px solid var(--border); opacity: 0.6; }
+.rl-row.live { opacity: 1; }
+.rl-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.rl-main { flex: 1; min-width: 0; }
+.rl-top { display: flex; align-items: baseline; gap: 6px; }
+.rl-freq { font: inherit; font-size: 14px; font-weight: 700; color: var(--text); background: none; border: 0; padding: 0; cursor: pointer; }
+.rl-sev { color: var(--muted); font-size: 11px; }
+.rl-count { color: var(--text); font-weight: 600; }
+.rl-sub { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-btn {
+  font: inherit; font-size: 11px; color: var(--text); background: #1e242c;
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; cursor: pointer;
+}
+.rl-btn:hover { border-color: var(--muted); }

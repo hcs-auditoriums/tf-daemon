@@ -36,6 +36,7 @@ from typing import Any
 import numpy as np
 
 from ..config import Channel, channels_from
+from ..dsp.ring import RingDetector, RingLog, RingSettings
 from ..dsp.spectrum import SpectrumAnalyzer
 from ..hub import FrameHub
 from .ringbuffer import RingBuffer
@@ -96,6 +97,13 @@ class AudioEngine:
         self._analyzers: dict[int, SpectrumAnalyzer] = {
             i: SpectrumAnalyzer(**self._analyzer_args) for i in sorted(self._pinned)
         }
+        # Ring detection runs on every analyzed input (see dsp/ring.py).
+        self.rings = RingLog()
+        self._ring_settings: RingSettings | None = None
+        if cfg["ring"]["enabled"]:
+            rs = RingSettings.from_config(cfg)
+            self._ring_settings = RingSettings(**{**rs.__dict__, "n_fft": min(rs.n_fft, self.n_fft)})
+        self._detectors: dict[int, RingDetector] = {i: d for i in self._analyzers if (d := self._new_detector())}
 
         n_bins = self.analyzer.bins.count
         self._frame = np.zeros((source.channels, self.n_fft), dtype=np.float32)
@@ -157,6 +165,11 @@ class AudioEngine:
         """Bumped whenever metadata() changes after startup (labels)."""
         return self._meta_version
 
+    def _new_detector(self) -> RingDetector | None:
+        if self._ring_settings is None:
+            return None
+        return RingDetector(self.analyzer.samplerate, self.hop, self._ring_settings)
+
     def _check_input(self, index: int) -> None:
         if not 0 <= index < len(self.inputs):
             raise ValueError(f"input {index} out of range (0..{len(self.inputs) - 1})")
@@ -168,6 +181,8 @@ class AudioEngine:
             self._viewers[index] += 1
             if index not in self._analyzers:
                 self._analyzers[index] = SpectrumAnalyzer(**self._analyzer_args)
+                if det := self._new_detector():
+                    self._detectors[index] = det
                 log.info("Analyzing input %d (%s) on demand", index, self.inputs[index].label)
 
     def release(self, index: int) -> None:
@@ -179,6 +194,8 @@ class AudioEngine:
                 del self._viewers[index]
                 if index not in self._pinned:
                     self._analyzers.pop(index, None)
+                    self._detectors.pop(index, None)
+                    self.rings.end_channel(index)
                     log.info("Stopped analyzing input %d", index)
 
     def active_inputs(self) -> list[int]:
@@ -220,6 +237,7 @@ class AudioEngine:
             "source_channels": self.source.channels,
             "source_stats": self.source.stats(),
             "active_inputs": self.active_inputs(),
+            "rings_active": sum(e["active"] for e in self.rings.snapshot()["events"]),
             "frames": self._frames,
             "skipped_hops": self._skipped_hops,
             "analysis_ms": round(self._proc_time_ewma * 1000, 3),
@@ -238,10 +256,16 @@ class AudioEngine:
                 t0 = time.perf_counter()
                 with self._lock:
                     active = sorted(self._analyzers.items())
+                    detectors = dict(self._detectors)
                 frame = self._frame[:len(active)]
                 self.ring.read_latest(frame, [i for i, _ in active])
-                for row, (_, an) in enumerate(active):
+                stream_t, wall_t = written / self.analyzer.samplerate, time.time()
+                for row, (index, an) in enumerate(active):
                     an.process(frame[row:row + 1])
+                    det = detectors.get(index)
+                    if det is not None:
+                        rings = det.process(frame[row], stream_t)
+                        self.rings.update(index, self.inputs[index].label, rings, wall_t)
                 self._publish(active)
                 dt = time.perf_counter() - t0
                 self._proc_time_ewma += 0.05 * (dt - self._proc_time_ewma)

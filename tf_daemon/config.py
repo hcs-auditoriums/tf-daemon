@@ -62,6 +62,14 @@ DEFAULTS: dict[str, Any] = {
         "meter_poll_s": 1.0,
         "full_poll_s": 10.0,
     },
+    "ring": {
+        # Ring / feedback detection on every analyzed input (always Main L/R).
+        "enabled": True,
+        "sensitivity": "normal",  # low | normal | high
+        "fmin": 80.0,             # Hz, detection range
+        "fmax": 12000.0,
+        "mains_hz": 60.0,         # skip mains hum harmonics up to 1 kHz (50 in Europe; 0 = off)
+    },
     "tf5": {
         # Read channel names (and settings) from the mixer over the network.
         "host": "",          # console IP; "" = don't connect
@@ -168,6 +176,14 @@ def _validate(cfg: dict[str, Any]) -> None:
         SweepSettings.from_dict(rf)
     except ValueError as e:
         raise ConfigError(f"[rf] {e}") from None
+
+    r = cfg["ring"]
+    if str(r["sensitivity"]).lower() not in ("low", "normal", "high"):
+        raise ConfigError(f"ring.sensitivity must be low, normal or high, got {r['sensitivity']!r}")
+    if not 20 <= float(r["fmin"]) < float(r["fmax"]) <= 20000:
+        raise ConfigError("ring.fmin / ring.fmax must satisfy 20 <= fmin < fmax <= 20000")
+    if float(r["mains_hz"]) not in (0.0, 50.0, 60.0):
+        raise ConfigError("ring.mains_hz must be 50, 60 or 0")
 
     t = cfg["tf5"]
     if not isinstance(t["host"], str):
