@@ -27,7 +27,7 @@ Address note: Ghidra VA = file offset + `0x401a00` for `.rdata` strings (`tf_edi
 | Find console | UDP broadcast **54330**, "YSDP" | VERIFIED-CAP |
 | Control session | TCP **50368**, tagged TLV frames (`MMIX` = Mixing, …) | VERIFIED-CAP + CODE |
 | **Read all EQ** | Subscribe `Mixing` → console sends **MMSXLIT** dump (descriptor tree + raw values) → `tools/mmsxlit.py` | VERIFIED-CAP (ch1 EQ decoded) |
-| **Live EQ updates from other controllers** | Console pushes `01 11` set-param messages; origin ≠ 0xA0 means "someone else changed it" | VERIFIED-CAP (Fader/On) + CODE (all types) |
+| **Live EQ updates from other controllers** | Console pushes `01 11` set-param messages (desk and TF Editor changes both reach a StageMix client); origin ≠ 0xA0 means "someone else changed it" | VERIFIED-CAP (EQ gain/freq/on, HPF, fader: 2026-11-08) |
 | Write a param | Send `01 11` with origin 0xA0; console echoes it | VERIFIED-CAP + CODE |
 | Value encoding | signed → `0x24` int32 BE, unsigned → `0x14` u32 BE, string → `0x31`; count = 1 | VERIFIED-CODE |
 | Sync direction | `SYNCDIR:1` = ClientToServer (**overwrites console**), `SYNCDIR:2` = ServerToClient | VERIFIED-CODE |
@@ -144,30 +144,36 @@ Field order is identical in the builder (`FUN_006738c0`) and the parser (`FUN_00
 | e1 | `0x31` | function name | Must equal the channel's function, max 24 chars (`"Mixing"`) |
 | e2 | `0x31` | base path | `"Mixing"` in all traffic; empty → none. Passed to the resolver with e4 |
 | e3 | `0x12` ×1 | depth N | ≤ 5 |
-| e4 | `0x14` ×N **or** `0x31` | path | Numeric: child-collection index per level, last = param index. **Or a string path that the receiver resolves itself** (resolver call at `FUN_0066fb50`, max depth 5) [VERIFIED-CODE; string form untested on the wire] |
+| e4 | `0x14` ×N **or** `0x31` | path | Numeric: one index per level into **that level's parameters followed by its child collections** (a single index space, parameters first); the last index is a parameter [VERIFIED-CAP 2026-11-08]. **Or a string path that the receiver resolves itself** (resolver call at `FUN_0066fb50`, max depth 5) [VERIFIED-CODE; string form untested on the wire] |
 | e5 | `0x14` ×N | array index per level | |
 | e6 | `0x14` ×1 | origin | `FUN_00665270`: **0xA0** = treat as the sender's own echo (not delivered as a change). **Anything else** (console uses 0xA1) = delivered as a change (source 0xF0) |
 | e7 | value | | Encoder `FUN_00673c30`: signed → **`0x24` s32**, unsigned → **`0x14` u32**, string → `0x31`. Decoder `FUN_00667a90` also accepts `0x11/0x12/0x21/0x22` and requires count = 1 |
 
-Example: set ch1 BandL gain to −5.20 dB (raw −520):
+Example (shown for decoding; tf-daemon never sends this): ch1 BandL gain −5.20 dB (raw −520):
 ```
 MMIX | len | 11 <n> 01 11 01 08
   11 00000001 00
   31 00000007 "Mixing\0"
   31 00000007 "Mixing\0"
   12 00000001 0005
-  14 00000005 00000000 00000007 00000000 00000002 00000002    path InputChannel/PEQ/Bank/BandL/Gain
+  14 00000005 00000000 00000007 00000001 00000003 00000002    path InputChannel/PEQ/Bank/BandL/Gain
   14 00000005 00000000 00000000 00000000 00000000 00000000    ch index 0 at level 0
   14 00000001 000000A0
   24 00000001 FFFFFDF8
 ```
 (e3 is a u16 element: `12 00000001 0005`.)
 
+Path walk for that address: `Mixing` root (no parameters) → 0 = `InputChannel`; `InputChannel` (no parameters) → 7 = `PEQ`; `PEQ` has 1 parameter (`On` = 0), so 1 = `Bank`; `Bank` has 1 parameter (`Type` = 0), so 1 = `OneKnob`, 2 = `HPF`, 3 = `BandL`; `BandL`'s parameters → 2 = `Gain`.
+An earlier version of this guide counted only collections (`[0,7,0,2,2]`); that was wrong. It happened to agree for `Fader/On`, because `InputChannel` has no parameters of its own.
+
 Observed traffic, resolved with `mmsxlit.resolve`:
 
 | Wire path / idx | Resolved | Value |
 |---|---|---|
 | `MMIX [0,19,1]` / `[14,0,0]` | `Mixing/InputChannel:14/Fader/On` | 0 (ch15 off at the console, origin 0xA1) |
+| `MMIX [0,7,1,3,2]` / `[0,0,0,0,0]` | `InputChannel:0/PEQ/Bank/BandL/Gain` | `0x24` s32, −1800…1800 (desk knob sweep) |
+| `MMIX [0,7,1,4,1]` / `[0,0,0,1,0]` | `InputChannel:0/PEQ/Bank/Band:1/Frequency` | `0x14` u32 (Hz×10) |
+| `MMIX [0,7,0]` / `[0,0,0]` | `InputChannel:0/PEQ/On` | `0x14` 0/1 |
 | `MVOL [5,0,0]` | `Volatile/Meter/RTA/Target` | editor write 0xA0, echoed |
 | `MPRO [2,0,0]` / `[0,1,0]` | `Property/Status/CommSession:1/ClientType` | `"Editor"` |
 
@@ -205,15 +211,16 @@ Layout (little-endian) is in `tools/mmsxlit.py`:
 
 The **wire path** is a parameter's position in this tree. **Derive paths from the console's dump at runtime.** They are firmware-specific (descriptor MD5 `8d0d0bdd394a9abb80ab12ed1500eddc` for this console).
 
-Input-channel PEQ paths on this firmware (idx = `[ch-1,0,0,band,0]`):
+Input-channel PEQ paths on this firmware (idx = `[ch-1,0,0,band,0]`), as the TF5 sends them [VERIFIED-CAP 2026-11-08; every one of 393 captured pushes resolves with type-matching signedness, fixture `tests/data/tf5_eq_pushes.json`]:
 ```
 PEQ/On                  [0,7,0]           uint8
-PEQ/Bank/Type           [0,7,0,0]         str8   "BOLD"
-PEQ/Bank/OneKnob/{On,Mode,Depth} [0,7,0,0,0..2]
-PEQ/Bank/HPF/{On,Frequency,Slope} [0,7,0,1,0..2]
-PEQ/Bank/BandL/{Type,Frequency,Gain,Q}       [0,7,0,2,0..3]
-PEQ/Bank/Band[2]/{Type,Frequency,Gain,Q}     [0,7,0,3,0..3]  (idx level 3 = band 0/1)
-PEQ/Bank/BandH/{Type,LPFOn,Frequency,Gain,Q} [0,7,0,4,0..4]
+PEQ/Bank/Type           [0,7,1,0]         str8   "BOLD"
+PEQ/Bank/OneKnob/{On,Mode,Depth} [0,7,1,1,0..2]
+PEQ/Bank/HPF/{On,Frequency,Slope} [0,7,1,2,0..2]
+PEQ/Bank/BandL/{Type,Frequency,Gain,Q}       [0,7,1,3,0..3]
+PEQ/Bank/Band[2]/{Type,Frequency,Gain,Q}     [0,7,1,4,0..3]  (idx level 3 = band 0/1)
+PEQ/Bank/BandH/{Type,LPFOn,Frequency,Gain,Q} [0,7,1,5,0..4]
+Fader/{Level,On}                             [0,19,0..1]
 ```
 
 Scaling (from `params/mms_Mixing.txt`):
@@ -337,7 +344,8 @@ Treat port 50368 as unauthenticated: keep it on a trusted VLAN. This guide inten
 ---
 
 ## 10. Remaining work [PENDING]
-- [ ] Confirm on the wire: an EQ gain push arrives as `0x24` (code says the encoder always uses s32 for signed). One capture with a console-side EQ change settles it.
+- [x] Confirmed on the wire (2026-11-08): EQ gain pushes arrive as `0x24` s32, frequencies / switches as `0x14` u32, to a StageMix client, for changes made on the desk and in TF Editor. Not yet seen: band Type and Q pushes, `ChangeSelectedCH` event meaning (the console sends it when the selected channel changes; TF Editor's reply, if any, is unknown).
+- [ ] The console closed tf-daemon's StageMix session once during that test, probably when TF Editor connected; the client re-synced 2 s later.
 - [ ] Test the string-path form of e4 (e.g. `31:"InputChannel/PEQ/Bank/BandL/Gain"`?). The exact string syntax the resolver expects is unverified. Check vtable+0x14 of the MMS facade called from `FUN_0066fb50`.
 - [ ] Behaviour of `TYPE:StageMix` (allowed functions, coexistence with an Editor).
 - [ ] `01 05 01` command, `DS_A` frame, d0x0 file-transfer details (`02 01` announce, `02 03` 2048-B chunks + ack).

@@ -89,16 +89,26 @@ def _peq(hpf: bool, mids: int, low_switch: str | None, high_switch: str | None) 
     if mids:
         bank.append(_band("Band", mids))
     bank.append(_band("BandH", switch=high_switch))
-    return C("PEQ", 1, [_p("On", UINT, 1)], [C("Bank", 1, [_p("Type", STR, 8)], bank)])
+    backup = C("OneKnobBackup", 1, [], [b for b in bank[1:]])   # same bands, after Bank (as on the TF5)
+    return C("PEQ", 1, [_p("On", UINT, 1)], [C("Bank", 1, [_p("Type", STR, 8)], bank), backup])
+
+
+# InputChannel's collections on the TF5, in order: PEQ is 7 and Fader 19 on the wire.
+INPUT_CHANNEL_CHILDREN = ["Label", "Patch", "Signal", "BuiltIn", "Slot", "Input", "DirectOut", "PEQ", "Gate", "Comp",
+                          "AutoMixer", "ToMix", "ToStMix", "ToFX", "ToMono", "ToStereo", "SubGroup", "DCAGroup",
+                          "MuteGroup", "Fader", "Library"]
 
 
 def mixing_tree() -> C:
-    """The shape of the TF5's Mixing function (subset), same parameter names and widths."""
+    """The shape of the TF5's Mixing function (subset), same parameter names and widths, and
+    InputChannel's collections in the TF5's order so real wire addresses resolve."""
     label = C("Label", 1, [_p("Name", STR, 64), _p("Color", STR, 8)])
     fader = C("Fader", 1, [_p("Level", INT, 2), _p("On", UINT, 1)])
+    real = {"Label": label, "Patch": C("Patch", 1, [_p("Port", STR, 16)]), "PEQ": _peq(True, 2, None, "LPFOn"),
+            "Fader": fader}
+    inputs = [real.get(n) or C(n, 1, [_p("Dummy", UINT, 1)]) for n in INPUT_CHANNEL_CHILDREN]
     return C("Mixing", 1, [], [
-        C("InputChannel", 40, [], [label, C("Patch", 1, [_p("Port", STR, 16)]),
-                                   _peq(True, 2, None, "LPFOn"), fader]),
+        C("InputChannel", 40, [], inputs),
         C("StInChannel", 4, [], [label, _peq(False, 0, "HPFOn", "LPFOn"), fader]),
         C("Mix", 8, [], [label, fader]),
         C("Stereo", 2, [], [label, _peq(False, 2, "HPFOn", "LPFOn"), fader]),
@@ -148,14 +158,17 @@ def property_tree() -> C:
 
 
 def wire_address(dump: Dump, path: str) -> tuple[list[int], list[int]]:
-    """Name path -> (wire path, index per level): the inverse of Dump.resolve."""
+    """Name path -> (wire path, index per level): the inverse of Dump.resolve.
+
+    Each level indexes the node's parameters and then its child collections.
+    """
     node, wp, idx = dump.root, [], []
     parts = path.split("/")
     for part in parts[:-1]:
         name, _, i = part.partition(":")
         k = next(n for n, c in enumerate(node.children) if c.name == name)
+        wp.append(len(node.params) + k)
         node = node.children[k]
-        wp.append(k)
         idx.append(int(i or 0))
     name, _, i = parts[-1].partition(":")
     wp.append(next(n for n, p in enumerate(node.params) if p.name == name))
