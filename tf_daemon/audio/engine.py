@@ -64,9 +64,13 @@ class AudioEngine:
                 f"{source.name} source provides {source.channels} channels (0..{source.channels - 1}) but config "
                 f"asks for {', '.join(f'{c.index} ({c.label})' for c in bad)}"
             )
-        labels = {c.index: c.label for c in self.channels}
-        self.inputs = [Channel(i, labels.get(i, f"Ch {i + 1}")) for i in range(source.channels)]
-        self._pinned = frozenset(labels)
+        self._pinned = frozenset(c.index for c in self.channels)
+        # Label precedence: an explicit [[channels]] label, then the console's
+        # channel name (set_console_names), then "Ch N".
+        self._config_labels = {int(c["index"]): str(c["label"]) for c in cfg["channels"] if "label" in c}
+        self._console_names: dict[int, str] = {}
+        self._meta_version = 0
+        self.inputs = self._build_inputs(source.channels)
 
         self.n_fft = int(dsp["fft_size"])
         self.hop = int(dsp["hop"])
@@ -131,6 +135,27 @@ class AudioEngine:
             if self._thread is not None:
                 self._thread.join(timeout=2)
                 self._thread = None
+
+    def _build_inputs(self, count: int) -> list[Channel]:
+        def label(i: int) -> str:
+            return self._config_labels.get(i) or self._console_names.get(i) or f"Ch {i + 1}"
+        return [Channel(i, label(i)) for i in range(count)]
+
+    def set_console_names(self, names: dict[int, str]) -> None:
+        """Channel names read from the mixer, keyed by input index (thread-safe)."""
+        names = {i: n.strip() for i, n in names.items() if 0 <= i < len(self.inputs) and n.strip()}
+        with self._lock:
+            if names == self._console_names:
+                return
+            self._console_names = names
+            self.inputs = self._build_inputs(len(self.inputs))
+            self._meta_version += 1
+        log.info("Console channel names updated (%d named)", len(names))
+
+    @property
+    def meta_version(self) -> int:
+        """Bumped whenever metadata() changes after startup (labels)."""
+        return self._meta_version
 
     def _check_input(self, index: int) -> None:
         if not 0 <= index < len(self.inputs):

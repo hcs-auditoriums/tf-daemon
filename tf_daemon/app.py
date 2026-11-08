@@ -22,6 +22,7 @@ from .rf.devices import DemoDevice, RFDevice, TinySADevice
 from .rf.engine import RangeHint, RFEngine, fit_span
 from .rf.module import RFModule
 from .system import register_system
+from .tf5 import TF5Module
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +74,8 @@ def build_modules(cfg: dict[str, Any], source_kind: str, wav_path: str | None = 
         modules.append(RFModule(RFEngine(cfg, build_rf_device(rf_kind), range_hint=receiver_range(qlxd))))
     if qlxd is not None:
         modules.append(QLXDModule(qlxd))
+    if str(cfg["tf5"]["host"]).strip():
+        modules.append(TF5Module(cfg, modules[0].engine))
     return modules
 
 
