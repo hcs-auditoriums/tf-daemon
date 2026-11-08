@@ -9,8 +9,9 @@
   --avg: #3fb6ff;
   --avg-fill: rgba(63, 182, 255, 0.16);
   --peak: #ffb547;
-  --rta: #8ee6a8;   /* real-time trace */
-  --eq: #e879f9;    /* console EQ overlay */
+  --rta: #c9d1d9;   /* real-time trace (neutral, so green stays the EQ's) */
+  --eq: #3ee66e;    /* console EQ overlay: green, as the TF5 draws it */
+  --eq-fill: rgba(62, 230, 110, 0.10);
   --ok: #4cd07d;
   --bad: #ff5d5d;
   color-scheme: dark;
