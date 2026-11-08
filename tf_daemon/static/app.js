@@ -456,15 +456,9 @@
 
   // ------------------------------------------------------------------ sidebar EQ
 
-  // dB above / below 0: ±18 as the TF5's EQ screen, widened in 6 dB steps (to ±48) when
-  // the curve goes further between 40 Hz and 16 kHz (no View range applies here).
-  const PEQ_RANGE_MIN = 18, PEQ_RANGE_MAX = 48;
-  function peqRange(d) {
-    let peak = 0;
-    if (d && d.eq && d.eq.on) d.freqs.forEach((f, i) => { if (f >= 40 && f <= 16000) peak = Math.max(peak, Math.abs(d.curve[i])); });
-    return Math.min(PEQ_RANGE_MAX, Math.max(PEQ_RANGE_MIN, Math.ceil(peak / 6) * 6));
-  }
-  const PEQ_GRID_F = [100, 1000, 10000], PEQ_FMIN = 20, PEQ_FMAX = 20000;
+  // Same scale as the EQ on the spectrum: ±eqHalf() dB (half the View range, so it
+  // follows Auto too) over the spectrum's frequency span.
+  const PEQ_GRID_F = [100, 1000, 10000];
   const fmtF0 = (f) => (f >= 1000 ? `${+(f / 1000).toFixed(f >= 10000 ? 0 : 1)}k` : `${Math.round(f)}`);
   const BAND_SHAPE = { bell: "bell", low_shelf: "shelf", high_shelf: "shelf", hpf: "HPF", lpf: "LPF" };
 
@@ -488,16 +482,16 @@
     const g = cv.getContext("2d");
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
-    const lo = Math.log10(PEQ_FMIN), hi = Math.log10(PEQ_FMAX);
+    const lo = state.logMin ?? Math.log10(20), hi = state.logMax ?? Math.log10(20000);
     const x = (f) => (Math.log10(f) - lo) / (hi - lo) * w;
-    const range = peqRange(d);
-    const y = (db) => h / 2 - db / range * (h / 2 - 3);
+    const range = eqHalf();
+    const y = (db) => h / 2 - db / range * (h / 2);
 
-    // Grid: 0 dB, ±6 / ±12 dB, 100 Hz / 1k / 10k.
+    // Grid: 0 dB, the spectrum's EQ steps (6 dB, 12 above ±40), 100 Hz / 1k / 10k.
     g.lineWidth = 1;
     g.strokeStyle = C.grid;
     g.beginPath();
-    const step = range > 24 ? 12 : 6;
+    const step = range > 40 ? 12 : 6;
     for (let db = step; db < range; db += step) {
       for (const yy of [Math.round(y(db)) + 0.5, Math.round(y(-db)) + 0.5]) { g.moveTo(0, yy); g.lineTo(w, yy); }
     }
@@ -508,7 +502,7 @@
     g.fillStyle = C.muted;
     g.font = "9px system-ui, sans-serif";
     g.textBaseline = "bottom"; g.textAlign = "left";
-    for (const f of PEQ_GRID_F) g.fillText(fmtF0(f), x(f) + 2, h - 1);
+    for (const f of PEQ_GRID_F) if (x(f) > 0 && x(f) < w - 14) g.fillText(fmtF0(f), x(f) + 2, h - 1);
     g.textBaseline = "top";
     g.fillText(`±${range} dB`, 2, 1);
     if (!eq || !d.freqs.length) return;
@@ -702,6 +696,7 @@
     if (min === state.dbMin && max === state.dbMax) return;
     state.dbMin = min; state.dbMax = max;
     wfRecolor();
+    drawPanelEq();   // the sidebar EQ uses the same scale
     state.dirty = true;
   }
 
