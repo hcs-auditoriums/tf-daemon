@@ -358,28 +358,37 @@ class Dump:
         return self._read(*self.locate(path))
 
     def resolve(self, path: list[int], idx: list[int]) -> tuple[str, int, Prm]:
-        """Wire address (child index per level, last = parameter index; array index per
-        level) -> (name path, data offset, parameter). ProtocolError if it doesn't exist."""
+        """Wire address -> (name path, data offset, parameter). ProtocolError if it doesn't exist.
+
+        ``path`` has one index per level into that level's parameters followed by its child
+        collections (one index space, parameters first); the address ends at a parameter.
+        ``idx`` is the array index at each level. E.g. InputChannel/PEQ/Bank/BandL/Gain is
+        [0, 7, 1, 3, 2]: PEQ's 0 is its On parameter and 1 its Bank collection (seen on the
+        wire, guides/tf5_api.md 4.4).
+        """
         if not path or len(path) != len(idx):
             raise ProtocolError("path / index length mismatch")
         node, names, off = self.root, [], 0
         for depth, (p, i) in enumerate(zip(path, idx)):
-            if depth < len(path) - 1:
-                if not 0 <= p < len(node.children):
-                    raise ProtocolError(f"no child {p} under {node.name}")
-                node = node.children[p]
-                if not 0 <= i < node.arraysize:
-                    raise ProtocolError(f"{node.name}: index {i} out of range")
-                off += node.offset + i * node.datasize
-                names.append(f"{node.name}:{i}" if node.arraysize > 1 else node.name)
-            else:
-                if not 0 <= p < len(node.params):
-                    raise ProtocolError(f"no parameter {p} under {node.name}")
+            last = depth == len(path) - 1
+            if 0 <= p < len(node.params):
+                if not last:
+                    raise ProtocolError(f"{node.name}: parameter {p} in the middle of an address")
                 prm = node.params[p]
                 if not 0 <= i < prm.arraysize:
                     raise ProtocolError(f"{prm.name}: index {i} out of range")
                 names.append(f"{prm.name}:{i}" if prm.arraysize > 1 else prm.name)
                 return "/".join(names), off + prm.offset + i * prm.elemsize, prm
+            c = p - len(node.params)
+            if not 0 <= c < len(node.children):
+                raise ProtocolError(f"no entry {p} under {node.name}")
+            if last:
+                raise ProtocolError(f"address ends at collection {node.children[c].name}")
+            node = node.children[c]
+            if not 0 <= i < node.arraysize:
+                raise ProtocolError(f"{node.name}: index {i} out of range")
+            off += node.offset + i * node.datasize
+            names.append(f"{node.name}:{i}" if node.arraysize > 1 else node.name)
         raise ProtocolError("unreachable")
 
     def _read(self, off: int, prm: Prm) -> int | str:
@@ -584,6 +593,9 @@ class TFEditorClient:
         self.last_error: str | None = None
         self.updated: float | None = None
         self.changes = 0             # parameter pushes applied
+        self.rejected = 0            # Mixing pushes that didn't fit our copy of the data (should stay 0)
+        self.last_rejected: str | None = None
+        self.received: dict[str, int] = {}   # "TAG cc dd ee" -> frames received (diagnostics)
         self.desc_md5: str | None = None
         self.sent: list[tuple[str, tuple[int, int, int]]] = []   # (tag, cmd) of the last frames sent
         self._phase = "idle"
@@ -612,7 +624,8 @@ class TFEditorClient:
     def status(self) -> dict[str, Any]:
         return {"host": self.host, "port": self.port, "connected": self.connected, "synced": self.synced,
                 "connects": self.connects, "last_error": self.last_error, "updated": self.updated,
-                "changes": self.changes, "descriptor_md5": self.desc_md5,
+                "changes": self.changes, "rejected": self.rejected, "last_rejected": self.last_rejected,
+                "received": dict(self.received), "descriptor_md5": self.desc_md5,
                 "descriptor_known": self.desc_md5 in (None, DESC_MD5["Mixing"]), "read_only": True}
 
     def eq(self, kind: str, x: int) -> dict[str, Any] | None:
@@ -703,6 +716,8 @@ class TFEditorClient:
 
     def _handle(self, sock: socket.socket, tag: str, payload: bytes) -> None:
         msg = parse_message(payload)
+        key = f"{tag} {bytes(msg.cmd).hex(' ')}"
+        self.received[key] = self.received.get(key, 0) + 1
         if tag == EVENT_TAG:
             self._on_event(sock, msg)
         elif tag == "MPRO":
@@ -786,7 +801,11 @@ class TFEditorClient:
             try:
                 self._mixing.apply(e[4].value, e[5].value, value)
             except ProtocolError as err:
-                log.debug("TF5 editor protocol: push not applied: %s", err)
+                self.rejected += 1
+                self.last_rejected = f"path={e[4].value} idx={e[5].value}: {err}"
+                if self.rejected <= 5 or self.rejected % 100 == 0:   # loud, but not one line per knob tick
+                    log.warning("TF5 editor protocol: push not applied (%d so far): %s", self.rejected,
+                                self.last_rejected)
                 return
         self.changes += 1
         self.updated = time.time()

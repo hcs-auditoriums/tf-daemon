@@ -8,6 +8,7 @@ could change the console (see check_outbound).
 
 import binascii
 import csv
+import json
 import logging
 import re
 import socket
@@ -34,6 +35,16 @@ RE_DIR = Path.home() / "yamaha-tf-re" / "capture"   # the reverse-engineering wo
 REAL_DUMP = RE_DIR / "dump_MMIX.bin"
 REAL_CSV = RE_DIR / "tcp50368.csv"
 EDITOR_IP = "10.99.40.20"
+# Every EQ / fader push the production TF5 sent to tf-daemon while InCh 1's EQ was changed on the
+# desk and from TF Editor (2026-11-08, tcpdump on the server; wire addresses and values only).
+PUSHES = Path(__file__).parent / "data" / "tf5_eq_pushes.json"
+CAPTURED_NAMES = {
+    (0, 7, 0): "PEQ/On", (0, 7, 1, 1, 0): "PEQ/Bank/OneKnob/On", (0, 7, 1, 2, 0): "PEQ/Bank/HPF/On",
+    (0, 7, 1, 2, 1): "PEQ/Bank/HPF/Frequency", (0, 7, 1, 3, 1): "PEQ/Bank/BandL/Frequency",
+    (0, 7, 1, 3, 2): "PEQ/Bank/BandL/Gain", (0, 7, 1, 4, 1): "PEQ/Bank/Band:{3}/Frequency",
+    (0, 7, 1, 4, 2): "PEQ/Bank/Band:{3}/Gain", (0, 7, 1, 5, 2): "PEQ/Bank/BandH/Frequency",
+    (0, 7, 1, 5, 3): "PEQ/Bank/BandH/Gain", (0, 19, 0): "Fader/Level", (0, 19, 1): "Fader/On",
+}
 
 
 @pytest.fixture
@@ -171,7 +182,7 @@ GUIDE_WRITE_EXAMPLE = (  # guides/tf5_api.md 4.4: set ch1 BandL gain to -5.20 dB
     "31 00000007 4d6978696e6700"
     "31 00000007 4d6978696e6700"
     "12 00000001 0005"
-    "14 00000005 00000000 00000007 00000000 00000002 00000002"
+    "14 00000005 00000000 00000007 00000001 00000003 00000002"
     "14 00000005 00000000 00000000 00000000 00000000 00000000"
     "14 00000001 000000A0"
     "24 00000001 FFFFFDF8")
@@ -180,8 +191,8 @@ GUIDE_WRITE_EXAMPLE = (  # guides/tf5_api.md 4.4: set ch1 BandL gain to -5.20 dB
 def test_guide_write_example_decodes_and_is_refused():
     payload = bytes.fromhex(GUIDE_WRITE_EXAMPLE.replace(" ", ""))
     m = parse_message(payload)
-    assert m.cmd == SET_PARAM and m.elements[4].value == [0, 7, 0, 2, 2] and m.elements[7].value == [-520]
-    assert payload == _set_param_bytes("Mixing", [0, 7, 0, 2, 2], [0] * 5, element(T_S32, [-520]))
+    assert m.cmd == SET_PARAM and m.elements[4].value == [0, 7, 1, 3, 2] and m.elements[7].value == [-520]
+    assert payload == _set_param_bytes("Mixing", [0, 7, 1, 3, 2], [0] * 5, element(T_S32, [-520]))
     with pytest.raises(ReadOnlyViolation):
         check_outbound("MMIX", payload)
 
@@ -419,8 +430,12 @@ def test_real_console_dump():
     assert (b1["freq"], b1["gain"], b1["q"]) == (800.0, -14.1, 0.25)
     assert (high["type"], high["freq"], high["gain"]) == ("high_shelf", 10000.0, 4.6)
     assert d.resolve([0, 19, 1], [14, 0, 0])[0] == "InputChannel:14/Fader/On"
-    assert d.resolve([0, 7, 0, 2, 2], [0, 0, 0, 0, 0])[0] == "InputChannel/PEQ/Bank/BandL/Gain".replace(
-        "InputChannel", "InputChannel:0")
+    # Addresses as the TF5 sends them (parameters first, then collections, at each level).
+    assert d.resolve([0, 7, 1, 3, 2], [0, 0, 0, 0, 0])[0] == "InputChannel:0/PEQ/Bank/BandL/Gain"
+    assert d.resolve([0, 7, 0], [3, 0, 0])[0] == "InputChannel:3/PEQ/On"
+    for push in json.loads(PUSHES.read_text())["pushes"]:
+        name, _, prm = d.resolve(push["path"], push["idx"])
+        assert (prm.type == 1) == (push["type"] == T_S32), name
     for x in range(40):
         assert channel_eq(d, "InCh", x) is not None
     assert channel_eq(d, "St", 0)["hpf"] is None and len(channel_eq(d, "St", 1)["bands"]) == 4
@@ -686,6 +701,66 @@ def test_nothing_before_connect():
     assert client.status()["read_only"] and not client.status()["connected"]
 
 
+def _captured():
+    return json.loads(PUSHES.read_text())["pushes"]
+
+
+def test_captured_board_pushes_resolve(mixing):
+    """Real addresses: each level indexes parameters first, then collections."""
+    pushes = _captured()
+    assert len(pushes) == 393
+    for push in pushes:
+        name, _, prm = mixing.resolve(push["path"], push["idx"])
+        expect = "InputChannel:{0}/".format(push["idx"][0]) + CAPTURED_NAMES[tuple(push["path"])].format(*push["idx"])
+        assert name == expect
+        assert (prm.type == 1) == (push["type"] == T_S32)          # signed values land on signed params
+        assert push["origin"] == 0xA1
+    gains = [p["value"] for p in pushes if p["path"] == [0, 7, 1, 3, 2]]
+    assert min(gains) == -1800 and max(gains) == 1800             # a sweep over the full +-18 dB
+
+
+def test_captured_board_pushes_apply_in_order(mixing):
+    last = {}
+    for push in _captured():
+        name = mixing.apply(push["path"], push["idx"], push["value"])
+        last[name] = push["value"]
+    for name, value in last.items():
+        assert mixing.get(name) == value
+    eq = channel_eq(mixing, "InCh", 0)
+    assert eq["bands"][0]["gain"] == last["InputChannel:0/PEQ/Bank/BandL/Gain"] / 100
+    assert eq["bands"][3]["freq"] == last["InputChannel:0/PEQ/Bank/BandH/Frequency"] / 10
+
+
+@pytest.mark.parametrize("path, idx", [
+    ([0, 7, 0, 2, 2], [0, 0, 0, 0, 0]),   # the guide's old children-only address for BandL/Gain
+    ([0, 7, 1, 3], [0, 0, 0, 0]),         # ends at a collection
+    ([0, 7, 3], [0, 0, 0]),               # PEQ has 1 parameter + 2 collections
+])
+def test_resolve_rejects_children_only_addresses(mixing, path, idx):
+    with pytest.raises(ProtocolError):
+        mixing.resolve(path, idx)
+
+
+def test_live_updates_replayed_from_the_board(console, client_for):
+    """The production capture, replayed by the fake console: every push is applied."""
+    changes = []
+    client = client_for(console, on_change=lambda: changes.append(1))
+    wait_until(lambda: client.synced)
+    pushes = _captured()
+    for push in pushes:
+        console.push("MMIX", set_param("Mixing", push["path"], push["idx"], push["value"], vtype=push["type"]))
+    wait_until(lambda: client.changes == len(pushes))
+    final = {}
+    for push in pushes:
+        final[(tuple(push["path"]), tuple(push["idx"]))] = push["value"]
+    eq = client.eq("InCh", 0)
+    assert eq["bands"][1]["gain"] == final[((0, 7, 1, 4, 2), (0, 0, 0, 0, 0))] / 100
+    assert eq["bands"][2]["gain"] == final[((0, 7, 1, 4, 2), (0, 0, 0, 1, 0))] / 100
+    assert eq["on"] == bool(final[((0, 7, 0), (0, 0, 0))])
+    assert eq["hpf"]["freq"] == final[((0, 7, 1, 2, 1), (0, 0, 0, 0, 0))] / 10
+    assert_read_only(console)
+
+
 def test_live_changes_from_the_desk(console, client_for):
     changes = []
     client = client_for(console, on_change=lambda: changes.append(1))
@@ -725,6 +800,10 @@ def test_bad_pushes_are_ignored(console, client_for):
     console.push_change("InputChannel:9/PEQ/Bank/Band:0/Gain", -100)                     # a good one last
     wait_until(lambda: client.eq("InCh", 9)["bands"][1]["gain"] == -1.0)
     assert client.eq("InCh", 0) == before and client.connected and client.changes == 1
+    # The four Mixing pushes that didn't fit are counted and shown, not silently dropped.
+    st = client.status()
+    assert st["rejected"] == 4 and "doesn't fit" in st["last_rejected"]
+    assert st["received"]["MMIX 01 11 01"] >= 6 and st["received"]["MMIX 01 05 01"] == 1
     assert_read_only(console)
 
 
