@@ -40,6 +40,13 @@ echo "==> installing systemd unit"
 sed -e "s|@USER@|$APP_USER|g" -e "s|@DIR@|$APP_DIR|g" \
   "$APP_DIR/deploy/tf-daemon.service" > /etc/systemd/system/tf-daemon.service
 systemctl daemon-reload
+
+echo "==> allowing $APP_USER to restart the service (for the /config page)"
+SUDOERS=/etc/sudoers.d/tf-daemon
+echo "$APP_USER ALL=(root) NOPASSWD: $(command -v systemctl) restart --no-block tf-daemon" > "$SUDOERS.tmp"
+chmod 0440 "$SUDOERS.tmp"
+visudo -cqf "$SUDOERS.tmp" && mv "$SUDOERS.tmp" "$SUDOERS"
+
 systemctl enable tf-daemon
 systemctl restart tf-daemon
 sleep 3

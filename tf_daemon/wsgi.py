@@ -22,8 +22,9 @@ from .app import build_modules, create_app
 from .config import load_config
 
 setup_logging(os.environ.get("TF_DAEMON_LOG", "INFO"))
-_cfg = load_config(os.environ.get("TF_DAEMON_CONFIG", "config.toml"))
+_cfg_path = os.environ.get("TF_DAEMON_CONFIG", "config.toml")
+_cfg = load_config(_cfg_path)
 _modules = build_modules(_cfg, os.environ.get("TF_DAEMON_SOURCE", "device").lower(), os.environ.get("TF_DAEMON_WAV"),
                          os.environ.get("TF_DAEMON_RF_SOURCE"), os.environ.get("TF_DAEMON_QLXD_SOURCE"))
-app = create_app(_cfg, _modules)
+app = create_app(_cfg, _modules, config_path=_cfg_path)
 logging.getLogger(__name__).info("tf-daemon WSGI app ready")

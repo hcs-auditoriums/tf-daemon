@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tf-daemon · Config</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>tf-daemon · Config</h1>
+    <a class="navlink" href="/">‹ Audio</a>
+    <a class="navlink" href="/rf">RF</a>
+    <a class="navlink" href="/qlxd">Wireless</a>
+    <div id="conn" class="conn" title="Connection">connecting…</div>
+  </header>
+  <main class="page">
+    <section class="cfg-card">
+      <h2>Software</h2>
+      <dl class="facts">
+        <dt>Version</dt><dd id="version">–</dd>
+        <dt>Revision</dt><dd id="revision">–</dd>
+        <dt>Source</dt><dd id="source">–</dd>
+        <dt>Latest</dt><dd id="latest">not checked</dd>
+      </dl>
+      <div class="controls">
+        <button id="check" type="button">Check for updates</button>
+        <button id="update" type="button" class="primary">Update now</button>
+        <span id="update-msg" class="muted"></span>
+      </div>
+      <pre id="update-log" class="log" hidden></pre>
+    </section>
+
+    <section class="cfg-card grow">
+      <h2>config.toml</h2>
+      <p class="muted" id="config-path"></p>
+      <textarea id="config" spellcheck="false" aria-label="config.toml"></textarea>
+      <div class="controls">
+        <button id="save" type="button" class="primary">Save</button>
+        <button id="save-restart" type="button">Save &amp; restart</button>
+        <button id="reload" type="button">Discard changes</button>
+        <span id="config-msg" class="muted"></span>
+      </div>
+    </section>
+  </main>
+  <script src="/static/config.js"></script>
+</body>
+</html>

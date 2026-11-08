@@ -193,3 +193,31 @@ body.scroll { min-height: 100%; height: auto; }
 .ant.on { background: var(--avg); border-color: var(--avg); color: #06131d; }
 .card-foot { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
 .card-foot .err { color: var(--bad); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------------------------------------------------------------- config page */
+
+main.page {
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 16px; max-width: 960px; width: 100%; margin: 0 auto; overflow: auto;
+}
+.cfg-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.cfg-card.grow { flex: 1; min-height: 360px; }
+.cfg-card h2 { font-size: 14px; margin: 0; font-weight: 600; }
+.page .muted { color: var(--muted); font-size: 12px; margin: 0; }
+.page .muted.error { color: var(--bad); }
+
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.log, .cfg-card textarea {
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin: 0;
+}
+.log { max-height: 260px; overflow: auto; white-space: pre-wrap; }
+.cfg-card textarea { flex: 1; min-height: 280px; resize: vertical; tab-size: 4; }
+.cfg-card textarea:disabled { opacity: 0.5; }

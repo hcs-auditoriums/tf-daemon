@@ -72,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         logging.getLogger("tf_daemon").error("%s", e)
         return 2
 
-    app = create_app(cfg, modules)
+    app = create_app(cfg, modules, config_path=args.config)
     host = args.host or cfg["server"]["host"]
     port = args.port or int(cfg["server"]["port"])
     # Reloader off: it would fork a second process and open the device twice.
