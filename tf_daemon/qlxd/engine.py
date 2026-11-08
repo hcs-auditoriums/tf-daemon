@@ -9,6 +9,12 @@ Receivers come from three places:
 Settings (interface + manual hosts) are edited from the UI and saved as JSON
 in ``qlxd.state_file`` so they survive restarts; config.toml only seeds them.
 
+The same file holds the *known receivers* catalog: every receiver ever seen,
+keyed by MAC address (falling back to host:port), with its channel name,
+device ID and frequency. Other pages use it (``frequencies()``; the /rf page
+draws receiver frequencies) even while a receiver is offline or before it
+has been reached since a restart.
+
 Every published message is a full JSON snapshot (text over /ws/qlxd),
 throttled to a few per second:
 
@@ -38,6 +44,7 @@ from .simulator import SimReceiver, demo_receivers
 log = logging.getLogger(__name__)
 
 PUBLISH_MIN_INTERVAL_S = 0.25
+KNOWN_SAVE_MIN_INTERVAL_S = 5.0  # catalog changes are written at most this often
 PROBE_ATTEMPTS = 3          # a found host that never answers this many times is dropped...
 REJECT_RETRY_S = 600.0      # ...and ignored for this long
 _HOST = re.compile(r"^[A-Za-z0-9.\-]+(?::\d{1,5})?$")
@@ -61,7 +68,11 @@ class QLXDEngine:
         self.meter_poll_s = float(q["meter_poll_s"])
         self.full_poll_s = float(q["full_poll_s"])
         self.state_path = Path(q["state_file"])
-        self.settings = self._load_settings({"interface": str(q["interface"]), "hosts": list(q["hosts"])})
+        data = self._read_state()
+        self.settings = self._settings_from(data, {"interface": str(q["interface"]), "hosts": list(q["hosts"])})
+        self._known: dict[str, dict[str, Any]] = self._known_from(data)
+        self._known_dirty = False
+        self._known_saved_at = 0.0
         self.hub = FrameHub()
 
         self._lock = threading.RLock()       # guards the receiver set and network state
@@ -99,6 +110,7 @@ class QLXDEngine:
             s.stop()
         if self._thread is not None:
             self._thread.join(timeout=2)
+        self._save_known(force=True)
         self.hub.close()
 
     # ------------------------------------------------------------------ settings
@@ -129,8 +141,8 @@ class QLXDEngine:
                     if entry not in clean:
                         clean.append(entry)
             new["hosts"] = clean
-        self._save_settings(new)
         with self._lock:
+            self._write_state(new, self._known)
             self.settings = new
         self._apply_network()
         return new
@@ -141,31 +153,124 @@ class QLXDEngine:
             self._rejected.clear()
         self._apply_network()
 
-    def _load_settings(self, defaults: dict[str, Any]) -> dict[str, Any]:
+    def _read_state(self) -> dict[str, Any]:
         try:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            return defaults
+            return {}
         except (OSError, ValueError) as e:
             log.warning("Ignoring unreadable %s: %s", self.state_path, e)
-            return defaults
+            return {}
+        if not isinstance(data, dict):
+            log.warning("Ignoring %s: not a JSON object", self.state_path)
+            return {}
+        log.info("Loaded QLX-D state from %s", self.state_path)
+        return data
+
+    @staticmethod
+    def _settings_from(data: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
         out = dict(defaults)
         if isinstance(data.get("interface"), str):
             out["interface"] = data["interface"]
         if isinstance(data.get("hosts"), list):
             out["hosts"] = [str(h) for h in data["hosts"]]
-        log.info("Loaded QLX-D settings from %s", self.state_path)
         return out
 
-    def _save_settings(self, settings: dict[str, Any]) -> None:
+    @staticmethod
+    def _known_from(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        known = data.get("known_receivers")
+        if not isinstance(known, dict):
+            return {}
+        out = {}
+        for key, e in known.items():
+            if isinstance(e, dict) and isinstance(e.get("frequency_mhz"), (int, float)):
+                out[str(key)] = {
+                    "name": e.get("name") if isinstance(e.get("name"), str) else None,
+                    "device_id": e.get("device_id") if isinstance(e.get("device_id"), str) else None,
+                    "frequency_mhz": float(e["frequency_mhz"]),
+                    "host": e.get("host") if isinstance(e.get("host"), str) else None,
+                    "last_seen": e.get("last_seen") if isinstance(e.get("last_seen"), (int, float)) else None,
+                }
+        return out
+
+    def _write_state(self, settings: dict[str, Any], known: dict[str, dict[str, Any]]) -> None:
         tmp = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
+        data = {**settings, "known_receivers": known}
         try:
             if self.state_path.parent != Path("."):
                 self.state_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+            tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
             os.replace(tmp, self.state_path)
         except OSError as e:
             raise ValueError(f"could not save settings to {self.state_path}: {e}") from e
+
+    # ------------------------------------------------------------------ known receivers
+
+    @staticmethod
+    def _known_key(snap: dict[str, Any]) -> str:
+        return snap["mac"] or snap["key"]
+
+    def _update_known(self) -> None:
+        """Fold the live receivers' name / device ID / frequency into the catalog."""
+        with self._lock:
+            for r, _src in self._receivers.values():
+                snap = r.snapshot()
+                if not snap["online"] or snap["frequency_mhz"] is None:
+                    continue
+                key = self._known_key(snap)
+                entry = self._known.get(key, {})
+                new = {"name": snap["name"], "device_id": snap["device_id"],
+                       "frequency_mhz": snap["frequency_mhz"], "host": snap["host"]}
+                if any(entry.get(k) != v for k, v in new.items()):
+                    self._known_dirty = True
+                self._known[key] = {**new, "last_seen": snap["last_seen"]}  # last_seen alone isn't worth a write
+
+    def _save_known(self, force: bool = False) -> None:
+        with self._lock:
+            if not self._known_dirty:
+                return
+            if not force and time.monotonic() - self._known_saved_at < KNOWN_SAVE_MIN_INTERVAL_S:
+                return
+            try:
+                self._write_state(self.settings, self._known)
+            except ValueError as e:
+                log.warning("%s", e)
+                return
+            self._known_dirty = False
+            self._known_saved_at = time.monotonic()
+
+    def forget_known(self, key: str | None = None) -> int:
+        """Drop one catalog entry (or all with ``key=None``); returns how many were removed."""
+        with self._lock:
+            if key is None:
+                n = len(self._known)
+                self._known.clear()
+            else:
+                n = 1 if self._known.pop(key, None) is not None else 0
+            if n:
+                self._known_dirty = True
+        self._save_known(force=True)
+        return n
+
+    def frequencies(self) -> list[dict[str, Any]]:
+        """Known receivers for other modules: ``[{key, name, device_id, frequency_mhz, online, last_seen}]``.
+
+        Live values win over the catalog, so a just-retuned receiver shows its
+        new frequency immediately.
+        """
+        with self._lock:
+            live = {}
+            for r, _src in self._receivers.values():
+                snap = r.snapshot()
+                if snap["online"] and snap["frequency_mhz"] is not None:
+                    live[self._known_key(snap)] = snap
+            out = []
+            for key in self._known.keys() | live.keys():
+                e = live.get(key) or self._known[key]
+                out.append({"key": key, "name": e["name"], "device_id": e["device_id"],
+                            "frequency_mhz": e["frequency_mhz"], "online": key in live,
+                            "last_seen": e["last_seen"]})
+        return sorted(out, key=lambda d: d["frequency_mhz"])
 
     # ------------------------------------------------------------------ network / receivers
 
@@ -293,6 +398,8 @@ class QLXDEngine:
                 self._stop.wait(wait)
             self._dirty.clear()
             self._prune()
+            self._update_known()
+            self._save_known()
             self._publish()
             last = time.monotonic()
 

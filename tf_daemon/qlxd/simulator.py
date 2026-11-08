@@ -30,6 +30,7 @@ class SimReceiver:
         self.batt_type, self.run_min, self.tx = batt_type, run_min, tx
         self.rf_base = rf_base
         self._rng = random.Random(seed)
+        self.mac = f"00:0E:DD:00:00:{seed:02X}"
         self._t0 = time.monotonic()
         self._srv = socket.create_server(("127.0.0.1", 0))
         self.port = self._srv.getsockname()[1]
@@ -53,6 +54,7 @@ class SimReceiver:
             "DEVICE_ID": "{" + f"{self.name[:8]:<8}" + "}",
             "MODEL": "{QLXD4                           }",
             "FW_VER": "{2.3.6.0  }",
+            "MAC_ADDR": self.mac,
             "CHAN_NAME": "{" + f"{self.name:<31}" + "}",
             "FREQUENCY": f"{self.freq_khz:06d}",
             "GROUP_CHAN": "{" + f"{self.group_chan:<5}" + "}",
@@ -113,8 +115,8 @@ class SimReceiver:
                         out.append("< REP ERR >")
                         continue
                     ch, param = m.groups()
-                    if param == "ALL":
-                        out += [_rep(k, v) for k, v in vals.items() if k not in ("DEVICE_ID", "MODEL", "FW_VER")]
+                    if param == "ALL":  # like real QLXD4s: includes the device-level values, not MODEL
+                        out += [_rep(k, v) for k, v in vals.items() if k != "MODEL"]
                     elif param in vals:
                         out.append(_rep(param, vals[param]))
                     else:
@@ -132,7 +134,7 @@ class SimReceiver:
 
 
 def _rep(param: str, value: str) -> str:
-    if param in ("DEVICE_ID", "MODEL", "FW_VER"):
+    if param in ("DEVICE_ID", "MODEL", "FW_VER", "MAC_ADDR"):
         return f"< REP {param} {value} >"
     return f"< REP 1 {param} {value} >"
 

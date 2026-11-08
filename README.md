@@ -5,7 +5,8 @@ serves a real-time **spectrum analyzer** (and, coming next, a feedback/ringing
 detector) to any browser on the network.
 
 A second page, **`/rf`**, is an RF spectrum analyzer for a **tinySA** on USB
-serial (connect, sweep, live trace + peak hold, waterfall), ported from
+serial (connect, sweep, live trace + peak hold, waterfall, and lines at the
+QLX-D receivers' frequencies), ported from
 tinysa-visualizer. A third page, **`/qlxd`**, is a read-only, low-effort
 Wireless Workbench: battery runtime and RF/antenna status of **Shure QLXD4**
 receivers found on a (link-local) network interface. Each is its own module; see
@@ -205,6 +206,15 @@ commands, never `SET`: everything on connect and every `full_poll_s`, meters
 are bound to the selected NIC (`SO_BINDTODEVICE` on Linux). A receiver that stops
 answering is shown offline with the reason.
 
+Known receivers: every receiver the module has reached is remembered in
+`state_file` (`known_receivers`, keyed by MAC address) with its channel name,
+device ID (e.g. `T4213-07`) and frequency, and updated when any of those change.
+`GET /api/qlxd/frequencies` serves that list (live values win, offline ones
+included). The `/rf` page polls it and, with **Receivers** ticked, draws a line
+per receiver on the spectrum and waterfall (dashed and dimmed when offline);
+**Fit to receivers** sets Start/Stop to span them. Entries for receivers that
+are gone for good can be dropped with `POST /api/qlxd/known/forget`.
+
 ### HTTP / WebSocket API
 
 | | |
@@ -245,6 +255,8 @@ Wireless (QLX-D):
 | `GET /api/qlxd/interfaces` | network interfaces with their IPv4 addresses |
 | `POST /api/qlxd/settings` | `{"interface": "eth1" \| "", "hosts": ["169.254.10.21", ...]}`; saved |
 | `POST /api/qlxd/rescan` | forget found receivers and rediscover |
+| `GET /api/qlxd/frequencies` | known receivers: `key` (MAC), `name`, `device_id`, `frequency_mhz`, `online` |
+| `POST /api/qlxd/known/forget` | `{"key": "<mac>"}`, or `{}` for all: drop from the known list |
 | `WS /ws/qlxd` | JSON state snapshots (format in `qlxd/engine.py`) |
 
 ## Roadmap

@@ -109,6 +109,8 @@ footer {
 .error:empty { display: none; }
 
 main.split { display: flex; flex-direction: column; }
+.group[hidden] { display: none; }
+:root { --rx: #c792ea; }
 .pane { position: relative; min-height: 120px; }
 .pane.spectrum { flex: 3; }
 .pane.waterfall { flex: 2; border-top: 1px solid var(--border); }

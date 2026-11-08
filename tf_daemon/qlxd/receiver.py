@@ -31,7 +31,7 @@ IDLE_TIMEOUT_S = 10.0  # no bytes for this long -> assume the link is dead
 
 def blank_state() -> dict[str, Any]:
     return {
-        "device_id": None, "model": None, "fw_ver": None, "name": None,
+        "mac": None, "device_id": None, "model": None, "fw_ver": None, "name": None,
         "frequency_mhz": None, "group_chan": None, "audio_gain_db": None,
         "interference": False, "encryption_warning": False,
         "tx_type": None, "tx_rf_power": None, "tx_muted": False,

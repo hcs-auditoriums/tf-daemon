@@ -25,6 +25,11 @@
       <div class="group">
         <label><input type="checkbox" id="show-peak" checked> Peak hold</label>
         <label><input type="checkbox" id="show-wf" checked> Waterfall</label>
+        <span class="group" id="rx-controls" hidden>
+          <label title="Frequencies reported by the Shure QLX-D receivers (Wireless page)">
+            <input type="checkbox" id="show-rx" checked> Receivers</label>
+          <button id="fit-rx" type="button" title="Set Start/Stop to span all known receivers">Fit to receivers</button>
+        </span>
         <label>Range
           <select id="range">
             <option value="-120,-20">−120…−20 dBm</option>
