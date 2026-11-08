@@ -636,7 +636,11 @@
 
   setInterval(() => {
     state.fps = state.frames; state.frames = 0;
-    if (ws && ws.readyState === WebSocket.OPEN) $("conn").textContent = `live · ${state.fps} fps`;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      // Connected to the server but no frames: the audio device is unplugged or silent.
+      $("conn").textContent = state.fps ? `live · ${state.fps} fps` : "no audio (device disconnected?)";
+      $("conn").classList.toggle("ok", state.fps > 0);
+    }
   }, 1000);
 
   resize();

@@ -23,6 +23,7 @@ DEFAULTS: dict[str, Any] = {
     "server": {"host": "0.0.0.0", "port": 8080},
     "audio": {
         "device": "TF",
+        "channels": 34,  # capture channels (TF5: 32 + St L/R); a device with fewer is zero-padded
         "samplerate": REQUIRED_SAMPLERATE,
         "blocksize": 1200,
         "buffer_seconds": 2.0,
@@ -151,6 +152,9 @@ def _validate(cfg: dict[str, Any]) -> None:
     fmin, fmax = float(dsp["display_fmin"]), float(dsp["display_fmax"])
     if not 0 < fmin < fmax <= sr / 2:
         raise ConfigError(f"need 0 < display_fmin < display_fmax <= {sr / 2}")
+
+    if not 1 <= int(cfg["audio"]["channels"]) <= 128:
+        raise ConfigError("audio.channels must be between 1 and 128")
 
     buf_frames = float(cfg["audio"]["buffer_seconds"]) * sr
     if buf_frames < n + hop:

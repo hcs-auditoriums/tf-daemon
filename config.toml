@@ -9,6 +9,8 @@ port = 8080
 [audio]
 # Case-insensitive substring of the capture device name (DeviceSource only).
 device = "TF"
+# Capture channels (TF5: 32 inputs + St L/R). A device with fewer is zero-padded.
+channels = 34
 # The TF5 runs at a fixed 48 kHz. Other rates are rejected.
 samplerate = 48000
 # Frames per capture callback / per synthetic block.

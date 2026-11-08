@@ -185,9 +185,18 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
 `tf_daemon/config.py`. Highlights:
 
 - `audio.device`: case-insensitive substring of the capture device name (default `"TF"`).
-  All channels the device offers are opened, and every one can be picked in the
-  browser (the input menu). An input is analyzed only while someone views it,
-  except the `[[channels]]` ones, which are always analyzed.
+  `audio.channels` (34) channels are opened (a device with fewer is zero-padded),
+  and every one can be picked in the browser (the input menu). An input is
+  analyzed only while someone views it, except the `[[channels]]` ones, which
+  are always analyzed.
+- **Unplugged devices don't stop anything.** The server starts without the TF5
+  connected and opens it when it appears (retrying every 3 s; the reason shows in
+  `GET /api/audio/status` under `source_stats.error`). If the USB audio stops
+  delivering for 2 s (unplugged, power-cycled) the stream is closed, PortAudio
+  rescanned and the device reopened when it's back; the audio page shows
+  "no audio" meanwhile. The tinySA, the TF5's network control and the QLX-D
+  receivers reconnect on their own the same way, and a tinySA that stops
+  answering times out after 20 s instead of tsapython's 120 s.
 - `audio.samplerate`: must be 48000 (the TF5 is fixed at 48 kHz).
 - `dsp.fft_size` (32768, ~1.46 Hz bins), `dsp.hop` (2400, ~20 updates/s),
   `dsp.average_tau` (3 s).
