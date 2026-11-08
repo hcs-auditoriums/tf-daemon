@@ -230,7 +230,9 @@ def test_tf5_routes(console):
     try:
         client = app.test_client()
         wait_until(lambda: client.get("/api/tf5/status").get_json()["connected"])
-        wait_until(lambda: client.get("/api/audio/meta").get_json()["channels"][0]["label"] == "Main L")
+        # Input 1 takes the console's name; Main L/R (33/34) keep their config labels.
+        wait_until(lambda: client.get("/api/audio/meta").get_json()["channels"][0]["label"] == "Kick")
+        assert client.get("/api/audio/meta").get_json()["channels"][32]["label"] == "Main L"
         wait_until(lambda: "Label/Name" in client.get("/api/tf5/channels").get_json()["channels"][0]["params"])
         chans = client.get("/api/tf5/channels").get_json()
         assert chans["connected"] and chans["channels"][0]["params"]["Label/Name"]["value"] == "Kick"

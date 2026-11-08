@@ -43,6 +43,8 @@ UPDATE_LOG = APP_DIR / ".update.log"
 UPDATE_STATE = APP_DIR / ".update.json"   # written by update.sh
 UPDATE_ENV = APP_DIR / ".update.env"      # read by the tf-daemon-update unit
 RESTART_CMD = ["sudo", "-n", "systemctl", "restart", "--no-block", "tf-daemon"]
+RESTART_CHECK_CMD = ["sudo", "-n", "-l", *RESTART_CMD[2:]]  # "may we?", without running it
+RESTART_DELAY_S = 0.5
 START_UPDATE_CMD = ["sudo", "-n", "systemctl", "start", "--no-block", "tf-daemon-update"]
 FINAL_STATES = {"done", "up_to_date", "failed", "rolled_back"}
 START_GRACE_S = 60     # time for update.sh to write its first state
@@ -193,6 +195,14 @@ def _write_atomic(path: Path, text: str) -> None:
         raise
 
 
+def _restart_now() -> None:
+    log.info("Restarting tf-daemon (requested from /config)")
+    try:
+        subprocess.run(RESTART_CMD, capture_output=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        log.exception("Restart command failed")
+
+
 def register_system(app: Flask, cfg: dict[str, Any], config_path: str | Path | None) -> None:
     cfg_file = Path(config_path).resolve() if config_path else None
     # The revision this process runs, fixed at startup: the checkout on disk
@@ -262,9 +272,17 @@ def register_system(app: Flask, cfg: dict[str, Any], config_path: str | Path | N
 
     @bp.post("/restart")
     def restart():
-        out = subprocess.run(RESTART_CMD, capture_output=True, text=True, timeout=15)
+        # systemctl runs inside the service it restarts, so systemd may kill it
+        # before it exits and its exit code says nothing. Check permission up
+        # front, answer, then restart once the response is out.
+        try:
+            out = subprocess.run(RESTART_CHECK_CMD, capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return jsonify({"ok": False, "error": f"cannot restart: {e}"}), 500
         if out.returncode != 0:
-            return jsonify({"ok": False, "error": out.stderr.strip() or "restart failed"}), 500
+            return jsonify({"ok": False, "error": "not allowed to restart the service; "
+                                                  "run  sudo bash deploy/install-service.sh  on the server"}), 500
+        threading.Timer(RESTART_DELAY_S, _restart_now).start()
         return jsonify({"ok": True})
 
     app.register_blueprint(bp)

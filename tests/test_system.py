@@ -121,3 +121,22 @@ def test_restart_handoff_is_settled_by_the_new_process(update_files):
     system._write_state(state="restarting", message="", pid=1, to="b" * 40, time=0)
     s = system.Updater("r", "main", running_revision="a" * 40).status()
     assert s["state"] == "failed" and "not running the update" in s["message"]
+
+
+def test_restart_answers_before_restarting(client_for, monkeypatch):
+    calls = []
+    monkeypatch.setattr(system, "RESTART_DELAY_S", 0.05)
+    monkeypatch.setattr(system, "_restart_now", lambda: calls.append(time.time()))
+    client = client_for(None)
+
+    monkeypatch.setattr(system, "RESTART_CHECK_CMD", ["false"])  # sudo would refuse
+    r = client.post("/api/system/restart")
+    assert r.status_code == 500 and "install-service.sh" in r.get_json()["error"]
+
+    monkeypatch.setattr(system, "RESTART_CHECK_CMD", ["true"])
+    t0 = time.time()
+    assert client.post("/api/system/restart").get_json() == {"ok": True}
+    deadline = time.time() + 2
+    while not calls and time.time() < deadline:
+        time.sleep(0.01)
+    assert len(calls) == 1 and calls[0] >= t0  # restarted after answering, exactly once
