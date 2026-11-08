@@ -484,59 +484,79 @@ def _opt(g: Callable[[str], Any], path: str, default: Any) -> Any:
 
 def _band(g: Callable[[str], Any], path: str, label: str, low: bool = False, high: bool = False) -> dict[str, Any]:
     """Band type enum: 0 bell, 1 shelf, 2 HPF (low band) / LPF (high band); mid bands bell only.
-    Some low / high bands also carry an HPFOn / LPFOn switch."""
+
+    As TF Editor maps it (FUN_0051a080): a type-2 band is a 12 dB/oct filter that is on
+    only while the band's HPFOn / LPFOn switch is set; ``on`` is False otherwise.
+    """
     t = int(g(path + "/Type"))
-    kind = "bell"
-    if low and (t == 2 or _opt(g, path + "/HPFOn", 0)):
-        kind = "hpf"
-    elif high and (t == 2 or _opt(g, path + "/LPFOn", 0)):
-        kind = "lpf"
+    kind, on = "bell", True
+    if (low or high) and t == 2:
+        kind = "hpf" if low else "lpf"
+        on = bool(_opt(g, path + ("/HPFOn" if low else "/LPFOn"), 0))
     elif (low or high) and t == 1:
         kind = "low_shelf" if low else "high_shelf"
-    return {"label": label, "type": kind, "freq": g(path + "/Frequency") / 10,
+    return {"label": label, "type": kind, "on": on, "freq": g(path + "/Frequency") / 10,
             "gain": g(path + "/Gain") / 100, "q": g(path + "/Q") / 1000}
 
 
+# The curve is computed the way TF Editor draws it (decompiled: designer FUN_005196e0,
+# band table FUN_0051a080, response FUN_00546ae0): one digital biquad per section at the
+# console's 48 kHz, bilinear transform with K = tan(pi f / fs), magnitudes summed in dB.
 CURVE_FREQS = np.geomspace(20.0, 20000.0, 241)
+FS = 48000.0
+BUTTERWORTH_Q = 0.707106
 
 
 def eq_curve(eq: dict[str, Any] | None, freqs: np.ndarray = CURVE_FREQS) -> np.ndarray:
-    """Magnitude response in dB of the console EQ (analog prototypes: an approximation of
-    Yamaha's filters, close but not identical). EQ off: flat."""
+    """Magnitude response in dB of the console EQ, as TF Editor computes it. EQ off: flat."""
     out = np.zeros(len(freqs))
     if not eq or not eq["on"]:
         return out
-    s = 1j * np.asarray(freqs, dtype=float)
     hpf = eq.get("hpf")
     if hpf and hpf["on"]:
-        out += _pass_db(freqs, hpf["freq"], max(1, round(hpf["slope"] / 6)), high=True)
+        kind = "hpf1" if hpf["slope"] == 6 else "hpf"
+        out += section_db(kind, hpf["freq"], 0.0, BUTTERWORTH_Q, freqs)
     for b in eq["bands"]:
-        f0, q = float(b["freq"]), max(0.05, float(b["q"]))
-        if b["type"] == "hpf":
-            out += _pass_db(freqs, f0, 2, high=True)
-        elif b["type"] == "lpf":
-            out += _pass_db(freqs, f0, 2, high=False)
-        elif b["gain"] != 0:
-            out += 20 * np.log10(np.abs(_shape(b["type"], s / f0, float(b["gain"]), q)))
+        if b["type"] in ("hpf", "lpf"):
+            if b.get("on", True):
+                out += section_db(b["type"], b["freq"], 0.0, BUTTERWORTH_Q, freqs)
+        elif b["gain"] != 0:   # a zero-gain band is flat (TF Editor skips it)
+            out += section_db(b["type"], b["freq"], b["gain"], b["q"], freqs)
     return out
 
 
-def _pass_db(freqs: np.ndarray, f0: float, order: int, high: bool) -> np.ndarray:
-    """Butterworth high/low pass of ``order`` (6 dB/oct per order)."""
-    r = (f0 / np.asarray(freqs, dtype=float)) if high else (np.asarray(freqs, dtype=float) / f0)
-    return -10 * np.log10(1 + r ** (2 * order))
+def section_db(kind: str, freq: float, gain_db: float, q: float, freqs: np.ndarray = CURVE_FREQS,
+               fs: float = FS) -> np.ndarray:
+    """|H| in dB of one section at ``freqs``; ``kind``: bell, low_shelf, high_shelf,
+    hpf / lpf (2nd order, Q), hpf1 / lpf1 (1st order)."""
+    b, a = biquad(kind, freq, gain_db, q, fs)
+    z = np.exp(-1j * 2 * np.pi * np.asarray(freqs, dtype=float) / max(fs, 44100.0))   # z^-1
+    h = (b[0] + b[1] * z + b[2] * z * z) / (a[0] + a[1] * z + a[2] * z * z)
+    return 20 * np.log10(np.maximum(np.abs(h), 1e-12))
 
 
-def _shape(kind: str, s: np.ndarray, gain_db: float, q: float) -> np.ndarray:
-    """RBJ analog prototypes with w0 = 1 (s is already divided by w0)."""
-    a = 10 ** (gain_db / 40)
-    if kind == "bell":
-        return (s * s + s * (a / q) + 1) / (s * s + s / (a * q) + 1)
-    sa = math.sqrt(a)
-    if kind == "low_shelf":
-        return a * (s * s + (sa / q) * s + a) / (a * s * s + (sa / q) * s + 1)
-    if kind == "high_shelf":
-        return a * (a * s * s + (sa / q) * s + 1) / (s * s + (sa / q) * s + a)
+def biquad(kind: str, freq: float, gain_db: float, q: float, fs: float = FS) -> tuple[list[float], list[float]]:
+    """(b, a) of TF Editor's design for one section (a not normalised)."""
+    fs = max(fs, 44100.0)
+    q = max(q, 0.1)
+    k = math.tan(math.pi * max(freq, 16.0) / fs)
+    kk = k * k
+    v = 10 ** (abs(gain_db) / 20)
+    if kind == "bell":   # Zoelzer: the cut mirrors the boost
+        num, den = (v * k / q, k / q) if gain_db > 0 else (k / q, v * k / q)
+        return [1 + kk + num, 2 * (kk - 1), 1 + kk - num], [1 + kk + den, 2 * (kk - 1), 1 + kk - den]
+    if kind in ("low_shelf", "high_shelf"):
+        # Two identical first-order shelves (Q not used), corner at freq.
+        sv = math.sqrt(v)
+        plain = [1 + k, k - 1]
+        shelf = [1 + k * sv, k * sv - 1] if kind == "low_shelf" else [k + sv, k - sv]
+        num, den = (shelf, plain) if gain_db > 0 else (plain, shelf)
+        return [float(x) for x in np.convolve(num, num)], [float(x) for x in np.convolve(den, den)]
+    if kind in ("hpf", "lpf"):
+        d = [1 + k / q + kk, 2 * (kk - 1), 1 - k / q + kk]
+        return ([kk, 2 * kk, kk] if kind == "lpf" else [1.0, -2.0, 1.0]), d
+    if kind in ("hpf1", "lpf1"):
+        return ([k, k, 0.0] if kind == "lpf1" else [1.0, -1.0, 0.0]), [1 + k, k - 1, 0.0]
     raise ValueError(kind)
 
 
