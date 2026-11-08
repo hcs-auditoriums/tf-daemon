@@ -24,7 +24,7 @@ sudo -u "$APP_USER" bash -c "
   cd '$APP_DIR'
   [ -d .venv ] || python3 -m venv .venv
   .venv/bin/pip install -q --upgrade pip
-  .venv/bin/pip install -q -e .
+  .venv/bin/pip install -q -e '.[rf]'
 "
 
 echo "==> installing systemd unit"

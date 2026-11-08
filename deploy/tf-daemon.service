@@ -10,8 +10,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=@USER@
-# ALSA devices are root:audio 0660; the service user needn't be in the group.
-SupplementaryGroups=audio
+# ALSA devices are root:audio 0660 and the tinySA's /dev/ttyACM* is root:dialout
+# 0660; the service user needn't be in either group.
+SupplementaryGroups=audio dialout
 WorkingDirectory=@DIR@
 Environment=TF_DAEMON_CONFIG=@DIR@/config.toml
 Environment=TF_DAEMON_SOURCE=device

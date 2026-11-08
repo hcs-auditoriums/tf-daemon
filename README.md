@@ -47,8 +47,9 @@ Run the tests with `pytest`.
 
 Targets: Raspberry Pi 4 on Raspberry Pi OS Lite (Trixie), or an x86 Ubuntu
 server. The system Python is "externally managed", so everything goes in a venv
-(`python3-venv`); sounddevice needs `libportaudio2`. For the tinySA page,
-install the extra too: `.venv/bin/pip install -e '.[rf]'`.
+(`python3-venv`); sounddevice needs `libportaudio2`. The deploy scripts install
+the `[rf]` extra (tsapython) for the tinySA page, and the service gets the
+`dialout` group so it can open the tinySA's `/dev/ttyACM*`.
 
 From your workstation, copy the committed code to the server (no GitHub access
 needed on the server):
@@ -64,8 +65,9 @@ cd ~/tf-daemon && sudo bash deploy/install-service.sh
 ```
 
 That installs `python3-venv libportaudio2 alsa-utils`, builds `.venv` as your
-user, and installs/starts the `tf-daemon` systemd service (with the `audio`
-group so it can open the ALSA device). After that, `deploy/deploy.sh user@host`
+user, and installs/starts the `tf-daemon` systemd service (with the `audio` and
+`dialout` groups so it can open the ALSA device and the tinySA). Re-run it after
+a deploy that changes `deploy/tf-daemon.service`. After that, `deploy/deploy.sh user@host`
 pushes new commits and restarts the service. The server's `config.toml` is
 never overwritten by a deploy, so edit it there.
 
