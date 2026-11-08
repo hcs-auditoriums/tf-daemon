@@ -501,12 +501,17 @@
     return `EQ ${d.source}${d.eq.on ? "" : " · OFF"}${d.eq.one_knob ? " · 1-knob on" : ""}`;
   }
 
+  // EQ curves (the console's and the vocal assist's) share one scale: centred,
+  // following the View range, so they can be compared directly.
+  const eqHalf = () => (state.dbMax - state.dbMin) / 2;     // EQ dB shown above / below 0
+  const eqY = (db) => (PAD.t + H - PAD.b) / 2 - db / eqHalf() * (H - PAD.b - PAD.t) / 2;
+
   function drawEq() {
     const d = state.eq;
     if (!state.showEq || !eqAvailable || !d || d.index !== state.input) return;
     const top = PAD.t, bot = H - PAD.b, x0 = PAD.l, x1 = W - PAD.r;
-    const half = (state.dbMax - state.dbMin) / 2;          // EQ dB shown above / below 0
-    const yEq = (db) => (top + bot) / 2 - db / half * (bot - top) / 2;
+    const half = eqHalf();
+    const yEq = eqY;
     ctx.font = "11px system-ui, sans-serif";
     ctx.lineWidth = 1;
     ctx.strokeStyle = C.eq; ctx.fillStyle = C.eq;
@@ -863,8 +868,14 @@
         const lbl = el("label", "vp-check");
         const cb = el("input"); cb.type = "checkbox"; cb.checked = state.vocalOverlay;
         cb.onchange = () => { state.vocalOverlay = cb.checked; save("tf.vocalOverlay", cb.checked ? 1 : 0); state.dirty = true; };
-        lbl.append(cb, " Show on spectrum");
+        lbl.append(cb, " Show suggested EQ on spectrum");
         items.push(lbl);
+        if (eqAvailable && !state.showEq) {  // desk EQ readable but its overlay is off: offer the comparison
+          items.push(row(button("Compare with desk EQ", () => {
+            const c = $("show-eq"); c.checked = true; c.dispatchEvent(new Event("change"));
+            state.vocalOverlay = true; save("tf.vocalOverlay", 1); renderVocal();
+          })));
+        }
       }
       items.push(row(button("Listen again", () => vocalPost("start"), true), button("Clear", () => vocalPost("clear"))));
     }
@@ -872,34 +883,40 @@
     panel.replaceChildren(...items);
   }
 
-  // Voice vs target (violet) and the suggested EQ (dashed green), on the EQ
-  // overlay's centred +-EQ_RANGE dB scale.
+  // The suggested EQ (violet, dashed) and, faintly, why: the voice vs reference speech.
   function drawVocal() {
     if (!vocal || !state.vocalOverlay) return;
     const s = vocal.sessions[String(state.input)];
     const r = s && s.result;
     if (!r || !r.ok) return;
+    // Same scale as the console EQ overlay (eqY), so the suggested curve lines
+    // up with the desk's actual EQ curve when both are shown.
     const top = PAD.t, bot = H - PAD.b;
-    const y = (db) => Math.min(bot, Math.max(top, (top + bot) / 2 - db / EQ_RANGE * (bot - top) / 2));
-    const line = (fs, vs, color, dash, width) => {
+    const y = (db) => Math.min(bot, Math.max(top, eqY(db)));
+    const line = (fs, vs, color, dash, width, alpha) => {
       ctx.beginPath();
       fs.forEach((f, i) => { const xx = xOf(f), yy = y(vs[i]); if (i) ctx.lineTo(xx, yy); else ctx.moveTo(xx, yy); });
-      ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash); ctx.stroke(); ctx.setLineDash([]);
+      ctx.globalAlpha = alpha; ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash);
+      ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
     };
-    if (!(state.showEq && eqAvailable)) {  // the EQ overlay draws this scale too
+    const deskEq = state.showEq && eqAvailable && state.eq && state.eq.index === state.input;
+    if (!deskEq) {  // otherwise the EQ overlay has drawn this scale already
       ctx.globalAlpha = 0.5; ctx.strokeStyle = C.vocal; ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
       const y0 = Math.round(y(0)) + 0.5;
       ctx.beginPath(); ctx.moveTo(PAD.l, y0); ctx.lineTo(W - PAD.r, y0); ctx.stroke(); ctx.setLineDash([]);
       ctx.fillStyle = C.vocal; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
-      for (const db of [12, 6, 0, -6, -12]) ctx.fillText(`${db > 0 ? "+" : ""}${db}`, W - PAD.r - 4, y(db));
+      const step = eqHalf() > 40 ? 12 : 6, edge = Math.floor((eqHalf() - 2) / step) * step;
+      for (let db = edge; db >= -edge; db -= step) ctx.fillText(`${db > 0 ? "+" : ""}${db}`, W - PAD.r - 4, y(db));
       ctx.globalAlpha = 1;
     }
-    line(r.points, r.deviation, C.vocal, [], 2);
-    line(r.curve_freqs, r.curve, C.eq, [6, 4], 2);
+    line(r.points, r.deviation, C.vocal, [], 1, 0.45);          // why: the voice vs reference speech
+    line(r.curve_freqs, r.curve, C.vocal, [7, 4], 2.5, 1);      // what: the suggested EQ
     ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "top";
-    ctx.fillStyle = C.vocal; ctx.fillText("voice vs reference speech", PAD.l + 6, bot - 30);
-    ctx.fillStyle = C.eq; ctx.fillText("suggested EQ (dashed)", PAD.l + 6, bot - 16);
-    ctx.lineWidth = 1;
+    ctx.fillStyle = C.vocal;
+    ctx.fillText(`suggested EQ (dashed)${deskEq ? " · desk EQ in green" : ""}`, PAD.l + 6, bot - 30);
+    ctx.globalAlpha = 0.6;
+    ctx.fillText("thin line: voice vs reference speech", PAD.l + 6, bot - 16);
+    ctx.globalAlpha = 1; ctx.lineWidth = 1;
   }
 
   function draw() {
@@ -1236,10 +1253,18 @@
   $("wf-source").onchange = (e) => { state.wfSource = e.target.value; save("tf.wfSource", state.wfSource); wfReset(); };
   applyLayout();
 
+  // A bug in any overlay must not freeze the analyzer: log it (once a few
+  // seconds) and keep animating.
+  let lastDrawError = 0;
   function loop() {
-    if (state.dirty) { state.dirty = false; draw(); }
-    if (wf.dirty && state.layout !== "spectrum") { wf.dirty = false; drawWaterfall(); wfHoverReadout(); }
     requestAnimationFrame(loop);
+    try {
+      if (state.dirty) { state.dirty = false; draw(); }
+      if (wf.dirty && state.layout !== "spectrum") { wf.dirty = false; drawWaterfall(); wfHoverReadout(); }
+    } catch (e) {
+      ctx.restore();  // draw() may have stopped inside its clip
+      if (performance.now() - lastDrawError > 5000) { console.error("draw failed:", e); lastDrawError = performance.now(); }
+    }
   }
 
   setInterval(() => {

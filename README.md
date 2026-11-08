@@ -207,8 +207,10 @@ moments they are actually talking, then suggests, in the TF5's terms:
   detector has reported on that input.
 
 With `tf5.eq` on, the channel's current desk EQ is shown next to each
-suggestion. **Show on spectrum** draws the voice's difference from reference
-speech (violet) and the suggested EQ (dashed green).
+suggestion. **Show suggested EQ on spectrum** draws the suggested EQ as a violet
+dashed curve on the same scale as the desk's EQ overlay (green), so the two can
+be compared directly; **Compare with desk EQ** turns that overlay on. A faint thin
+line shows the voice's difference from reference speech.
 
 How it decides: it builds the voice's long-term average spectrum and compares
 its *shape* with the ANSI S3.5-1997 standard speech spectrum (normal vocal
