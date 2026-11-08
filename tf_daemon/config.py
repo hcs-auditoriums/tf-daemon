@@ -78,6 +78,7 @@ DEFAULTS: dict[str, Any] = {
         "password": "",
         "poll_s": 30.0,      # full re-read period (changes on the desk are pushed in between)
         "usb_patch": [],     # per USB capture channel: "InCh N", "St L", "St R" or ""; [] = TF default
+        "usb_post_fader": False,  # USB feeds taken after the fader? (ring attribution adds the fader if not)
     },
     "update": {
         # Where the /config page's Update button pulls from.
@@ -194,6 +195,8 @@ def _validate(cfg: dict[str, Any]) -> None:
         raise ConfigError("tf5.username and tf5.password must be strings")
     if not 1 <= float(t["poll_s"]) <= 3600:
         raise ConfigError("tf5.poll_s must be between 1 and 3600")
+    if not isinstance(t["usb_post_fader"], bool):
+        raise ConfigError("tf5.usb_post_fader must be true or false")
     if not isinstance(t["usb_patch"], list):
         raise ConfigError("tf5.usb_patch must be a list of strings")
     from .tf5 import parse_patch_entry  # local: tf5 imports flask, config shouldn't at import time

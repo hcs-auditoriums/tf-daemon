@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from tf_daemon.app import build_modules, create_app
-from tf_daemon.audio.sources import SynthSource, make_pink_noise
+from tf_daemon.audio.sources import SynthSource, _PacedSource, make_pink_noise
 from tf_daemon.config import ConfigError, load_config
 from tf_daemon.dsp.ring import RingDetector, RingLog, RingSettings, geq_band
 
@@ -239,3 +239,84 @@ def test_ring_detection_can_be_turned_off():
         assert app.test_client().get("/api/audio/rings").get_json()["events"] == []
     finally:
         app.extensions["tf_stop"]()
+
+
+# ---------------------------------------------------------------- which input feeds a ring on the mains
+
+class _StageSource(_PacedSource):
+    """Two mics hearing a ring at different levels, a third with only noise, and a Main mix.
+
+    The 'mains' (input 3) carry the sum, so a ring is detected there; attribution
+    must rank mic A first, then mic B, and leave out the silent input.
+    """
+
+    name = "stage"
+
+    def __init__(self, a_db=-30.0, b_db=-38.0):
+        super().__init__(channels=4, blocksize=BLOCK)
+        self._amps = (10 ** (a_db / 20), 10 ** (b_db / 20))
+        self._noise = [make_pink_noise(1 << 19, np.random.default_rng(s)) * 10 ** (-70 / 20) for s in (1, 2, 3)]
+        self._pos = 0
+        self._phase = 0.0
+
+    def _fill(self, block):
+        n = block.shape[0]
+        ph = self._phase + 2 * np.pi * 2000.0 / FS * np.arange(1, n + 1)
+        self._phase = float(ph[-1] % (2 * np.pi))
+        ring = np.sin(ph)
+        sl = slice(self._pos, self._pos + n)
+        self._pos = (self._pos + n) % ((1 << 19) - n)
+        block[:, 0] = self._amps[0] * ring + self._noise[0][sl]
+        block[:, 1] = self._amps[1] * ring + self._noise[1][sl]
+        block[:, 2] = self._noise[2][sl]
+        block[:, 3] = block[:, 0] + block[:, 1]
+
+
+def _wait_sources(engine, pred, timeout=8.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for e in engine.rings.snapshot()["events"]:
+            if e["active"] and e["channel"] == 3 and e["sources"] and pred(e):
+                return e
+        time.sleep(0.1)
+    raise AssertionError(f"not reached: {engine.rings.snapshot()['events']}")
+
+
+def test_ring_on_the_mains_is_traced_to_its_inputs():
+    from tf_daemon.audio.engine import AudioEngine
+    cfg = load_config(None)
+    cfg["channels"] = [{"index": 3, "label": "Main"}]  # the bus: always analyzed, rings there get attributed
+    engine = AudioEngine(cfg, _StageSource())
+    engine.set_console_names({0: "Mic A", 1: "Mic B", 2: "Spare"})
+    engine.start()
+    try:
+        # Without fader information: ranked by level at the ring frequency.
+        e = _wait_sources(engine, lambda e: len(e["sources"]) == 2)
+        assert [s["label"] for s in e["sources"]] == ["Mic A", "Mic B"]
+        assert e["sources"][1]["rel_db"] == pytest.approx(-8.0, abs=1.5)
+        assert e["sources_basis"] == "level" and abs(e["freq"] - 2000) < 5
+
+        # With the console's faders: level + fader. Mic B pushed up beats Mic A pulled down.
+        engine.set_console_gains({0: -10.0, 1: 5.0, 2: 0.0})
+        # (Contributions are smoothed over ~1 s so one measurement can't reorder the list.)
+        e = _wait_sources(engine, lambda e: e["sources"][0]["label"] == "Mic B"
+                          and len(e["sources"]) == 2 and e["sources"][1]["rel_db"] <= -6.0)
+        assert e["sources_basis"] == "fader"
+        assert e["sources"][1]["rel_db"] == pytest.approx(-7.0, abs=1.5)  # (-30-10) - (-38+5)
+
+        # A channel that is off isn't in the loop at all.
+        engine.set_console_gains({0: 0.0, 1: None, 2: 0.0})
+        e = _wait_sources(engine, lambda e: [s["label"] for s in e["sources"]] == ["Mic A"])
+    finally:
+        engine.stop()
+
+
+def test_narrowband_levels():
+    from tf_daemon.dsp.ring import narrowband_levels
+    from tf_daemon.dsp.spectrum import blackman_harris
+    n = 16384
+    t = np.arange(n) / FS
+    frames = np.stack([0.5 * np.sin(2 * np.pi * 1000 * t), 0.05 * np.sin(2 * np.pi * 3000 * t)])
+    lv = narrowband_levels(frames, [1000.0, 3000.0], FS, blackman_harris(n))
+    assert lv[0, 0] == pytest.approx(-6.0, abs=0.2) and lv[1, 1] == pytest.approx(-26.0, abs=0.2)
+    assert lv[0, 1] < -100 and lv[1, 0] < -100

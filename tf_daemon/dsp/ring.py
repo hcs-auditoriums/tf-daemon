@@ -44,6 +44,16 @@ energy at 2f or 3f (PHPR). Two paths look for rings:
 RingLog turns per-input reports into events for the UI (with how often a ring
 came back, which is the one to EQ out) and keeps an ignore list for steady
 tones that aren't feedback.
+
+Which input is ringing
+----------------------
+A ring on the mains is the loop loudspeaker -> room -> microphone -> channel ->
+mains. Every open microphone hears the ringing PA, but the loop gain at the ring
+frequency is set by how much of it each channel sends back to the mains: the
+level of that frequency in the channel times the channel's gain to the mains.
+``narrowband_levels`` measures every input at the ring frequency; the engine adds
+each channel's fader (from the TF5, skipping channels that are off) and RingLog
+ranks the inputs, smoothed over the ring's life.
 """
 
 from __future__ import annotations
@@ -66,6 +76,15 @@ GEQ_BANDS = [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 50
 SENSITIVITY = {"low": (14.0, 1.2), "normal": (10.0, 0.8), "high": (7.0, 0.5)}
 
 KIND_RANK = {"tail": 1, "sustained": 2, "growing": 3}
+
+
+def narrowband_levels(frames: np.ndarray, freqs: list[float], samplerate: int, window: np.ndarray) -> np.ndarray:
+    """Level (dBFS, sine-peak) of each row of ``frames`` at each frequency: (rows, len(freqs))."""
+    n = frames.shape[1]
+    t = np.arange(n) / samplerate
+    basis = window[None, :] * np.exp(-2j * np.pi * np.asarray(freqs, dtype=np.float64)[:, None] * t[None, :])
+    amp = 2.0 * np.abs(frames.astype(np.float64) @ basis.T) / float(np.sum(window))
+    return 20.0 * np.log10(amp + 1e-12)
 
 
 def geq_band(freq: float) -> float:
@@ -360,12 +379,27 @@ class RingEvent:
     last_seen: float
     count: int = 1        # separate occurrences
     active: bool = True
+    # Inputs feeding this ring (rings on a bus): input -> smoothed contribution (dB), and labels.
+    contrib: dict[int, float] = field(default_factory=dict)
+    contrib_labels: dict[int, str] = field(default_factory=dict)
+    contrib_basis: str = ""   # "fader": level at the ring frequency + fader; "level": level only
+
+    SOURCES_WITHIN_DB = 12.0
+    MAX_SOURCES = 3
+
+    def sources(self) -> list[dict[str, Any]]:
+        if not self.contrib:
+            return []
+        ranked = sorted(self.contrib.items(), key=lambda kv: -kv[1])
+        top = ranked[0][1]
+        return [{"channel": i, "label": self.contrib_labels.get(i, f"Ch {i + 1}"), "rel_db": round(c - top, 1)}
+                for i, c in ranked[:self.MAX_SOURCES] if c >= top - self.SOURCES_WITHIN_DB]
 
     def to_dict(self) -> dict[str, Any]:
         return {"id": self.id, "channel": self.channel, "label": self.label, "freq": self.freq, "kind": self.kind,
                 "level": self.level, "prominence": self.prominence, "first_seen": self.first_seen,
                 "last_seen": self.last_seen, "count": self.count, "active": self.active,
-                "geq": geq_band(self.freq)}
+                "geq": geq_band(self.freq), "sources": self.sources(), "sources_basis": self.contrib_basis}
 
 
 class RingLog:
@@ -430,6 +464,38 @@ class RingLog:
             if len(self._events) > self.KEEP:
                 self._events = sorted(self._events, key=lambda e: (e.active, e.last_seen))[-self.KEEP:]
             if changed:
+                self.version += 1
+
+    def active_on(self, channels: frozenset[int] | set[int]) -> list[tuple[int, float]]:
+        """(channel, freq) of the live rings on these inputs."""
+        with self._lock:
+            return [(e.channel, e.freq) for e in self._events if e.active and e.channel in channels]
+
+    def set_sources(self, channel: int, freq: float, contributions: list[tuple[int, str, float]],
+                    basis: str) -> None:
+        """Contribution (dB) of each input to the live ring at ``freq`` on ``channel``.
+
+        Smoothed in the power domain over the ring's life, so one noisy
+        measurement doesn't reorder the list.
+        """
+        with self._lock:
+            ev = next((e for e in self._events if e.channel == channel and e.active
+                       and abs(e.freq - freq) <= self.MATCH * e.freq), None)
+            if ev is None:
+                return
+            before = [s["channel"] for s in ev.sources()]
+            seen = set()
+            for i, label, db in contributions:
+                seen.add(i)
+                ev.contrib_labels[i] = label
+                p_new = 10 ** (db / 10)
+                p_old = 10 ** (ev.contrib[i] / 10) if i in ev.contrib else p_new
+                ev.contrib[i] = 10 * math.log10(0.6 * p_old + 0.4 * p_new)
+            for i in list(ev.contrib):
+                if i not in seen:  # muted or gone: no longer feeding the ring
+                    del ev.contrib[i]
+            ev.contrib_basis = basis
+            if [s["channel"] for s in ev.sources()] != before:
                 self.version += 1
 
     def end_channel(self, channel: int) -> None:
