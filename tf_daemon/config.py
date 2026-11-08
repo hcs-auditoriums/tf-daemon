@@ -90,6 +90,7 @@ DEFAULTS: dict[str, Any] = {
         "usb_post_fader": False,  # USB feeds taken after the fader? (ring attribution adds the fader if not)
         "eq": False,         # also read the EQ (TF Editor protocol, read-only) for the spectrum overlay
         "eq_port": 50368,
+        "eq_write": False,   # let a person apply suggested EQ to the desk (vocal assist "Apply to desk")
     },
     "update": {
         # Where the /config page's Update button pulls from.
@@ -233,6 +234,10 @@ def _validate(cfg: dict[str, Any]) -> None:
         raise ConfigError("tf5.eq must be true or false")
     if not 1 <= int(t["eq_port"]) <= 65535:
         raise ConfigError(f"tf5.eq_port must be 1..65535, got {t['eq_port']}")
+    if not isinstance(t["eq_write"], bool):
+        raise ConfigError("tf5.eq_write must be true or false")
+    if t["eq_write"] and not t["eq"]:
+        raise ConfigError("tf5.eq_write needs tf5.eq = true (EQ is written over the same connection)")
 
     q = cfg["qlxd"]
     if str(q["source"]).lower() not in ("device", "demo"):

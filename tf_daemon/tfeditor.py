@@ -1,4 +1,4 @@
-"""READ-ONLY client for the TF Editor protocol (TCP 50368): the console's EQ.
+"""Client for the TF Editor protocol (TCP 50368): reads the console's EQ.
 
 The TF5's text protocol (RCP, see tf5.py) has no EQ addresses, so the EQ is
 read the way TF Editor / StageMix read it. Protocol details and how they were
@@ -14,17 +14,22 @@ established: guides/tf5_api.md.
     <- MMIX set-param  (a change on the desk / another app / scene recall)
     <-> EEVT KeepAlive
 
-THIS CLIENT NEVER CHANGES ANYTHING ON THE CONSOLE. Every outgoing frame goes
-through ``_send``, which passes it to ``check_outbound`` first; that accepts
-only the handshake / keepalive messages listed in ALLOWED_* below and raises
-ReadOnlyViolation for anything else, notably:
+READ-ONLY UNLESS WRITES ARE ENABLED, and then only for what a person asked for.
+Every outgoing frame goes through ``_send``, which passes it to ``check_outbound``
+first; that accepts only the handshake / keepalive messages listed in ALLOWED_*
+below and raises ReadOnlyViolation for anything else, notably:
 
-- set-param (``01 11``) and full dump (``01 14``): these write parameters;
+- set-param (``01 11``), except as below, and full dump (``01 14``);
 - ``SYNCDIR:1``: makes the console take the client's memories (overwrite);
 - ``TYPE:Editor``: the console allows only one editor;
 - any function other than Property / Mixing, any other event.
 
-There is deliberately no builder for set-param or dump messages here.
+The one exception: with ``writes=True`` (config ``tf5.eq_write``), ``write()``
+sends set-params for input-channel PEQ parameters (WRITABLE, values within
+WRITE_LIMITS). It is called only from an explicit user request (the vocal
+assist's "Apply to desk"); nothing in tf-daemon writes on its own. While a
+``write()`` runs, ``check_outbound`` lets through exactly the frames of that
+request and nothing else; at any other time a set-param is refused as before.
 
 The Property dump contains the console password in plain text; it is dropped
 unparsed and never logged.
@@ -35,6 +40,7 @@ from __future__ import annotations
 import argparse
 import logging
 import math
+import re
 import socket
 import struct
 import threading
@@ -53,6 +59,7 @@ KEEPALIVE_S = 10.0               # our keepalive period (the guide: every <= 15 
 RX_TIMEOUT_S = 35.0              # no frame from the console for this long: reconnect
 SYNC_TIMEOUT_S = 20.0            # connect -> Mixing dump
 CLIENT_TYPE_WAIT_S = 3.0         # SetClientType acked but no onSetClientType: go on after this
+WRITE_CONFIRM_S = 3.0            # write(): how long to wait for the console to echo each change
 
 # Element types: high nibble kind (1 unsigned, 2 signed, 3 string), low nibble width.
 T_U8, T_U16, T_U32 = 0x11, 0x12, 0x14
@@ -65,7 +72,7 @@ SUBSCRIBE = (0x01, 0x01, 0x01)
 HASH_COMPARE = (0x01, 0x10, 0x01)
 SYNC_OPEN = (0x01, 0x04, 0x01)
 SYNC_CLOSE = (0x01, 0x04, 0x10)
-SET_PARAM = (0x01, 0x11, 0x01)   # received only; NEVER sent
+SET_PARAM = (0x01, 0x11, 0x01)   # received; sent only by write() (see the module docstring)
 DUMP = (0x01, 0x14, 0x01)        # received only; NEVER sent
 EVENT = (0x03, 0x01, 0x01)
 EVENT_REPLY = (0x03, 0x01, 0x10)
@@ -82,6 +89,19 @@ CLIENT_TYPE = "TYPE:StageMix SYNCDIR:2"   # SYNCDIR 2 = console -> client. NEVER
 ALLOWED_PARAM_CMDS = {SUBSCRIBE, HASH_COMPARE, SYNC_OPEN, SYNC_CLOSE}
 ALLOWED_EVENTS = {"KeepAlive": "", "SetClientType": CLIENT_TYPE}   # request name -> exact args
 ALLOWED_EVENT_REPLIES = {"KeepAlive", "NotifySyncStatus"}         # console events we acknowledge
+
+# The only parameters write() may change: an input channel's PEQ switch, high-pass
+# and bands (guides/tf5_api.md section 5). Raw limits per parameter name.
+ORIGIN_SELF = 0xA0   # "the sender's own change": the console applies and echoes it (guide 4.4)
+WRITABLE = re.compile(r"InputChannel:\d+/PEQ/(On|Bank/HPF/(On|Frequency)"
+                      r"|Bank/(BandL|Band:\d|BandH)/(Type|Frequency|Gain|Q|LPFOn))")
+WRITE_LIMITS = {
+    "On": (0, 1), "LPFOn": (0, 1), "Type": (0, 2),
+    "HPF/Frequency": (200, 6000),     # 20-600 Hz (raw Hz x 10)
+    "Frequency": (200, 200000),       # 20 Hz - 20 kHz
+    "Gain": (-1800, 1800),            # +-18 dB (raw dB x 100)
+    "Q": (100, 10000),                # 0.1 - 10 (raw x 1000)
+}
 
 
 class ReadOnlyViolation(RuntimeError):
@@ -213,8 +233,24 @@ def event(name: str, args: str = "", reply: bool = False) -> bytes:
                    [element(T_U32, [0]), element(T_U32, [0]), element(T_STR, name), element(T_STR, args)])
 
 
-def check_outbound(tag: str, payload: bytes) -> None:
-    """Raise ReadOnlyViolation unless the frame is one of the read-only handshake messages."""
+def set_param_message(path: list[int], idx: list[int], prm: Prm, value: int) -> bytes:
+    """A Mixing set-param as TF Editor sends it (guide 4.4); used only by TFEditorClient.write."""
+    v = element(T_S32 if prm.type == 1 else T_U32, [value])
+    return message(SET_PARAM, [element(T_U8, b"\0"), element(T_STR, "Mixing"), element(T_STR, "Mixing"),
+                               element(T_U16, [len(path)]), element(T_U32, path), element(T_U32, idx),
+                               element(T_U32, [ORIGIN_SELF]), v])
+
+
+def write_limits(path: str) -> tuple[int, int]:
+    """Raw (min, max) for a WRITABLE parameter path."""
+    name = path.rsplit("/", 1)[-1]
+    return WRITE_LIMITS["HPF/Frequency"] if path.endswith("HPF/Frequency") else WRITE_LIMITS[name]
+
+
+def check_outbound(tag: str, payload: bytes, allow_set: Callable[[Message], bool] | None = None) -> None:
+    """Raise ReadOnlyViolation unless the frame is one of the read-only handshake messages,
+    or a Mixing set-param that ``allow_set`` (given only while a user-requested write runs)
+    accepts."""
     try:
         msg = parse_message(payload)
     except ProtocolError as e:
@@ -236,6 +272,10 @@ def check_outbound(tag: str, payload: bytes) -> None:
     func = next((f for f, t in TAGS.items() if t == tag), None)
     if func is None:
         raise ReadOnlyViolation(f"frame tag {tag!r} not allowed (only {sorted(TAGS.values())} and EEVT)")
+    if msg.cmd == SET_PARAM and tag == TAGS["Mixing"] and allow_set is not None:
+        if not allow_set(msg):
+            raise ReadOnlyViolation("set-param isn't one of the changes the user asked for")
+        return
     if msg.cmd not in ALLOWED_PARAM_CMDS:
         raise ReadOnlyViolation(f"{tag} command {bytes(msg.cmd).hex(' ')} not allowed (read-only client)")
     if msg.cmd in (SYNC_OPEN, SYNC_CLOSE):
@@ -390,6 +430,29 @@ class Dump:
             off += node.offset + i * node.datasize
             names.append(f"{node.name}:{i}" if node.arraysize > 1 else node.name)
         raise ProtocolError("unreachable")
+
+    def address(self, path: str) -> tuple[list[int], list[int], Prm]:
+        """Name path -> (wire path, index per level, parameter): the inverse of ``resolve``.
+        KeyError if the path doesn't exist."""
+        node, wp, idx = self.root, [], []
+        parts = path.split("/")
+        for part in parts[:-1]:
+            name, i = _split_index(part)
+            k = next((n for n, c in enumerate(node.children) if c.name == name), None)
+            if k is None:
+                raise KeyError(part)
+            wp.append(len(node.params) + k)   # parameters first, then child collections
+            node = node.children[k]
+            if not 0 <= i < node.arraysize:
+                raise KeyError(f"{part}: index out of range (size {node.arraysize})")
+            idx.append(i)
+        name, i = _split_index(parts[-1])
+        k = next((n for n, p in enumerate(node.params) if p.name == name), None)
+        if k is None:
+            raise KeyError(parts[-1])
+        if not 0 <= i < node.params[k].arraysize:
+            raise KeyError(f"{parts[-1]}: index out of range")
+        return wp + [k], idx + [i], node.params[k]
 
     def _read(self, off: int, prm: Prm) -> int | str:
         raw = bytes(self.data[off:off + prm.elemsize])
@@ -572,14 +635,22 @@ def biquad(kind: str, freq: float, gain_db: float, q: float, fs: float = FS) -> 
 # ---------------------------------------------------------------------- client
 
 class TFEditorClient:
-    """Keeps a read-only TF Editor protocol session; holds the console's Mixing data.
+    """Keeps a TF Editor protocol session; holds the console's Mixing data.
 
     ``on_change`` (optional) is called with no arguments after the Mixing data
-    changed (dump received or a parameter pushed).
+    changed (dump received or a parameter pushed). With ``writes`` False (the
+    default) the client is read-only; with True, ``write()`` may change EQ
+    parameters when a person asks for it.
     """
 
-    def __init__(self, host: str, port: int = DEFAULT_PORT, on_change: Callable[[], None] | None = None) -> None:
+    def __init__(self, host: str, port: int = DEFAULT_PORT, on_change: Callable[[], None] | None = None,
+                 writes: bool = False) -> None:
         self.host, self.port = host, port
+        self.writes = writes
+        self._write_lock = threading.Lock()                     # one write() at a time
+        self._authorized: dict[tuple[tuple[int, ...], tuple[int, ...]], tuple[int, int]] = {}  # addr -> (type, value)
+        self._echo = threading.Condition()
+        self._awaiting: dict[tuple[tuple[int, ...], tuple[int, ...]], int | str | None] = {}  # addr -> echoed value
         self.on_change = on_change
         self._lock = threading.Lock()
         self._mixing: Dump | None = None
@@ -626,7 +697,7 @@ class TFEditorClient:
                 "connects": self.connects, "last_error": self.last_error, "updated": self.updated,
                 "changes": self.changes, "rejected": self.rejected, "last_rejected": self.last_rejected,
                 "received": dict(self.received), "descriptor_md5": self.desc_md5,
-                "descriptor_known": self.desc_md5 in (None, DESC_MD5["Mixing"]), "read_only": True}
+                "descriptor_known": self.desc_md5 in (None, DESC_MD5["Mixing"]), "read_only": not self.writes}
 
     def eq(self, kind: str, x: int) -> dict[str, Any] | None:
         with self._lock:
@@ -641,6 +712,77 @@ class TFEditorClient:
                 return self._mixing.get(path)
             except KeyError:
                 return None
+
+    def write(self, changes: list[tuple[str, int]], timeout: float = WRITE_CONFIRM_S) -> list[dict[str, Any]]:
+        """CHANGE PARAMETERS ON THE CONSOLE: ``[(name path, raw value), ...]``.
+
+        Only for an explicit request by a person; nothing calls this on its own. Only
+        WRITABLE paths, values within WRITE_LIMITS, and only with ``writes`` enabled;
+        anything else raises before a byte is sent. Returns per change whether the
+        console echoed it back within ``timeout`` and the value it reported.
+        """
+        if not self.writes:
+            raise PermissionError("writing to the console is off (tf5.eq_write = false)")
+        sock = self._sock
+        plan = []
+        with self._lock:
+            dump = self._mixing
+            if not self.synced or sock is None or dump is None:
+                raise ConnectionError("not connected to the console's editor protocol")
+            for path, value in changes:
+                if not WRITABLE.fullmatch(path):
+                    raise ValueError(f"{path}: not a writable EQ parameter")
+                lo, hi = write_limits(path)
+                if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
+                    raise ValueError(f"{path}: {value!r} outside {lo}..{hi}")
+                try:
+                    wp, idx, prm = dump.address(path)
+                except KeyError:
+                    raise ValueError(f"{path}: not on this console") from None
+                if prm.type not in (1, 2) or (prm.type == 2 and value < 0):
+                    raise ValueError(f"{path}: not a numeric parameter of that sign")
+                plan.append((path, (tuple(wp), tuple(idx)), prm, value))
+        if len({key for _, key, _, _ in plan}) != len(plan):
+            raise ValueError("the same parameter twice in one write")
+        with self._write_lock:
+            with self._echo:
+                self._awaiting = {key: None for _, key, _, _ in plan}
+            echoed: dict[Any, Any] = {}
+            try:
+                self._authorized = {key: (prm.type, value) for _, key, prm, value in plan}
+                try:
+                    for _, (wp, idx), prm, value in plan:
+                        self._send(sock, "MMIX", set_param_message(list(wp), list(idx), prm, value))
+                finally:
+                    self._authorized = {}
+                log.info("TF5 editor protocol: wrote %d EQ parameter(s) on user request: %s", len(plan),
+                         ", ".join(f"{p}={v}" for p, _, _, v in plan))
+                deadline = time.monotonic() + timeout
+                with self._echo:
+                    while any(v is None for v in self._awaiting.values()):
+                        left = deadline - time.monotonic()
+                        if left <= 0:
+                            break
+                        self._echo.wait(left)
+                    echoed = dict(self._awaiting)
+            finally:
+                with self._echo:
+                    self._awaiting = {}
+        return [{"path": path, "value": value, "confirmed": echoed.get(key) is not None, "actual": echoed.get(key)}
+                for path, key, _, value in plan]
+
+    def _allow_set(self, msg: Message) -> bool:
+        """check_outbound's test while write() runs: exactly one of the requested changes."""
+        e = msg.elements
+        if len(e) != 8 or e[0] != Element(T_U8, b"\0") or e[1] != Element(T_STR, "Mixing") \
+                or e[2] != Element(T_STR, "Mixing") or e[6] != Element(T_U32, [ORIGIN_SELF]) \
+                or e[4].type != T_U32 or e[5].type != T_U32 or e[3] != Element(T_U16, [len(e[4].value)]):
+            return False
+        want = self._authorized.get((tuple(e[4].value), tuple(e[5].value)))
+        if want is None:
+            return False
+        typ, value = want
+        return e[7] == Element(T_S32 if typ == 1 else T_U32, [value])
 
     # ------------------------------------------------------------------ connection thread
 
@@ -670,8 +812,9 @@ class TFEditorClient:
             backoff = min(backoff * 2, 60.0)
 
     def _send(self, sock: socket.socket, tag: str, payload: bytes) -> None:
-        """THE ONLY WAY ANYTHING IS SENT. Refuses anything that isn't read-only."""
-        check_outbound(tag, payload)
+        """THE ONLY WAY ANYTHING IS SENT. Refuses anything that isn't read-only, except
+        the set-params of a write() in progress."""
+        check_outbound(tag, payload, self._allow_set if self._authorized else None)
         with self._send_lock:
             sock.sendall(frame(tag, payload))
         self.sent = (self.sent + [(tag, parse_message(payload).cmd)])[-50:]
@@ -683,7 +826,8 @@ class TFEditorClient:
             sock.settimeout(1.0)
             self.connected = True
             self.connects += 1
-            log.info("TF5 editor protocol: connected to %s:%d (read-only)", self.host, self.port)
+            log.info("TF5 editor protocol: connected to %s:%d (%s)", self.host, self.port,
+                     "EQ writes on request" if self.writes else "read-only")
             self._phase, self._mixing_due = "property", None
             self._open("Property", sock)
             started = last_rx = last_ka = time.monotonic()
@@ -807,6 +951,11 @@ class TFEditorClient:
                     log.warning("TF5 editor protocol: push not applied (%d so far): %s", self.rejected,
                                 self.last_rejected)
                 return
+        key = (tuple(e[4].value), tuple(e[5].value))
+        with self._echo:
+            if key in self._awaiting:   # the console confirming a write() of ours
+                self._awaiting[key] = value
+                self._echo.notify_all()
         self.changes += 1
         self.updated = time.time()
         self._changed()

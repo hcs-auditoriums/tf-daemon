@@ -976,11 +976,47 @@
             state.vocalOverlay = true; save("tf.vocalOverlay", 1); renderVocal();
           })));
         }
+        const ap = s.apply;
+        if (vocal.can_write && ap) {
+          if (ap.possible) items.push(row(button("Apply to desk…", () => vocalDesk("apply", label, ap.changes), true)));
+          else items.push(el("p", "vp-note", `Can't apply to the desk: ${ap.reason}.`));
+        }
       }
       items.push(row(button("Listen again", () => vocalPost("start"), true), button("Clear", () => vocalPost("clear"))));
     }
-    items.push(el("p", "vp-foot", "Suggestions only: nothing is changed on the desk."));
+    const key = String(state.input);
+    const done = vocal.applied && vocal.applied[key];
+    if (done) {
+      const when = new Date(done.at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const what = done.action === "undo" ? "Undone" : "Applied to the desk";
+      const ok = done.confirmed === done.sent;
+      items.push(el("p", ok ? "vp-note" : "vp-error", done.sent
+        ? `${what} at ${when}: ${done.confirmed} of ${done.sent} change(s) confirmed by the desk`
+          + (ok ? "." : ". Check the channel's EQ on the desk.")
+        : `${what} at ${when}: the desk already matched.`));
+      if (done.action === "apply" && done.sent) {
+        items.push(el("p", "vp-note", "The analyzer listens before the EQ, so the spectrum doesn't change; "
+                                     + "the green desk EQ curve shows the new setting."));
+      }
+    }
+    if (vocal.undo && vocal.undo[key]) items.push(row(button("Undo apply", () => vocalDesk("undo", label))));
+    items.push(el("p", "vp-foot", vocal.can_write
+      ? "The desk is changed only when you press Apply and confirm; Undo puts back what it replaced."
+      : "Suggestions only: nothing is changed on the desk."));
     panel.replaceChildren(...items);
+  }
+
+  // Changes the desk: only from a click, after the person confirms the exact changes.
+  function vocalDesk(action, label, lines) {
+    const msg = action === "apply"
+      ? `Change ${label}'s EQ on the desk to the suggestion?\n\n${lines.join("\n")}\n\nUndo puts back the current settings.`
+      : `Put ${label}'s EQ on the desk back to how it was before Apply?`;
+    if (!window.confirm(msg)) return;
+    fetch(`/api/vocal/${action}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel: state.input, confirm: true }),
+    }).then((r) => r.json()).catch(() => ({ ok: false, error: "server unreachable" }))
+      .then((d) => { if (!d.ok) alert(d.error || "Not applied."); setTimeout(pollVocal, 50); });
   }
 
   // The suggested EQ (violet, dashed) and, faintly, why: the voice vs reference speech.

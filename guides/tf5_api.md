@@ -149,7 +149,7 @@ Field order is identical in the builder (`FUN_006738c0`) and the parser (`FUN_00
 | e6 | `0x14` ×1 | origin | `FUN_00665270`: **0xA0** = treat as the sender's own echo (not delivered as a change). **Anything else** (console uses 0xA1) = delivered as a change (source 0xF0) |
 | e7 | value | | Encoder `FUN_00673c30`: signed → **`0x24` s32**, unsigned → **`0x14` u32**, string → `0x31`. Decoder `FUN_00667a90` also accepts `0x11/0x12/0x21/0x22` and requires count = 1 |
 
-Example (shown for decoding; tf-daemon never sends this): ch1 BandL gain −5.20 dB (raw −520):
+Example: ch1 BandL gain −5.20 dB (raw −520). tf-daemon sends this form only from `TFEditorClient.write()`, for the vocal assist's **Apply to desk** / **Undo** with `tf5.eq_write` on (section 6.2):
 ```
 MMIX | len | 11 <n> 01 11 01 08
   11 00000001 00
@@ -289,6 +289,24 @@ Designer `FUN_005196e0(coef, fs, Q, gain, freq, type)`:
 
 `tf_daemon/tfeditor.py` (`biquad`, `eq_curve`) implements this. `tests/tf_editor_reference.py` is a literal transcription of the decompiled code that the tests compare against.
 
+### 6.2 Writing EQ (tf-daemon's "Apply to desk") [CODE per 4.4; StageMix acceptance PENDING]
+
+What tf-daemon sends, only on a person's confirmed click (`POST /api/vocal/apply|undo` with `"confirm": true`) and only with `tf5.eq_write = true`:
+- **Frame:** `MMIX` set-param `01 11 01`, as in the 4.4 example:
+  - `e1` / `e2` = `"Mixing"`;
+  - `e3` = u16 depth;
+  - `e4` = the numeric wire path from `Dump.address()` (the inverse of `resolve`);
+  - `e5` = `[ch-1, 0, 0, band, 0]`;
+  - **origin `0xA0`**;
+  - value `0x24` s32 for signed parameters (Gain), `0x14` u32 for the rest.
+- **Parameters** (`tfeditor.WRITABLE`), input channels only, raw limits in `WRITE_LIMITS`:
+  - `PEQ/On`
+  - `PEQ/Bank/HPF/{On,Frequency}` (20–600 Hz)
+  - `PEQ/Bank/{BandL,Band:n,BandH}/{Type,Frequency,Gain,Q,LPFOn}` (20 Hz–20 kHz, ±18 dB, Q 0.1–10)
+- **Guard:** `check_outbound` passes a set-param only while `write()` runs, and only if the address, value, type and origin equal one of the requested changes. Anything else still raises `ReadOnlyViolation`.
+- **Confirmation:** the console is expected to echo each write as a set-param for the same address (4.4, step 7 above). `write()` waits up to 3 s for each echo and reports `confirmed` / the echoed value per change. Our copy of the data changes only through that echo.
+- **[PENDING]** Writes from a `TYPE:StageMix` client haven't been tried on the real console. If the TF5 ignores them, every change comes back unconfirmed. If the console rounds a value to its own step (e.g. frequency), the echo shows the value it used.
+
 ---
 
 ## 7. Password [VERIFIED-CODE `FUN_00474030`]
@@ -347,7 +365,7 @@ Treat port 50368 as unauthenticated: keep it on a trusted VLAN. This guide inten
 - [x] Confirmed on the wire (2026-11-08): EQ gain pushes arrive as `0x24` s32, frequencies / switches as `0x14` u32, to a StageMix client, for changes made on the desk and in TF Editor. Not yet seen: band Type and Q pushes, `ChangeSelectedCH` event meaning (the console sends it when the selected channel changes; TF Editor's reply, if any, is unknown).
 - [ ] The console closed tf-daemon's StageMix session once during that test, probably when TF Editor connected; the client re-synced 2 s later.
 - [ ] Test the string-path form of e4 (e.g. `31:"InputChannel/PEQ/Bank/BandL/Gain"`?). The exact string syntax the resolver expects is unverified. Check vtable+0x14 of the MMS facade called from `FUN_0066fb50`.
-- [ ] Behaviour of `TYPE:StageMix` (allowed functions, coexistence with an Editor).
+- [ ] Behaviour of `TYPE:StageMix` (allowed functions, coexistence with an Editor), in particular **whether it accepts set-param writes** (section 6.2). The first real "Apply to desk" answers it: confirmed vs unconfirmed counts in the panel and log.
 - [ ] `01 05 01` command, `DS_A` frame, d0x0 file-transfer details (`02 01` announce, `02 03` 2048-B chunks + ack).
 - [ ] YMDP block-id → meter-point mapping and value scale.
 

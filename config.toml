@@ -109,6 +109,10 @@ usb_post_fader = false
 # as a StageMix client, so it can run alongside TF Editor.
 eq = false
 eq_port = 50368
+# Allow the vocal EQ assist's "Apply to desk" button to set a channel's EQ to the
+# suggestion (with Undo). Only ever on a person's click and confirmation; nothing
+# is written automatically. Input channels' PEQ only. Needs eq = true.
+eq_write = false
 
 # Named inputs. index is the 0-based capture channel on the device. Every input
 # can be viewed in the browser; these get buttons and are always analyzed, the

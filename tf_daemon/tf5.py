@@ -465,7 +465,8 @@ class TF5Module:
     """Reads the TF5's channel names and settings; feeds names to the audio engine.
 
     With ``tf5.eq`` it also reads every channel's EQ over the TF Editor protocol
-    (tfeditor.py, read-only) for the spectrum overlay.
+    (tfeditor.py) for the spectrum overlay. With ``tf5.eq_write`` as well, an input
+    channel's EQ can be set (``write_eq``), only on a person's request.
 
     Routes:
       GET /api/tf5/status     connection state, discovered parameters
@@ -488,7 +489,8 @@ class TF5Module:
         self.eq_client: TFEditorClient | None = None
         self.eq_version = 0  # bumped whenever the console's mixing data (EQ included) changes
         if t["eq"]:
-            self.eq_client = TFEditorClient(str(t["host"]), int(t["eq_port"]), on_change=self._eq_changed)
+            self.eq_client = TFEditorClient(str(t["host"]), int(t["eq_port"]), on_change=self._eq_changed,
+                                            writes=bool(t["eq_write"]))
         # Open audio pages get desk changes pushed over their /ws/audio connection.
         audio_engine.console = self
 
@@ -504,6 +506,36 @@ class TF5Module:
 
     def changes_since(self, seq: int) -> tuple[int, dict[str, Any] | None]:
         return self.client.changes_since(seq)
+
+    @property
+    def eq_writable(self) -> bool:
+        return self.eq_client is not None and self.eq_client.writes
+
+    def eq_target(self, usb: int) -> str | None:
+        """Mixing path of the input channel on USB input ``usb`` ("InputChannel:4"); None if
+        it isn't an input channel (only input channels' EQ can be written)."""
+        src = self.patch[usb] if 0 <= usb < len(self.patch) else None
+        return f"InputChannel:{src[1]}" if src is not None and src[0] == "InCh" else None
+
+    def eq_raw(self, usb: int, paths: list[str]) -> dict[str, int | str | None]:
+        """Raw values of PEQ parameters (paths relative to the channel) on USB input ``usb``."""
+        target, ec = self.eq_target(usb), self.eq_client
+        if target is None or ec is None:
+            return {p: None for p in paths}
+        return {p: ec.get(f"{target}/{p}") for p in paths}
+
+    def write_eq(self, usb: int, changes: list[tuple[str, int]]) -> list[dict[str, Any]]:
+        """SET the EQ of the input channel on USB input ``usb``: ``[(path relative to the
+        channel, raw value)]``. Only on a person's request (see TFEditorClient.write)."""
+        target, ec = self.eq_target(usb), self.eq_client
+        if ec is None or not ec.writes:
+            raise PermissionError("writing to the console is off (tf5.eq_write = false)")
+        if target is None:
+            raise ValueError(f"USB {usb + 1} doesn't carry an input channel; only input channel EQ can be set")
+        results = ec.write([(f"{target}/{p}", v) for p, v in changes])
+        for r in results:
+            r["path"] = r["path"].split("/", 1)[1]
+        return results
 
     def eq(self, usb: int) -> dict[str, Any]:
         """EQ of the console channel feeding USB input ``usb`` and its response curve (dB)."""

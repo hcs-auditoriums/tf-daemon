@@ -158,21 +158,8 @@ def property_tree() -> C:
 
 
 def wire_address(dump: Dump, path: str) -> tuple[list[int], list[int]]:
-    """Name path -> (wire path, index per level): the inverse of Dump.resolve.
-
-    Each level indexes the node's parameters and then its child collections.
-    """
-    node, wp, idx = dump.root, [], []
-    parts = path.split("/")
-    for part in parts[:-1]:
-        name, _, i = part.partition(":")
-        k = next(n for n, c in enumerate(node.children) if c.name == name)
-        wp.append(len(node.params) + k)
-        node = node.children[k]
-        idx.append(int(i or 0))
-    name, _, i = parts[-1].partition(":")
-    wp.append(next(n for n, p in enumerate(node.params) if p.name == name))
-    idx.append(int(i or 0))
+    """Name path -> (wire path, index per level): the inverse of Dump.resolve."""
+    wp, idx, _ = dump.address(path)
     return wp, idx
 
 
@@ -206,7 +193,8 @@ class FakeEditorConsole:
     """Console side of TCP 50368. Records everything the client sends in ``received``."""
 
     def __init__(self, mixing_values: dict[str, int | str] | None = None, *, send_on_set_client_type: bool = True,
-                 send_mixing_dump: bool = True, mixing_md5: str | None = None) -> None:
+                 send_mixing_dump: bool = True, mixing_md5: str | None = None, echo_writes: bool = True) -> None:
+        self.echo_writes = echo_writes   # like the TF5: apply a client's set-param and echo it back
         self.mixing_values = default_mixing_values() if mixing_values is None else mixing_values
         self.send_on_set_client_type = send_on_set_client_type
         self.send_mixing_dump = send_mixing_dump
@@ -217,6 +205,7 @@ class FakeEditorConsole:
             "Specification/Unit/Model": "TF5", "Status/CommSession:0/ClientType": "Editor",
             "UserAccount/Unit/Password": PASSWORD}, md5=DESC_MD5["Property"])
         self.received: list[tuple[str, Message]] = []
+        self.writes: list[tuple[str, int]] = []   # (name path, value) of every set-param the client sent
         self.raw: list[tuple[str, bytes]] = []
         self.srv = socket.create_server(("127.0.0.1", 0))
         self.port = self.srv.getsockname()[1]
@@ -263,6 +252,15 @@ class FakeEditorConsole:
                 self._send(conn, "MMIX", message(SYNC_OPEN))
                 self._send(conn, "MMIX", dump_message("Mixing", self.mixing_blob))
                 self._send(conn, "MMIX", message(SYNC_CLOSE))
+        elif tag == "MMIX" and msg.cmd == SET_PARAM:
+            e = msg.elements
+            name, _, _ = self.mixing.resolve(e[4].value, e[5].value)
+            with self._lock:
+                self.writes.append((name, e[7].value[0]))
+            self.mixing.apply(e[4].value, e[5].value, e[7].value[0])
+            if self.echo_writes:
+                self._send(conn, "MMIX", set_param("Mixing", e[4].value, e[5].value, e[7].value[0],
+                                                   origin=0xA0, vtype=e[7].type))
         elif tag == "EEVT" and msg.cmd == EVENT:
             name, args = msg.elements[2].value, msg.elements[3].value
             self._send(conn, "EEVT", event(name, args, reply=True))
