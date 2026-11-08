@@ -30,6 +30,7 @@ def test_parse_and_decode():
     assert p.decode("ALL", ["AX", "100", "030"]) == {"ant_a": True, "ant_b": False, "rf_dbm": -28, "audio_dbfs": -20}
     assert p.decode("TX_TYPE", ["UNKN"]) == {"tx_type": None}
     assert p.decode("GROUP_CHAN", ["--,--"]) == {"group_chan": None}
+    assert p.decode("MAC_ADDR", ["00:0e:dd:a4:88:bb"]) == {"mac": "00:0E:DD:A4:88:BB"}
     assert p.decode("SOMETHING_NEW", ["1"]) == {}
 
 
@@ -72,7 +73,7 @@ def test_manual_host_monitoring_persistence_and_offline(cfg):
 
         # Persisted and reloaded by a fresh engine.
         saved = json.loads(open(cfg["qlxd"]["state_file"]).read())
-        assert saved == {"interface": "", "hosts": [f"127.0.0.1:{sim.port}"]}
+        assert {k: saved[k] for k in ("interface", "hosts")} == {"interface": "", "hosts": [f"127.0.0.1:{sim.port}"]}
         assert QLXDEngine(cfg).settings["hosts"] == saved["hosts"]
 
         sim.stop()
@@ -123,3 +124,49 @@ def test_config_rejects_bad_qlxd(tmp_path):
     p_.write_text('[qlxd]\nsource = "axient"\n')
     with pytest.raises(ConfigError, match="qlxd.source"):
         load_config(p_)
+
+
+def test_known_receivers_persist_for_the_rf_page(cfg, monkeypatch):
+    monkeypatch.setattr(engine_mod, "KNOWN_SAVE_MIN_INTERVAL_S", 0.0)
+    sim = SimReceiver("Lee", 492025, seed=0xBB)
+    sim.start()
+    eng = QLXDEngine(cfg)
+    eng.start()
+    try:
+        eng.update_settings({"hosts": [f"127.0.0.1:{sim.port}"]})
+        _wait(lambda: eng.frequencies() and eng.frequencies()[0]["online"])
+        f = eng.frequencies()[0]
+        assert f == {"key": "00:0E:DD:00:00:BB", "name": "Lee", "device_id": "Lee", "frequency_mhz": 492.025,
+                     "online": True, "last_seen": f["last_seen"]}
+        _wait(lambda: "00:0E:DD:00:00:BB" in json.loads(open(cfg["qlxd"]["state_file"]).read())["known_receivers"])
+
+        sim.stop()
+        _wait(lambda: not eng.frequencies()[0]["online"])  # offline, but still known
+        assert eng.frequencies()[0]["frequency_mhz"] == 492.025
+    finally:
+        eng.stop()
+        sim.stop()
+
+    # A restart remembers it before the receiver is ever reached again.
+    fresh = QLXDEngine(cfg)
+    assert [(r["name"], r["frequency_mhz"], r["online"]) for r in fresh.frequencies()] == [("Lee", 492.025, False)]
+    assert fresh.forget_known("nope") == 0
+    assert fresh.forget_known("00:0E:DD:00:00:BB") == 1
+    assert QLXDEngine(cfg).frequencies() == []
+
+
+def test_frequencies_endpoint(cfg):
+    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="demo")
+    app = create_app(cfg, modules)
+    try:
+        client = app.test_client()
+        _wait(lambda: len(client.get("/api/qlxd/frequencies").get_json()["receivers"]) == 4)
+        rx = client.get("/api/qlxd/frequencies").get_json()["receivers"]
+        assert [r["frequency_mhz"] for r in rx] == sorted(r["frequency_mhz"] for r in rx)
+        assert {r["name"] for r in rx} == {"Lead Vox", "BGV 1", "Pastor HH", "Spare"}
+        engine = next(m for m in modules if m.name == "qlxd").engine
+        _wait(lambda: len(engine._known) == 4)  # catalog fills on the next publish tick
+        assert client.post("/api/qlxd/known/forget", json={"key": 5}).status_code == 400
+        assert client.post("/api/qlxd/known/forget", json={}).get_json()["removed"] == 4
+    finally:
+        app.extensions["tf_stop"]()

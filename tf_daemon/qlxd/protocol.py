@@ -89,6 +89,8 @@ def decode(param: str, args: list[str]) -> dict[str, Any]:
             return {"model": v}
         case "FW_VER":
             return {"fw_ver": v}
+        case "MAC_ADDR":
+            return {"mac": v.upper() or None}
         case "CHAN_NAME":
             return {"name": v}
         case "FREQUENCY":

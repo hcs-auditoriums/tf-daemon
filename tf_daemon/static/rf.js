@@ -12,7 +12,7 @@
   const color = (name) => css.getPropertyValue(name).trim();
   const C = {
     grid: color("--grid"), gridStrong: color("--grid-strong"), muted: color("--muted"),
-    live: color("--live"), liveFill: color("--live-fill"), peak: color("--peak"),
+    live: color("--live"), liveFill: color("--live-fill"), peak: color("--peak"), rx: color("--rx"),
   };
 
   const WF_ROWS = 200;
@@ -24,6 +24,8 @@
     peak: null,
     lastSweeps: -1,
     showPeak: true,
+    showRx: loadBool("rf.showRx", true),
+    receivers: [],     // QLX-D receivers: [{key, name, device_id, frequency_mhz, online}]
     showWf: true,
     dbMin: -100,
     dbMax: -10,
@@ -32,6 +34,52 @@
     dirty: true,
     hover: null,
   };
+
+  function loadBool(key, def) {
+    try { const v = localStorage.getItem(key); return v === null ? def : v === "1"; } catch { return def; }
+  }
+  function saveBool(key, v) { try { localStorage.setItem(key, v ? "1" : "0"); } catch { /* ignore */ } }
+
+  // ------------------------------------------------------------------ QLX-D receivers
+  // Integration with the Wireless page: /api/qlxd/frequencies lists every known
+  // receiver (online or not) with the frequency it reported. Absent (404) when
+  // the QLX-D module is disabled; the controls then stay hidden.
+
+  const RX_REFRESH_MS = 10000;
+
+  async function fetchReceivers() {
+    try {
+      const res = await fetch("/api/qlxd/frequencies");
+      if (res.status === 404) { $("rx-controls").hidden = true; return; }
+      const data = await res.json();
+      state.receivers = (data.receivers || []).filter((r) => r.frequency_mhz != null);
+      $("rx-controls").hidden = false;
+      $("fit-rx").disabled = !state.receivers.length;
+      state.dirty = true;
+    } catch { /* server unreachable: keep the last list */ }
+    setTimeout(fetchReceivers, RX_REFRESH_MS);
+  }
+
+  $("show-rx").checked = state.showRx;
+  $("show-rx").onchange = (e) => { state.showRx = e.target.checked; saveBool("rf.showRx", state.showRx); state.dirty = true; };
+  $("fit-rx").onclick = () => {
+    const f = state.receivers.map((r) => r.frequency_mhz);
+    if (!f.length) return;
+    const lo = Math.max(0, Math.floor(Math.min(...f) - 1)), hi = Math.ceil(Math.max(...f) + 1);
+    $("start").value = lo;
+    $("stop").value = hi > lo ? hi : lo + 1;
+    if (state.snap && state.snap.scanning) post("/api/rf/scan/start", readInputs());  // apply right away
+  };
+
+  // Receivers inside the current sweep, with their x position.
+  function visibleReceivers() {
+    if (!state.showRx || !state.sweep) return [];
+    const { start_hz: f0, stop_hz: f1 } = state.sweep;
+    return state.receivers
+      .map((r) => ({ ...r, hz: r.frequency_mhz * 1e6 }))
+      .filter((r) => r.hz >= f0 && r.hz <= f1)
+      .map((r) => ({ ...r, x: Math.round(xOf(r.hz)) + 0.5 }));
+  }
 
   // ------------------------------------------------------------------ websocket
 
@@ -252,6 +300,46 @@
     ctx.stroke();
   }
 
+  function drawReceivers() {
+    const rx = visibleReceivers();
+    if (!rx.length) return;
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.font = "600 12px system-ui, sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    let lastLabelX = -Infinity;
+    for (const r of rx) {
+      ctx.globalAlpha = r.online ? 0.9 : 0.4;
+      ctx.strokeStyle = C.rx;
+      ctx.setLineDash(r.online ? [] : [4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(r.x, PAD.t); ctx.lineTo(r.x, H - PAD.b);
+      ctx.stroke();
+      // Vertical label at the top; skip it if it would overlap the previous one.
+      if (r.x - lastLabelX >= 16) {
+        const text = r.name || r.device_id || r.key;
+        ctx.save();
+        ctx.translate(r.x + 8, PAD.t + 4);
+        ctx.rotate(-Math.PI / 2);
+        const w = ctx.measureText(text).width;
+        ctx.fillStyle = "rgba(13, 16, 20, 0.85)";  // backing so labels read over the grid and traces
+        ctx.fillRect(-w - 4, -8, w + 8, 16);
+        ctx.fillStyle = C.rx;
+        ctx.fillText(text, 0, 0);
+        ctx.restore();
+        lastLabelX = r.x;
+      }
+    }
+    ctx.restore();
+  }
+
+  function nearestReceiver(x, maxPx) {
+    let best = null;
+    for (const r of visibleReceivers()) if (!best || Math.abs(r.x - x) < Math.abs(best.x - x)) best = r;
+    return best && Math.abs(best.x - x) <= maxPx ? best : null;
+  }
+
   function drawHover() {
     const h = state.hover, ro = $("readout");
     if (!h || h.x < PAD.l || h.x > W - PAD.r || h.y < PAD.t || h.y > H - PAD.b) { ro.style.display = "none"; return; }
@@ -268,6 +356,11 @@
     ro.textContent = `${fmtHz(freqAt(i))}  live ${state.live[i].toFixed(1)} dBm` +
       (state.peak ? `  peak ${state.peak[i].toFixed(1)} dBm` : "") +
       `  cursor ${dbOfY(h.y).toFixed(1)} dBm`;
+    const r = nearestReceiver(h.x, 6);
+    if (r) {
+      ro.textContent += `  ·  ${r.name || "?"}${r.device_id ? ` (${r.device_id})` : ""} ` +
+        `${r.frequency_mhz.toFixed(3)} MHz${r.online ? "" : " · offline"}`;
+    }
     ro.style.display = "block";
   }
 
@@ -281,6 +374,7 @@
     ctx.clip();
     if (state.showPeak && state.peak) trace(state.peak, C.peak, null);
     trace(state.live, C.live, C.liveFill);
+    drawReceivers();
     ctx.restore();
     drawHover();
   }
@@ -338,6 +432,15 @@
     wfCtx.rect(PAD.l, 0, plotW(), WH);
     wfCtx.clip();
     wfCtx.drawImage(wfOff, 0, 0, wfOff.width, WF_ROWS, PAD.l - colW / 2, 0, plotW() + colW, WH);
+    wfCtx.strokeStyle = C.rx;
+    wfCtx.lineWidth = 1;
+    for (const r of visibleReceivers()) {
+      wfCtx.globalAlpha = r.online ? 0.55 : 0.25;
+      wfCtx.setLineDash(r.online ? [] : [4, 4]);
+      wfCtx.beginPath();
+      wfCtx.moveTo(r.x, 0); wfCtx.lineTo(r.x, WH);
+      wfCtx.stroke();
+    }
     wfCtx.restore();
   }
 
@@ -350,5 +453,6 @@
 
   renderStatus();
   connectWs();
+  fetchReceivers();
   requestAnimationFrame(loop);
 })();
