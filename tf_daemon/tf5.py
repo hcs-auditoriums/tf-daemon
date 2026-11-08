@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import deque
 import shlex
 import socket
 import threading
@@ -160,6 +161,11 @@ class TF5Client:
         self.on_gains = on_gains
         self._gains_dirty = False
         self._lock = threading.Lock()
+        # Every value change gets a sequence number, so browsers can be sent just
+        # what changed (see changes_since); a status change is logged as None.
+        self._changed = threading.Condition(self._lock)
+        self._seq = 0
+        self._changes: deque[tuple[int, tuple[str, int, str, int] | None]] = deque(maxlen=4096)
         self._params: dict[str, dict[str, Param]] = {k: {p.path: p for p in ps} for k, ps in BASE_PARAMS.items()}
         self._values: dict[tuple[str, int, str, int], str] = {}  # (kind, x, path, y) -> raw value
         self._discovered: list[str] = []                          # addresses from prminfo
@@ -256,7 +262,9 @@ class TF5Client:
                     log.warning("TF5 %s:%d: %s (retrying)", self.host, self.port, e)
                 self.last_error = str(e)
             finally:
-                self.connected = False
+                if self.connected:
+                    self.connected = False
+                    self._note(None)
                 self._sock = None
             self._stop.wait(backoff)
             backoff = min(backoff * 2, 30.0)
@@ -266,6 +274,7 @@ class TF5Client:
             self._sock = sock
             sock.settimeout(1.0)
             self.connected = True
+            self._note(None)
             self.connects += 1
             self.last_error = None
             log.info("Connected to TF5 at %s:%d", self.host, self.port)
@@ -343,6 +352,7 @@ class TF5Client:
             if path not in self._params[kind] or self._values.get(key) == args[3]:
                 return False
             self._values[key] = args[3]
+            self._log_change(key)
         self.updated = time.time()
         if path in ("Fader/Level", "Fader/On") and kind != "Mix":
             self._gains_dirty = True
@@ -370,6 +380,57 @@ class TF5Client:
             log.info("TF5 lists %d parameters; reading %d extra input-channel parameter(s)", n, extras)
             if extras:
                 self._request_all(sock)
+
+    # ------------------------------------------------------------------ change feed
+
+    def _log_change(self, key: tuple[str, int, str, int] | None) -> None:
+        """Record a change (caller holds the lock)."""
+        self._seq += 1
+        self._changes.append((self._seq, key))
+        self._changed.notify_all()
+
+    def _note(self, key: tuple[str, int, str, int] | None) -> None:
+        with self._lock:
+            self._log_change(key)
+
+    def snapshot(self) -> tuple[int, dict[str, Any]]:
+        """(seq, full state): send first, then follow with changes_since(seq)."""
+        with self._lock:
+            seq = self._seq
+        return seq, {"type": "tf5", "connected": self.connected, "channels": self.channels(), "mixes": self.mixes()}
+
+    def changes_since(self, seq: int) -> tuple[int, dict[str, Any] | None]:
+        """What changed after ``seq``: (new seq, message), message {} if nothing.
+
+        The message is ``{"type": "tf5-changes", "connected", "changes": [{"i": usb input,
+        "p": path, "y": index or null, "v": value, "u": unit}], "mixes": {mix: name}}``,
+        with one entry per value (the latest). None means ``seq`` is too old to
+        catch up from: send a fresh snapshot instead.
+        """
+        with self._lock:
+            cur = self._seq
+            if cur == seq:
+                return seq, {}
+            if not self._changes or self._changes[0][0] > seq + 1:
+                return cur, None
+            keys = {k for s, k in self._changes if s > seq and k is not None}
+            changes: dict[tuple[int, str, int | None], dict[str, Any]] = {}
+            mixes: dict[int, str] = {}
+            for kind, x, path, y in keys:
+                raw = self._values.get((kind, x, path, y))
+                if kind == "Mix":
+                    if path == NAME.path and raw is not None:
+                        mixes[x] = raw
+                    continue
+                p = self._params[kind].get(path)
+                if p is None:
+                    continue
+                for i, src in enumerate(self.patch):
+                    if src == (kind, x):
+                        yy = y if p.count > 1 else None
+                        changes[(i, path, yy)] = {"i": i, "p": path, "y": yy, "v": format_value(p, raw), "u": p.unit}
+        return cur, {"type": "tf5-changes", "connected": self.connected, "changes": list(changes.values()),
+                     "mixes": mixes}
 
     def gains(self) -> dict[int, float | None]:
         """Per USB input whose channel state is known: fader dB, or None if off or at -inf."""
@@ -425,8 +486,24 @@ class TF5Module:
         # USB channels carrying the stereo bus are mixes, not sources (for ring attribution).
         audio_engine.set_bus_inputs([i for i, src in enumerate(patch) if src is not None and src[0] == "St"])
         self.eq_client: TFEditorClient | None = None
+        self.eq_version = 0  # bumped whenever the console's mixing data (EQ included) changes
         if t["eq"]:
-            self.eq_client = TFEditorClient(str(t["host"]), int(t["eq_port"]))
+            self.eq_client = TFEditorClient(str(t["host"]), int(t["eq_port"]), on_change=self._eq_changed)
+        # Open audio pages get desk changes pushed over their /ws/audio connection.
+        audio_engine.console = self
+
+    def _eq_changed(self) -> None:
+        self.eq_version += 1
+
+    @property
+    def eq_available(self) -> bool:
+        return self.eq_client is not None
+
+    def snapshot(self) -> tuple[int, dict[str, Any]]:
+        return self.client.snapshot()
+
+    def changes_since(self, seq: int) -> tuple[int, dict[str, Any] | None]:
+        return self.client.changes_since(seq)
 
     def eq(self, usb: int) -> dict[str, Any]:
         """EQ of the console channel feeding USB input ``usb`` and its response curve (dB)."""

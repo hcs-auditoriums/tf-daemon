@@ -13,7 +13,7 @@
   const C = {
     grid: color("--grid"), gridStrong: color("--grid-strong"), muted: color("--muted"),
     avg: color("--avg"), avgFill: color("--avg-fill"), peak: color("--peak"), rta: color("--rta"),
-    eq: color("--eq"),
+    eq: color("--eq"), eqFill: color("--eq-fill"),
   };
 
   const state = {
@@ -22,7 +22,7 @@
     showAvg: true,
     showPeak: true,
     showLive: true,
-    dbMin: -100,
+    dbMin: -90,   // see "range" below; Auto fits these to the signal
     dbMax: -20,
     avg: null,   // Float32Array for the shown input
     peak: null,
@@ -36,6 +36,10 @@
 
   function loadInt(key, def) {
     try { const v = parseInt(localStorage.getItem(key), 10); return Number.isFinite(v) ? v : def; }
+    catch { return def; }
+  }
+  function loadStr(key, def, allowed) {
+    try { const v = localStorage.getItem(key); return v !== null && allowed.includes(v) ? v : def; }
     catch { return def; }
   }
   function save(key, value) { try { localStorage.setItem(key, String(value)); } catch { /* ignore */ } }
@@ -60,6 +64,9 @@
       if (typeof ev.data !== "string") { onFrame(ev.data); return; }
       const msg = JSON.parse(ev.data);
       if (msg.type === "rings") onRings(msg);
+      else if (msg.type === "tf5") onConsoleSnapshot(msg);
+      else if (msg.type === "tf5-changes") onConsoleChanges(msg);
+      else if (msg.type === "tf5-eq") onConsoleEq(msg);
       else onMeta(msg);
     };
   }
@@ -121,6 +128,8 @@
         state.peak[i] = data[nBins + i] / 100;
         state.live[i] = data[2 * nBins + i] / 100;
       }
+      autoRange();
+      wfPush(state.wfSource === "avg" ? state.avg : state.live);
       state.frames++;
       state.dirty = true;
       return;
@@ -169,32 +178,55 @@
     state.avg.fill(state.meta.db_floor);
     state.peak.fill(state.meta.db_floor);
     state.live.fill(state.meta.db_floor);
+    autoReset();
+    wfReset();
     markSelected(index);
     send({ cmd: "view", channel: index });
     renderPanel();
     state.eq = null;
-    if (state.showEq) fetchEq();
     state.dirty = true;
   }
 
   // ------------------------------------------------------------------ console panel
 
   // Sidebar with the TF5 channel feeding the shown input: name, on, fader,
-  // pan and its sends (GET /api/tf5/channels; only when tf5.host is set).
+  // pan and its sends. The desk's state arrives over /ws/audio: a snapshot on
+  // connect ("tf5"), then each change as it happens on the desk ("tf5-changes");
+  // nothing arrives when tf5.host isn't set, and the sidebar stays hidden.
   let tf5 = null;   // null = no TF5 module; {connected, channels, mixes} otherwise
   state.showConsole = loadInt("tf.console", 1) === 1;
   state.allSends = loadInt("tf.allSends", 0) === 1;
 
-  async function pollConsole() {
-    try {
-      const r = await fetch("/api/tf5/channels");
-      if (r.status === 404) { tf5 = null; renderPanel(); return; }  // TF5 not configured: stop polling
-      tf5 = await r.json();
-    } catch {
-      if (tf5) tf5.connected = false;
+  function onConsoleSnapshot(msg) {
+    tf5 = msg;
+    panelSig = null;  // rebuild
+    schedulePanel();
+  }
+
+  function onConsoleChanges(msg) {
+    if (!tf5) return;
+    tf5.connected = msg.connected;
+    for (const [m, name] of Object.entries(msg.mixes || {})) tf5.mixes[Number(m)] = name;
+    for (const c of msg.changes) {
+      const ch = tf5.channels[c.i];
+      if (!ch) continue;
+      let p = ch.params[c.p];
+      if (c.y === null) {
+        ch.params[c.p] = { value: c.v, unit: c.u };
+      } else {
+        if (!p || !Array.isArray(p.value)) p = ch.params[c.p] = { value: [], unit: c.u };
+        p.value[c.y] = c.v;
+      }
     }
-    renderPanel();
-    setTimeout(pollConsole, 1000);
+    schedulePanel();
+  }
+
+  // Many changes can arrive per frame while a fader moves: render once per frame.
+  let panelQueued = false;
+  function schedulePanel() {
+    if (panelQueued) return;
+    panelQueued = true;
+    requestAnimationFrame(() => { panelQueued = false; renderPanel(); });
   }
 
   const TF_COLORS = {
@@ -242,6 +274,49 @@
     return rows;
   }
 
+  // The sidebar is rebuilt only when its structure changes (another input, a
+  // send appearing, ...); otherwise values are updated in place, so a fader
+  // moving on the desk moves smoothly here (with a short CSS transition).
+  let panelSig = null, refs = null;
+
+  function panelStructure(ch) {
+    if (!tf5.connected || !ch || !ch.source) return JSON.stringify([state.input, tf5.connected, ch && ch.source]);
+    const p = ch.params, rows = p["ToMix/Level"] ? sendRows(p, tf5.mixes || []) : [];
+    const shown = (state.allSends ? rows : rows.filter((r) => r.on && r.db !== null)).map((r) => r.name);
+    return JSON.stringify([state.input, ch.source, p["Label/Name"]?.value, p["Label/Color"]?.value,
+                           !!p["ToStereo/Pan"], !!p["Out/Balance"], !!p["ToMix/Level"], state.allSends, shown,
+                           Object.keys(p).sort()]);
+  }
+
+  function updatePanel(ch) {
+    const p = ch.params, v = (k) => p[k]?.value;
+    const isOn = v("Fader/On") !== 0;
+    refs.on.className = `cp-on ${isOn ? "on" : "off"}`;
+    refs.on.textContent = isOn ? "ON" : "OFF";
+    const level = v("Fader/Level"), pos = `${faderPos(level) * 100}%`;
+    refs.level.textContent = `${fmtDb(level)} dB`;
+    refs.fill.style.height = pos;
+    refs.cap.style.bottom = pos;
+    if (refs.panKey && p[refs.panKey]) {
+      const pan = v(refs.panKey);
+      refs.panVal.textContent = fmtPan(pan);
+      refs.panDot.style.left = `${(pan + 63) / 126 * 100}%`;
+    }
+    if (refs.sends.size) {
+      for (const r of sendRows(p, tf5.mixes || [])) {
+        const s = refs.sends.get(r.name);
+        if (!s) continue;
+        s.row.className = `cp-send${r.on && r.db !== null ? "" : " off"}`;
+        s.fill.style.width = `${faderPos(r.db) * 100}%`;
+        s.val.textContent = r.on ? fmtDb(r.db) : "off";
+      }
+    }
+    for (const [k, dd] of refs.extra) {
+      const x = p[k];
+      if (x) dd.textContent = `${x.value ?? "−∞"}${x.unit ? " " + x.unit : ""}`;
+    }
+  }
+
   function renderPanel() {
     const panel = $("console-panel"), toggle = $("console-toggle");
     toggle.hidden = tf5 === null;
@@ -249,6 +324,13 @@
     if (panel.hidden) return;
 
     const ch = tf5.channels && tf5.channels.find((c) => c.index === state.input);
+    const sig = panelStructure(ch);
+    if (sig === panelSig && refs) {
+      updatePanel(ch);
+      return;
+    }
+    panelSig = sig;
+    refs = { sends: new Map(), extra: new Map() };
     const items = [];
     if (!tf5.connected) {
       items.push(el("p", "cp-note", "TF5 not connected"));
@@ -264,19 +346,20 @@
       head.append(sw, title);
       items.push(head);
 
-      const isOn = v("Fader/On") !== 0;
-      items.push(el("div", `cp-on ${isOn ? "on" : "off"}`, isOn ? "ON" : "OFF"));
+      refs.on = el("div", "cp-on");
+      items.push(refs.on);
 
       // Fader: heading with the level, then a tall fader (scale, track, cap).
-      const section = (title, value) => {
+      const section = (title) => {
         const sec = el("div", "cp-section");
         const hd = el("div", "cp-sechead");
-        hd.append(el("span", "cp-label", title), el("span", "cp-value", value));
+        const value = el("span", "cp-value");
+        hd.append(el("span", "cp-label", title), value);
         sec.append(hd);
-        return sec;
+        return [sec, value];
       };
-      const level = v("Fader/Level");
-      const faderSec = section("Fader", `${fmtDb(level)} dB`);
+      const [faderSec, levelEl] = section("Fader");
+      refs.level = levelEl;
       const fader = el("div", "cp-fader");
       const scale = el("div", "cp-scale");
       const track = el("div", "cp-track");
@@ -292,9 +375,9 @@
         tick.style.bottom = pos;
         track.append(tick);
       }
-      const fill = el("div", "cp-fill"); fill.style.height = `${faderPos(level) * 100}%`;
-      const cap = el("div", "cp-cap"); cap.style.bottom = `${faderPos(level) * 100}%`;
-      track.append(fill, cap);
+      refs.fill = el("div", "cp-fill");
+      refs.cap = el("div", "cp-cap");
+      track.append(refs.fill, refs.cap);
       fader.append(scale, track);
       faderSec.append(fader);
       items.push(faderSec);
@@ -302,11 +385,11 @@
       // Pan (balance for ST) below the fader: a full-width, centre-detented bar.
       const panKey = p["ToStereo/Pan"] ? "ToStereo/Pan" : "Out/Balance";
       if (p[panKey]) {
-        const pan = v(panKey);
-        const panSec = section(panKey === "Out/Balance" ? "Balance" : "Pan", fmtPan(pan));
+        const [panSec, panVal] = section(panKey === "Out/Balance" ? "Balance" : "Pan");
         const bar = el("div", "cp-pan");
-        const dot = el("span"); dot.style.left = `${(pan + 63) / 126 * 100}%`;
+        const dot = el("span");
         bar.append(dot);
+        Object.assign(refs, { panKey, panVal, panDot: dot });
         const marks = el("div", "cp-panmarks");
         marks.append(el("span", "", "L"), el("span", "", "C"), el("span", "", "R"));
         panSec.append(bar, marks);
@@ -321,17 +404,19 @@
         const hdr = el("div", "cp-sendhdr");
         const lbl = el("label");
         const cb = el("input"); cb.type = "checkbox"; cb.checked = state.allSends;
-        cb.onchange = () => { state.allSends = cb.checked; save("tf.allSends", cb.checked ? 1 : 0); renderPanel(); };
+        cb.onchange = () => { state.allSends = cb.checked; save("tf.allSends", cb.checked ? 1 : 0); panelSig = null; renderPanel(); };
         lbl.append(cb, " all");
         hdr.append(el("h3", "", "Sends"), lbl);
         sends.append(hdr);
         if (!shown.length) sends.append(el("p", "cp-note", "No active sends"));
         for (const r of shown) {
-          const row = el("div", `cp-send${r.on && r.db !== null ? "" : " off"}`);
+          const row = el("div", "cp-send");
           const bar = el("div", "cp-sendbar");
-          const f = el("span"); f.style.width = `${faderPos(r.db) * 100}%`;
+          const f = el("span");
           bar.append(f);
-          row.append(el("span", "cp-sendname", r.name), bar, el("span", "cp-sendval", r.on ? fmtDb(r.db) : "off"));
+          const val = el("span", "cp-sendval");
+          row.append(el("span", "cp-sendname", r.name), bar, val);
+          refs.sends.set(r.name, { row, fill: f, val });
           sends.append(row);
         }
         items.push(sends);
@@ -342,11 +427,16 @@
       const extra = Object.entries(p).filter(([k]) => !known.has(k));
       if (extra.length) {
         const dl = el("dl", "cp-extra");
-        for (const [k, x] of extra) dl.append(el("dt", "", k), el("dd", "", `${x.value ?? "−∞"}${x.unit ? " " + x.unit : ""}`));
+        for (const [k] of extra) {
+          const dd = el("dd");
+          refs.extra.set(k, dd);
+          dl.append(el("dt", "", k), dd);
+        }
         items.push(dl);
       }
     }
     panel.replaceChildren(...items);
+    if (refs.on) updatePanel(ch);
   }
 
   $("show-console").checked = state.showConsole;
@@ -363,42 +453,28 @@
 
   // ------------------------------------------------------------------ console EQ overlay
 
-  // The EQ set on the console for the channel on the shown input
-  // (GET /api/tf5/eq/<usb>; only when tf5.eq is on). Read-only: this page
+  // The EQ set on the console for the channel on the shown input (pushed as
+  // "tf5-eq" over /ws/audio; only when tf5.eq is on). Read-only: this page
   // never changes the console. Drawn on its own dB scale, centred: ±18 dB, widened
   // in 6 dB steps (up to ±48) so the whole curve fits between the shown frequencies.
   const EQ_RANGE_MIN = 18, EQ_RANGE_MAX = 48;
   state.showEq = loadInt("tf.eq", 0) === 1;
-  state.eq = null;         // last /api/tf5/eq response for state.input
+  state.eq = null;         // last "tf5-eq" message for state.input
   let eqAvailable = null;  // null = not known yet, false = tf5.eq off (404)
 
-  async function fetchEq() {
-    const want = state.input;
-    try {
-      const r = await fetch(`/api/tf5/eq/${want}`);
-      if (r.status === 404) { eqAvailable = false; state.eq = null; }
-      else if (r.ok) {
-        eqAvailable = true;
-        const d = await r.json();
-        if (want === state.input) state.eq = d;
-      }
-    } catch {
-      if (state.eq) state.eq = { ...state.eq, connected: false };
-    }
-    $("eq-toggle").hidden = !eqAvailable;
+  // Pushed over /ws/audio for the viewed input whenever it changes on the desk
+  // (or the view changes); nothing arrives when tf5.eq is off.
+  function onConsoleEq(msg) {
+    eqAvailable = true;
+    if (msg.index === state.input) state.eq = msg;
+    $("eq-toggle").hidden = false;
     state.dirty = true;
-  }
-
-  async function pollEq() {
-    if (eqAvailable === null || (eqAvailable && state.showEq)) await fetchEq();
-    if (eqAvailable !== false) setTimeout(pollEq, 1000);
   }
 
   $("show-eq").checked = state.showEq;
   $("show-eq").onchange = (e) => {
     state.showEq = e.target.checked;
     save("tf.eq", state.showEq ? 1 : 0);
-    if (state.showEq) fetchEq();
     state.dirty = true;
   };
 
@@ -466,6 +542,18 @@
     const eq = d.eq;
     if (!eq || !d.freqs.length) return;
 
+    // Shade between the curve and 0 dB, as the TF5's EQ screen does (only when on).
+    if (eq.on) {
+      ctx.beginPath();
+      d.freqs.forEach((f, i) => { const x = xOf(f), y = yEq(d.curve[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+      ctx.lineTo(xOf(d.freqs[d.freqs.length - 1]), yEq(0));
+      ctx.lineTo(xOf(d.freqs[0]), yEq(0));
+      ctx.closePath();
+      ctx.fillStyle = C.eqFill;
+      ctx.fill();
+      ctx.fillStyle = C.eq;
+    }
+
     // The response curve (clipped by the plot, not flattened onto its edge); dashed
     // and dim when the EQ is switched off on the desk.
     ctx.globalAlpha = eq.on ? 1 : 0.45;
@@ -497,10 +585,71 @@
   $("show-avg").onchange = (e) => { state.showAvg = e.target.checked; state.dirty = true; };
   $("show-peak").onchange = (e) => { state.showPeak = e.target.checked; state.dirty = true; };
   $("show-live").onchange = (e) => { state.showLive = e.target.checked; state.dirty = true; };
-  $("range").onchange = (e) => {
-    [state.dbMin, state.dbMax] = e.target.value.split(",").map(Number);
+  // ------------------------------------------------------------------ range
+
+  // Levels are per 1/48-octave display bin (a full-scale sine reads 0 dB): speech
+  // harmonics land around -25..-40, a hot mix -10..-25, rings up to ~0, and below
+  // ~-90 there's only preamp hiss and silence (-130..-140). The pre-fader inputs
+  // sit wherever their head-amp gain puts them, so the default, Auto, keeps a
+  // 70 dB window on whatever the shown input is doing: the top 5 dB above the
+  // loudest point of the last 5 s, rounded up to 10 dB. It moves up at once and
+  // back down only after 8 s quieter, so it doesn't pump between phrases.
+  const RANGES = ["auto", "-90,-10", "-80,0", "-70,-20", "-130,0"];
+  const AUTO_SPAN = 70, AUTO_TOP_MIN = -40, AUTO_TOP_MAX = 0, AUTO_HOLD_S = 8, AUTO_WINDOW_S = 5;
+  state.range = loadStr("tf.range", "auto", RANGES);
+  const auto = { maxima: [], quietSince: null, fitUntil: 0 };
+
+  function setRange(min, max) {
+    if (min === state.dbMin && max === state.dbMax) return;
+    state.dbMin = min; state.dbMax = max;
+    wfRecolor();
     state.dirty = true;
+  }
+
+  function autoLabel() {
+    $("range").options[0].textContent = state.range === "auto" ? `Auto (${state.dbMin}…${state.dbMax} dB)` : "Auto";
+  }
+
+  function autoReset() {  // new input: fit straight away, both directions
+    auto.maxima = []; auto.quietSince = null; auto.fitUntil = performance.now() + 1500;
+  }
+
+  function autoRange() {
+    if (state.range !== "auto" || !state.meta) return;
+    let m = -Infinity;
+    for (let i = 0; i < state.live.length; i++) if (state.live[i] > m) m = state.live[i];
+    const keep = Math.round(AUTO_WINDOW_S * state.meta.update_rate);
+    auto.maxima.push(m);
+    if (auto.maxima.length > keep) auto.maxima.shift();
+    const loudest = Math.max(...auto.maxima);
+    const top = Math.min(AUTO_TOP_MAX, Math.max(AUTO_TOP_MIN, Math.ceil((loudest + 5) / 10) * 10));
+    const now = performance.now();
+    if (top > state.dbMax || now < auto.fitUntil) {
+      auto.quietSince = null;
+      setRange(top - AUTO_SPAN, top);
+    } else if (top < state.dbMax) {
+      if (auto.quietSince === null) auto.quietSince = now;
+      if (now - auto.quietSince >= AUTO_HOLD_S * 1000) {
+        auto.quietSince = null;
+        setRange(state.dbMin - 10, state.dbMax - 10);  // one step at a time
+      }
+    } else {
+      auto.quietSince = null;
+    }
+    autoLabel();
+  }
+
+  $("range").value = state.range;
+  $("range").onchange = (e) => {
+    state.range = e.target.value;
+    save("tf.range", state.range);
+    if (state.range === "auto") autoReset();
+    else setRange(...state.range.split(",").map(Number));
+    autoLabel();
   };
+  // At load there's no waterfall history to recolour (and it's defined further down).
+  if (state.range !== "auto") [state.dbMin, state.dbMax] = state.range.split(",").map(Number);
+  autoLabel();
   $("reset-peak").onclick = () => send({ cmd: "reset_peak", channel: state.input });
 
   canvas.addEventListener("pointermove", (e) => {
@@ -594,7 +743,10 @@
 
   function drawHover() {
     const h = state.hover, ro = $("readout");
-    if (!h || h.x < PAD.l || h.x > W - PAD.r || h.y < PAD.t || h.y > H - PAD.b) { ro.style.display = "none"; return; }
+    if (!h || h.x < PAD.l || h.x > W - PAD.r || h.y < PAD.t || h.y > H - PAD.b) {
+      if (!wf.hover) ro.style.display = "none";
+      return;
+    }
     ctx.strokeStyle = C.muted;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
@@ -768,8 +920,191 @@
   };
   setInterval(() => { if (state.rings.length) renderRings(); }, 5000);  // keep "x s ago" current
 
+  // ------------------------------------------------------------------ waterfall
+
+  // Each frame of the shown input becomes one row (newest at the top). Rows live
+  // in an off-screen canvas used as a circular buffer, one pixel per display bin,
+  // so a frame costs one 400-pixel row; the levels are kept too, to recolour the
+  // history when the range changes and for the hover readout.
+  const LAYOUTS = ["spectrum", "both", "waterfall"];
+  state.layout = loadStr("tf.layout", "both", LAYOUTS);
+  state.wfSpan = loadInt("tf.wfSpan", 30);
+  state.wfSource = loadStr("tf.wfSource", "live", ["live", "avg"]);
+
+  const wfCanvas = $("waterfall");
+  const wfCtx = wfCanvas.getContext("2d");
+  const wf = {
+    W: 0, H: 0, rows: 0, bins: 0, head: 0, filled: 0,
+    data: null, buf: document.createElement("canvas"), img: null, dirty: true, hover: null,
+  };
+  const wfBufCtx = wf.buf.getContext("2d");
+
+  // Colour map (inferno-like: black, purple, red, orange, pale yellow) as a 256-entry RGB table.
+  const LUT = (() => {
+    const stops = [[0, 0, 4], [40, 11, 84], [101, 21, 110], [159, 42, 99], [212, 72, 66],
+                   [245, 125, 21], [250, 193, 39], [252, 255, 164]];
+    const lut = new Uint8ClampedArray(256 * 3);
+    for (let i = 0; i < 256; i++) {
+      const x = i / 255 * (stops.length - 1), k = Math.min(Math.floor(x), stops.length - 2), t = x - k;
+      for (let c = 0; c < 3; c++) lut[i * 3 + c] = stops[k][c] + (stops[k + 1][c] - stops[k][c]) * t;
+    }
+    return lut;
+  })();
+
+  function wfReset() {
+    if (!state.meta) return;
+    wf.bins = state.freqs.length;
+    wf.rows = Math.max(10, Math.round(state.wfSpan * state.meta.update_rate));
+    wf.data = new Float32Array(wf.rows * wf.bins).fill(-1e9);
+    wf.buf.width = wf.bins; wf.buf.height = wf.rows;
+    wfBufCtx.fillStyle = `rgb(${LUT[0]},${LUT[1]},${LUT[2]})`;
+    wfBufCtx.fillRect(0, 0, wf.bins, wf.rows);
+    wf.img = wfBufCtx.createImageData(wf.bins, 1);
+    wf.head = 0; wf.filled = 0; wf.dirty = true;
+  }
+
+  function wfColorRow(row) {
+    const d = wf.img.data, base = row * wf.bins, span = state.dbMax - state.dbMin;
+    for (let i = 0; i < wf.bins; i++) {
+      const v = wf.data[base + i];
+      const k = (Math.max(0, Math.min(255, Math.round((v - state.dbMin) / span * 255)))) * 3;
+      d[i * 4] = LUT[k]; d[i * 4 + 1] = LUT[k + 1]; d[i * 4 + 2] = LUT[k + 2]; d[i * 4 + 3] = 255;
+    }
+    wfBufCtx.putImageData(wf.img, 0, row);
+  }
+
+  // Rows are written going *up* the buffer (head decrements), so drawing from
+  // head down and wrapping shows newest first.
+  function wfPush(values) {
+    if (!wf.data || state.layout === "spectrum") return;
+    wf.head = (wf.head - 1 + wf.rows) % wf.rows;
+    wf.data.set(values, wf.head * wf.bins);
+    wfColorRow(wf.head);
+    wf.filled = Math.min(wf.filled + 1, wf.rows);
+    wf.dirty = true;
+  }
+
+  function wfRecolor() {
+    if (!wf.data) return;
+    for (let r = 0; r < wf.rows; r++) wfColorRow(r);
+    wf.dirty = true;
+  }
+
+  function wfResize() {
+    const dpr = window.devicePixelRatio || 1;
+    const r = wfCanvas.getBoundingClientRect();
+    wf.W = r.width; wf.H = r.height;
+    wfCanvas.width = Math.round(wf.W * dpr);
+    wfCanvas.height = Math.round(wf.H * dpr);
+    wfCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    wf.dirty = true;
+  }
+  new ResizeObserver(wfResize).observe(wfCanvas);
+
+  // Same horizontal mapping as the spectrum, so columns line up; frequency
+  // labels only when the spectrum (which has them) is hidden.
+  const wfPad = () => ({ l: PAD.l, r: PAD.r, t: state.layout === "both" ? 4 : PAD.t, b: state.layout === "waterfall" ? PAD.b : 8 });
+  const wfXOf = (f) => { const p = wfPad(); return p.l + (Math.log10(f) - state.logMin) / (state.logMax - state.logMin) * (wf.W - p.l - p.r); };
+  const wfFOfX = (x) => { const p = wfPad(); return 10 ** (state.logMin + (x - p.l) / (wf.W - p.l - p.r) * (state.logMax - state.logMin)); };
+
+  function drawWaterfall() {
+    const c = wfCtx, p = wfPad();
+    c.clearRect(0, 0, wf.W, wf.H);
+    if (!state.meta || !wf.data || wf.W < 100 || wf.H < 40) return;
+    const pw = wf.W - p.l - p.r, ph = wf.H - p.t - p.b;
+    // Bin centres sit at the plot edges (as on the spectrum): stretch by half a bin each side.
+    const colW = pw / (wf.bins - 1), x0 = p.l - colW / 2, w = colW * wf.bins;
+    const rowH = ph / wf.rows, first = wf.rows - wf.head;  // rows head..end, then 0..head
+    c.save();
+    c.beginPath(); c.rect(p.l, p.t, pw, ph); c.clip();
+    c.imageSmoothingEnabled = false;
+    c.drawImage(wf.buf, 0, wf.head, wf.bins, first, x0, p.t, w, first * rowH);
+    if (wf.head) c.drawImage(wf.buf, 0, 0, wf.bins, wf.head, x0, p.t + first * rowH, w, wf.head * rowH);
+    // Live rings on this input, carried down the waterfall.
+    if (state.showRings) {
+      c.setLineDash([2, 4]); c.lineWidth = 1;
+      for (const e of state.rings) {
+        if (e.channel !== state.input || !e.active) continue;
+        const x = Math.round(wfXOf(e.freq)) + 0.5;
+        c.strokeStyle = SEV[severity(e)].color;
+        c.beginPath(); c.moveTo(x, p.t); c.lineTo(x, p.t + ph); c.stroke();
+      }
+      c.setLineDash([]);
+    }
+    if (wf.hover) {
+      c.strokeStyle = "rgba(255,255,255,0.6)"; c.setLineDash([3, 3]);
+      c.beginPath(); c.moveTo(wf.hover.x + 0.5, p.t); c.lineTo(wf.hover.x + 0.5, p.t + ph);
+      c.moveTo(p.l, wf.hover.y + 0.5); c.lineTo(p.l + pw, wf.hover.y + 0.5); c.stroke(); c.setLineDash([]);
+    }
+    c.restore();
+
+    // Time scale on the left: 0 s at the top.
+    c.font = "11px system-ui, sans-serif"; c.fillStyle = C.muted;
+    c.textAlign = "right"; c.textBaseline = "middle";
+    const step = [1, 2, 5, 10, 15, 30, 60, 120].find((s) => state.wfSpan / s <= Math.max(2, ph / 40)) || 60;
+    for (let t = 0; t <= state.wfSpan + 1e-9; t += step) {
+      const y = p.t + t / state.wfSpan * ph;
+      c.fillText(t === 0 ? "now" : t >= 60 ? `-${t / 60}m` : `-${t}s`, p.l - 6, Math.min(Math.max(y, p.t + 6), p.t + ph - 6));
+    }
+    if (state.layout === "waterfall") {
+      c.textAlign = "center"; c.textBaseline = "top";
+      for (const f of F_MAJOR) c.fillText(fmtF(f), wfXOf(f), p.t + ph + 6);
+    }
+  }
+
+  function wfHoverReadout() {
+    const ro = $("readout"), h = wf.hover, p = wfPad();
+    const ph = wf.H - p.t - p.b;
+    if (!h || !wf.data || h.x < p.l || h.x > wf.W - p.r || h.y < p.t || h.y > p.t + ph) {
+      if (!state.hover) ro.style.display = "none";
+      return;
+    }
+    const f = wfFOfX(h.x);
+    let i = 0, best = Infinity;
+    for (let k = 0; k < state.freqs.length; k++) {
+      const d = Math.abs(state.freqs[k] - f);
+      if (d < best) { best = d; i = k; }
+    }
+    const back = Math.min(wf.rows - 1, Math.floor((h.y - p.t) / ph * wf.rows));
+    const v = wf.data[((wf.head + back) % wf.rows) * wf.bins + i];
+    const ago = back / state.meta.update_rate, fBin = state.freqs[i];
+    ro.textContent = `${fBin >= 1000 ? (fBin / 1000).toFixed(2) + " kHz" : fBin.toFixed(1) + " Hz"}` +
+      `  ${ago < 0.05 ? "now" : `${ago.toFixed(1)} s ago`}  ` + (v > -1e8 ? `${v.toFixed(1)} dB` : "no data");
+    ro.style.display = "block";
+  }
+
+  wfCanvas.addEventListener("pointermove", (e) => {
+    const r = wfCanvas.getBoundingClientRect();
+    wf.hover = { x: e.clientX - r.left, y: e.clientY - r.top };
+    wf.dirty = true;
+  });
+  wfCanvas.addEventListener("pointerleave", () => { wf.hover = null; if (!state.hover) $("readout").style.display = "none"; wf.dirty = true; });
+
+  function applyLayout() {
+    $("spec-pane").hidden = state.layout === "waterfall";
+    $("wf-pane").hidden = state.layout === "spectrum";
+    for (const r of document.querySelectorAll('input[name="layout"]')) r.checked = r.value === state.layout;
+    state.dirty = true; wf.dirty = true;
+  }
+  for (const r of document.querySelectorAll('input[name="layout"]')) {
+    r.onchange = () => {
+      const was = state.layout;
+      state.layout = r.value;
+      save("tf.layout", state.layout);
+      if (was === "spectrum") wfReset();  // it wasn't recording while hidden
+      applyLayout();
+    };
+  }
+  $("wf-span").value = String(state.wfSpan);
+  if ($("wf-span").value !== String(state.wfSpan)) { state.wfSpan = 30; $("wf-span").value = "30"; }
+  $("wf-span").onchange = (e) => { state.wfSpan = Number(e.target.value); save("tf.wfSpan", state.wfSpan); wfReset(); };
+  $("wf-source").value = state.wfSource;
+  $("wf-source").onchange = (e) => { state.wfSource = e.target.value; save("tf.wfSource", state.wfSource); wfReset(); };
+  applyLayout();
+
   function loop() {
     if (state.dirty) { state.dirty = false; draw(); }
+    if (wf.dirty && state.layout !== "spectrum") { wf.dirty = false; drawWaterfall(); wfHoverReadout(); }
     requestAnimationFrame(loop);
   }
 
@@ -784,7 +1119,5 @@
 
   resize();
   connect();
-  pollConsole();
-  pollEq();
   requestAnimationFrame(loop);
 })();

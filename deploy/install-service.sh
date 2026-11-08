@@ -33,7 +33,7 @@ sudo -u "$APP_USER" bash -c "
   cd '$APP_DIR'
   [ -d .venv ] || python3 -m venv .venv
   .venv/bin/pip install -q --upgrade pip
-  .venv/bin/pip install -q -e '.[rf]'
+  PYTHONWARNINGS=ignore::UserWarning .venv/bin/pip install -q -e '.[rf]'  # quiet setuptools' editable-install notice
 "
 
 echo "==> installing systemd units"

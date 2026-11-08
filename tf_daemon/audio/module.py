@@ -14,7 +14,10 @@ Routes:
                                that input analyzed while it stays connected, and
                                {"cmd": "reset_peak", "channel": <input index|null>}.
                                Ring events arrive as {"type": "rings", ...} text
-                               messages whenever they change.
+                               messages whenever they change. With a TF5, the
+                               desk's state arrives as {"type": "tf5"} (on connect),
+                               then {"type": "tf5-changes"} as values change on the
+                               desk, and {"type": "tf5-eq"} for the viewed input's EQ.
 """
 
 from __future__ import annotations
@@ -98,6 +101,11 @@ class AudioModule:
             meta_version = engine.meta_version
             ws.send(json.dumps(engine.metadata()))
             rings_version, rings_sent = None, 0.0
+            console = engine.console
+            tf5_seq, eq_sent = 0, None
+            if console is not None:
+                tf5_seq, snap = console.snapshot()
+                ws.send(json.dumps(snap))
             seq = 0
             view: list[int] = []  # the input this client views, if any (a list so the handler can swap it)
             try:
@@ -111,7 +119,10 @@ class AudioModule:
                     if engine.rings.version != rings_version or now - rings_sent >= 2.0:
                         rings_version, rings_sent = engine.rings.version, now
                         ws.send(json.dumps(engine.rings.snapshot()))
-                    seq, payload = engine.hub.wait(seq, timeout=1.0)
+                    if console is not None:
+                        tf5_seq, eq_sent = _send_console(ws, console, tf5_seq, view, eq_sent)
+                    # Short wait: desk changes go out promptly even when no audio arrives.
+                    seq, payload = engine.hub.wait(seq, timeout=0.1)
                     if payload is not None:
                         ws.send(payload)
             except ConnectionClosed:
@@ -119,6 +130,23 @@ class AudioModule:
             finally:
                 for index in view:
                     engine.release(index)
+
+
+def _send_console(ws, console: Any, tf5_seq: int, view: list[int], eq_sent: Any) -> tuple[int, Any]:
+    """Push what changed on the desk since ``tf5_seq``, and the viewed input's EQ when it changes."""
+    tf5_seq, msg = console.changes_since(tf5_seq)
+    if msg is None:  # fell too far behind: start over from a snapshot
+        tf5_seq, msg = console.snapshot()
+    if msg:
+        ws.send(json.dumps(msg))
+    if console.eq_available and view:
+        key = (view[0], console.eq_version)
+        if key != (eq_sent or (None, None))[:2]:
+            eq = console.eq(view[0])
+            if eq_sent is None or eq != eq_sent[2]:
+                ws.send(json.dumps({"type": "tf5-eq", **eq}))
+            eq_sent = (*key, eq)
+    return tf5_seq, eq_sent
 
 
 def _channel_arg(value: Any) -> int | None:

@@ -1,8 +1,17 @@
 # tf-daemon
 
 A Raspberry Pi appliance that captures audio from a **Yamaha TF5** over USB and
-serves a real-time **spectrum analyzer** with a **ring / feedback detector** to
-any browser on the network.
+serves a real-time **spectrum analyzer** and **waterfall** with a **ring /
+feedback detector** to any browser on the network.
+
+The audio page's **View** menu picks the layout (**Spectrum**, **Waterfall** or
+**Both**, stacked with aligned frequency columns), the traces (average,
+real-time, peak hold), the dB range (**Auto**, the default, keeps a 70 dB window on the shown input's
+level; fixed choices from −90…−10 to −130…0 dB; it also sets the waterfall's colours),
+the waterfall's history (10 s to 5 min) and source (real-time or the 3 s
+average), and the Rings / Console overlays. Choices are remembered per browser.
+On the waterfall, speech shows as gliding harmonics and a ring as a straight
+vertical line; hovering shows frequency, how long ago, and level.
 
 A second page, **`/rf`**, is an RF spectrum analyzer for a **tinySA** on USB
 serial (connect, sweep, live trace + peak hold, waterfall, and lines at the
@@ -228,8 +237,10 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   ticked. On connect the console's parameter list (`prminfo`) is read, and any
   input-channel gain / EQ / HPF / dynamics parameters it offers are shown too. A
   TF5 lists none of those (checked on the desk at tf5-daemon); its EQ comes from
-  `eq` below instead. Desk
-  changes and scene recalls update live. The protocol has no login, so
+  `eq` below instead. Desk changes and scene recalls update live: the desk pushes
+  each change, and the server forwards it to open pages over their audio
+  websocket within ~50 ms (just the changed values; a fader moving on the desk
+  moves on the page). The protocol has no login, so
   `username` / `password` are accepted but not sent. It also doesn't expose the
   USB output patch, so `usb_patch` says which console channel each USB capture
   channel carries (`"InCh N"`, `"St L"`, `"St R"`, `""`). The default is the TF
