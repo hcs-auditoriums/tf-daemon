@@ -52,6 +52,15 @@ DEFAULTS: dict[str, Any] = {
         "rbw": "auto",
         "interval_s": 0.5,
     },
+    "qlxd": {
+        "enabled": True,
+        "source": "device",  # device (real receivers on the network) | demo
+        "interface": "",     # NIC for discovery; "" = first with a 169.254.x.x address
+        "hosts": [],         # receivers to always monitor, "ip" or "ip:port"
+        "state_file": "qlxd_state.json",  # UI-edited interface/hosts, overrides the two above
+        "meter_poll_s": 1.0,
+        "full_poll_s": 10.0,
+    },
     "channels": [
         {"index": 0, "label": "Main L"},
         {"index": 1, "label": "Main R"},
@@ -142,3 +151,12 @@ def _validate(cfg: dict[str, Any]) -> None:
         SweepSettings.from_dict(rf)
     except ValueError as e:
         raise ConfigError(f"[rf] {e}") from None
+
+    q = cfg["qlxd"]
+    if str(q["source"]).lower() not in ("device", "demo"):
+        raise ConfigError(f"qlxd.source must be 'device' or 'demo', got {q['source']!r}")
+    if not isinstance(q["hosts"], list):
+        raise ConfigError("qlxd.hosts must be a list of \"ip\" or \"ip:port\" strings")
+    for key in ("meter_poll_s", "full_poll_s"):
+        if not 0.2 <= float(q[key]) <= 300:
+            raise ConfigError(f"qlxd.{key} must be between 0.2 and 300")

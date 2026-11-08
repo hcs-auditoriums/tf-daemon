@@ -11,3 +11,5 @@ dist/
 !tests/data/*.wav
 .DS_Store
 config.local.toml
+qlxd_state.json
+*.json.tmp
