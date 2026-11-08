@@ -82,11 +82,13 @@ usb_patch = []
 
 # Named inputs. index is the 0-based capture channel on the device. Every input
 # can be viewed in the browser; these get buttons and are always analyzed, the
-# rest only while someone is looking at them.
+# rest only while someone is looking at them. An explicit label here beats the
+# name read from the console ([tf5]). The TF's default USB patch carries the
+# stereo bus on USB 33/34.
 [[channels]]
-index = 0
+index = 32
 label = "Main L"
 
 [[channels]]
-index = 1
+index = 33
 label = "Main R"
