@@ -188,6 +188,43 @@ harmonics to skip: 60, 50 or 0). API: `GET /api/audio/rings`,
 `POST /api/audio/rings/unignore` `{"freq": hz}` or `{}`; live updates arrive on
 `/ws/audio` as `{"type": "rings", ...}`.
 
+## Vocal EQ assist (mic checks)
+
+Optional and **off by default** (`[vocal] enabled = true` to turn it on). It
+**only suggests**: nothing is ever changed on the console.
+
+During a mic check, show the vocal mic's input, press **Mic check** in the top
+bar and **Start listening**, and have the person talk normally at their usual
+distance for about 20 s (reading a passage works well). It counts only the
+moments they are actually talking, then suggests, in the TF5's terms:
+
+- an **HPF** just under the voice's lowest pitch (rumble, handling, proximity
+  boom);
+- up to four **PEQ bands** (L, 1, 2, H) with frequency, gain and Q, each named
+  for what it addresses: boomy / muddy, boxy, woody / hollow, nasal / honky,
+  tinny / thin, harsh, sibilant, or presence / air for a gentle boost;
+- narrow **notches** for resonances in the mic or room, and for rings the ring
+  detector has reported on that input.
+
+With `tf5.eq` on, the channel's current desk EQ is shown next to each
+suggestion. **Show on spectrum** draws the voice's difference from reference
+speech (violet) and the suggested EQ (dashed green).
+
+How it decides: it builds the voice's long-term average spectrum and compares
+its *shape* with the ANSI S3.5-1997 standard speech spectrum (normal vocal
+effort). Build-ups of 3 dB or more spanning at least 1/3 octave become cuts
+(80 % of the excess, at most `max_cut_db`); a deficit of 3 dB or more at
+2–8 kHz becomes a boost (at most `max_boost_db`). Energy at the voice's own
+fundamental is left alone. Cuts are preferred to boosts and kept few. The
+labels are a vocabulary for where an issue sits, not a diagnosis (part of
+nasality is how a person talks), and the reference is an average voice, so treat
+the result as a starting point for your ears. It analyzes the mic before the EQ
+and dynamics, so compression isn't included.
+
+`[vocal]`: `enabled`, `inputs` (0-based inputs that are vocal mics; `[]` = any),
+`listen_s` (20), `max_cut_db` (6), `max_boost_db` (3). API: `GET /api/vocal/status`,
+`POST /api/vocal/start|stop|clear` `{"channel": n}`.
+
 ## Configuration
 
 Everything lives in `config.toml`; any missing key falls back to the defaults in
