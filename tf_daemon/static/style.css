@@ -374,3 +374,10 @@ main.page {
 .rl-src { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rl-srcname { font: inherit; color: var(--text); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; }
 .rl-srcname.top { font-weight: 700; }
+
+/* Smooth the steps between desk updates (a moving fader sends many small changes). */
+.cp-cap { transition: bottom 90ms linear; }
+.cp-fill { transition: height 90ms linear; }
+.cp-pan span { transition: left 90ms linear; }
+.cp-sendbar span { transition: width 90ms linear; }
+@media (prefers-reduced-motion: reduce) { .cp-cap, .cp-fill, .cp-pan span, .cp-sendbar span { transition: none; } }
