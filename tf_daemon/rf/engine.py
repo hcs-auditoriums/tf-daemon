@@ -112,6 +112,7 @@ class RFEngine:
         self._scanning = False
         self._error: str | None = None
         self._info = ""
+        self._input: str | None = None  # "low" / "high" on an original tinySA
         self._sweeps = 0
         self._sweep_ms_ewma = 0.0
         self._sweep: dict[str, Any] | None = None  # current sweep geometry
@@ -181,7 +182,7 @@ class RFEngine:
             with self._device_lock:
                 self.device.close()
             with self._lock:
-                self._connected, self._info = False, ""
+                self._connected, self._info, self._input = False, "", None
         self._publish()
 
     def start_scan(self, overrides: dict[str, Any] | None = None, by_user: bool = False) -> SweepSettings:
@@ -198,13 +199,23 @@ class RFEngine:
                 raise RFDeviceError("not connected")
             if settings.points > self.device.max_points:
                 raise ValueError(f"this {self.device.name} sweeps at most {self.device.max_points} points")
+            which = self.device.input_for(settings.start_hz, settings.stop_hz)  # ValueError before stopping anything
             self.stop_scan()
             with self._device_lock:
+                try:
+                    # Every start, not just on connect: the device may have been power-cycled.
+                    if which:
+                        self.device.set_input(which)
+                except Exception as e:
+                    raise RFDeviceError(f"could not select the {which} input: {e}") from e
                 try:
                     self.device.set_rbw(settings.rbw)
                 except Exception as e:
                     raise RFDeviceError(f"could not set RBW: {e}") from e
+            if which:
+                log.info("%s: %s input", self.device.name, which.upper())
             with self._lock:
+                self._input = which
                 self.settings = settings
                 self._scanning, self._error = True, None
                 self._live = self._peak = None
@@ -268,6 +279,7 @@ class RFEngine:
                 "error": self._error,
                 "device": self.device.name,
                 "info": self._info,
+                "input": self._input,
                 "auto": self.auto,
                 "paused": self._paused,
                 "settings": asdict(self.settings),
@@ -296,7 +308,7 @@ class RFEngine:
                 with self._lock:
                     self._error = f"sweep failed: {e}"
                     self._scanning = False
-                    self._connected, self._info = False, ""
+                    self._connected, self._info, self._input = False, "", None
                 self._publish()
                 self._sup_wake.set()
                 return
@@ -361,6 +373,8 @@ class RFEngine:
                 if str(e) != last_error:  # log each distinct problem once, not every retry
                     log.warning("RF auto mode: %s (retrying every %.0f s)", e, SUPERVISE_INTERVAL_S)
                     last_error = str(e)
+                if isinstance(e, ValueError):
+                    self._set_error(str(e))  # e.g. receiver range spans both inputs: show it on the page
             except Exception:
                 log.exception("RF auto mode error")
             self._sup_wake.wait(SUPERVISE_INTERVAL_S)

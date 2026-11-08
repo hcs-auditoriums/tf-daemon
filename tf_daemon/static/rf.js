@@ -169,8 +169,9 @@
     if (!wsOpen) el.textContent = "server disconnected";
     else if (!s) el.textContent = "connecting…";
     else if (!connected) el.textContent = s.auto && !s.paused ? `${s.device} · waiting for device…` : `${s.device} · not connected`;
-    else el.textContent = `${s.device} · ${scanning ? "sweeping" : s.paused ? "paused" : "idle"} · ${s.sweeps} sweeps`;
-    el.title = !s ? "Connection" : s.auto ? (s.paused ? "Auto mode paused by Stop/Disconnect; press Start or Connect to resume"
+    else el.textContent = `${s.device}${s.input ? ` · ${s.input.toUpperCase()} input` : ""} · ` +
+      `${scanning ? "sweeping" : s.paused ? "paused" : "idle"} · ${s.sweeps} sweeps`;
+    el.title = s && s.input ? `Antenna must be on the tinySA's ${s.input.toUpperCase()} connector` : !s ? "Connection" : s.auto ? (s.paused ? "Auto mode paused by Stop/Disconnect; press Start or Connect to resume"
       : "Auto mode: connects and sweeps on its own") : "Connection";
 
     $("connect").textContent = connected ? "Disconnect" : "Connect";

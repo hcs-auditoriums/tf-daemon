@@ -7,7 +7,7 @@ import pytest
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError, load_config
 from tf_daemon.rf import engine as engine_mod
-from tf_daemon.rf.devices import DemoDevice, RFDeviceError, parse_scan
+from tf_daemon.rf.devices import DemoDevice, RFDeviceError, TinySADevice, basic_input_for, parse_scan
 from tf_daemon.rf.engine import RFEngine, SweepSettings, fit_span
 
 
@@ -110,6 +110,56 @@ def test_rf_off_and_sweep_failure():
     s = _wait_state(engine, lambda s: s["error"] is not None)
     assert "USB unplugged" in s["error"] and not s["scanning"]
     engine.stop()
+
+
+def test_original_tinysa_input_follows_the_range():
+    assert basic_input_for(88_000_000, 108_000_000) == "low"
+    assert basic_input_for(480_000_000, 610_000_000) == "high"
+    assert basic_input_for(300_000_000, 400_000_000) == "high"  # 240-350 MHz overlap: both work
+    with pytest.raises(ValueError, match="spans both"):
+        basic_input_for(100_000_000, 500_000_000)
+
+    sent = []
+
+    class FakeTSA:
+        def mode(self, a, b):
+            sent.append(f"mode {a} {b}")
+
+    dev = TinySADevice()
+    dev._tsa = FakeTSA()
+    for start, stop in ((480_000_000, 610_000_000), (88_000_000, 108_000_000)):
+        dev.set_input(dev.input_for(start, stop))
+    assert sent == ["mode high input", "mode low input"]
+    dev.ultra = True
+    assert dev.input_for(100_000_000, 500_000_000) is None  # Ultra: one input, any range
+
+
+def test_engine_selects_input_on_every_start():
+    class TwoInput(DemoDevice):
+        name = "tinysa"
+        inputs: list = []
+
+        def input_for(self, start_hz, stop_hz):
+            return basic_input_for(start_hz, stop_hz)
+
+        def set_input(self, which):
+            self.inputs.append(which)
+
+    cfg = load_config(None)
+    dev = TwoInput()
+    engine = RFEngine(cfg, dev)
+    engine.connect()
+    try:
+        engine.start_scan({"start_hz": 480_000_000, "stop_hz": 610_000_000})
+        assert engine.snapshot()["input"] == "high"
+        engine.start_scan({"start_hz": 88_000_000, "stop_hz": 108_000_000})
+        assert engine.snapshot()["input"] == "low" and dev.inputs == ["high", "low"]
+        with pytest.raises(ValueError, match="spans both"):
+            engine.start_scan({"start_hz": 100_000_000, "stop_hz": 500_000_000})
+        st = engine.status()  # the rejected range left the running sweep alone
+        assert st["scanning"] and st["settings"]["start_hz"] == 88_000_000
+    finally:
+        engine.stop()
 
 
 def test_fit_span():

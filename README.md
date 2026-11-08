@@ -230,6 +230,12 @@ being added or retuned; a range set by hand on the page is kept. **Stop** or
 **Disconnect** on the page pause auto mode (to free the device) until **Start**
 or **Connect**.
 
+Inputs: the original tinySA has two SMA inputs and a sweep only sees the selected
+one, so every sweep start sends `mode low input` (range up to 350 MHz, **LOW**
+connector) or `mode high input` (from 240 MHz, **HIGH** connector); the page shows
+which, so the antenna goes on that port. A range spanning both (e.g. 100–500 MHz)
+is refused. The Ultra has one input and is left alone.
+
 QLX-D data flow: Shure devices periodically announce themselves with SLP
 multicast (239.255.254.253:8427). The engine listens on the selected interface,
 probes each announcing address on TCP 2202, and keeps the ones that answer like
