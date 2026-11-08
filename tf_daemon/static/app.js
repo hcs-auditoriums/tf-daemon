@@ -13,7 +13,7 @@
   const C = {
     grid: color("--grid"), gridStrong: color("--grid-strong"), muted: color("--muted"),
     avg: color("--avg"), avgFill: color("--avg-fill"), peak: color("--peak"), rta: color("--rta"),
-    eq: color("--eq"), eqFill: color("--eq-fill"),
+    eq: color("--eq"), eqFill: color("--eq-fill"), vocal: color("--vocal"),
   };
 
   const state = {
@@ -179,6 +179,7 @@
     state.peak.fill(state.meta.db_floor);
     state.live.fill(state.meta.db_floor);
     autoReset();
+    renderVocal();
     wfReset();
     markSelected(index);
     send({ cmd: "view", channel: index });
@@ -750,6 +751,150 @@
     ro.style.display = "block";
   }
 
+  // ------------------------------------------------------------------ vocal EQ assist
+
+  // Optional module (vocal.enabled): during a mic check, listen to the shown
+  // input while the person talks and suggest HPF / PEQ settings. Suggestions
+  // only: the desk is never changed. API: /api/vocal/*.
+  let vocal = null;                 // GET /api/vocal/status; null = module off
+  let vocalOpen = false;
+  state.vocalOverlay = loadInt("tf.vocalOverlay", 1) === 1;
+
+  async function pollVocal() {
+    let next = 3000;
+    try {
+      const r = await fetch("/api/vocal/status");
+      if (r.status === 404) { vocal = null; $("mic-check").hidden = true; return; }  // module off: stop
+      vocal = await r.json();
+      $("mic-check").hidden = false;
+      const listening = Object.values(vocal.sessions).some((s) => s.state === "listening");
+      if (vocalOpen || listening) next = 500;
+      renderVocal();
+      state.dirty = true;
+    } catch { /* server restarting: try again */ }
+    setTimeout(pollVocal, next);
+  }
+
+  function vocalPost(path) {
+    return fetch(`/api/vocal/${path}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ channel: state.input }),
+    }).then((r) => r.json()).catch(() => ({ ok: false, error: "server unreachable" }))
+      .then((d) => { if (!d.ok && d.error) alert(d.error); setTimeout(pollVocal, 50); });
+  }
+
+  $("mic-check").onclick = () => {
+    vocalOpen = !vocalOpen;
+    $("mic-check").setAttribute("aria-expanded", String(vocalOpen));
+    renderVocal();
+    if (vocalOpen) pollVocal();
+  };
+
+  const fmtFreq = (f) => (f >= 1000 ? `${+(f / 1000).toFixed(2)} kHz` : `${Math.round(f)} Hz`);
+  const fmtGain = (g) => `${g > 0 ? "+" : g < 0 ? "−" : ""}${Math.abs(g).toFixed(1)} dB`;
+
+  // The band's current setting on the desk, when the console EQ is readable.
+  function currentSetting(eq, band) {
+    if (!eq) return null;
+    if (band === "HPF") return eq.hpf && eq.hpf.on ? `HPF ${fmtFreq(eq.hpf.freq)}` : "HPF off";
+    const b = eq.bands.find((x) => x.label === band);
+    if (!b) return null;
+    if (b.type === "hpf" || b.type === "lpf") return `${b.type.toUpperCase()} ${fmtFreq(b.freq)}`;
+    return b.gain ? `${fmtGain(b.gain)} @ ${fmtFreq(b.freq)}, Q ${b.q}` : "flat";
+  }
+
+  function renderVocal() {
+    const panel = $("vocal-panel");
+    panel.hidden = !vocal || !vocalOpen;
+    if (panel.hidden || !state.meta) return;
+    const label = state.meta.channels[state.input]?.label ?? `In ${state.input + 1}`;
+    const s = vocal.sessions[String(state.input)];
+    const items = [];
+    const head = el("div", "vp-head");
+    const close = el("button", "vp-x", "×"); close.type = "button"; close.title = "Close";
+    close.onclick = () => $("mic-check").click();
+    head.append(el("strong", "", `Vocal EQ assist · ${label}`), close);
+    items.push(head);
+    const button = (text, fn, primary) => {
+      const b = el("button", primary ? "vp-btn primary" : "vp-btn", text); b.type = "button"; b.onclick = fn; return b;
+    };
+    const row = (...els) => { const d = el("div", "vp-row"); d.append(...els); return d; };
+
+    if (vocal.inputs && !vocal.inputs.includes(state.input)) {
+      items.push(el("p", "vp-note", `${label} isn't one of the vocal mics (vocal.inputs).`));
+    } else if (!s) {
+      items.push(el("p", "", "Have the person talk normally into this mic, at their usual distance, for about "
+                              + `${Math.round(vocal.listen_s)} s (reading a passage works well).`));
+      items.push(row(button("Start listening", () => vocalPost("start"), true)));
+    } else if (s.state === "listening") {
+      const pct = Math.min(100, s.speech_s / s.target_s * 100);
+      const bar = el("div", "vp-bar"); const fill = el("span"); fill.style.width = `${pct}%`; bar.append(fill);
+      items.push(bar);
+      items.push(el("p", "vp-note", `Heard ${s.speech_s.toFixed(1)} of ${Math.round(s.target_s)} s of speech`
+                                     + (s.f0_hz ? ` · voice pitch ≈ ${Math.round(s.f0_hz)} Hz` : "")));
+      items.push(row(button("Stop & analyze", () => vocalPost("stop"), true), button("Cancel", () => vocalPost("clear"))));
+    } else {
+      const r = s.result || {};
+      if (!r.ok) {
+        items.push(el("p", "vp-error", r.error || "No result."));
+      } else {
+        items.push(el("p", "vp-note", `${Math.round(r.speech_s)} s of speech · ${r.voice || "voice"}`
+                                       + (r.f0_hz ? ` (≈ ${Math.round(r.f0_hz)} Hz)` : "") + ` · confidence ${r.confidence}`));
+        const table = el("table", "vp-table");
+        const tr = (cells, cls) => { const t = el("tr", cls || ""); cells.forEach((c) => t.append(el("td", "", c))); return t; };
+        const cur = s.current_eq;
+        const headRow = el("tr");
+        ["Band", "Suggested", "For"].concat(cur ? ["Now"] : []).forEach((h) => headRow.append(el("th", "", h)));
+        table.append(headRow);
+        if (r.hpf) table.append(tr(["HPF", fmtFreq(r.hpf.freq), r.hpf.issue].concat(cur ? [currentSetting(cur, "HPF") || "–"] : [])));
+        for (const b of r.bands) {
+          table.append(tr([b.band, `${fmtGain(b.gain)} @ ${fmtFreq(b.freq)}, Q ${b.q}`, b.issue]
+            .concat(cur ? [currentSetting(cur, b.band) || "–"] : []), b.kind));
+        }
+        if (!r.bands.length) table.append(tr(["", "No EQ moves needed", "close to the reference speech spectrum"].concat(cur ? [""] : [])));
+        items.push(table);
+        for (const n of r.notes) items.push(el("p", "vp-note", n));
+        const lbl = el("label", "vp-check");
+        const cb = el("input"); cb.type = "checkbox"; cb.checked = state.vocalOverlay;
+        cb.onchange = () => { state.vocalOverlay = cb.checked; save("tf.vocalOverlay", cb.checked ? 1 : 0); state.dirty = true; };
+        lbl.append(cb, " Show on spectrum");
+        items.push(lbl);
+      }
+      items.push(row(button("Listen again", () => vocalPost("start"), true), button("Clear", () => vocalPost("clear"))));
+    }
+    items.push(el("p", "vp-foot", "Suggestions only: nothing is changed on the desk."));
+    panel.replaceChildren(...items);
+  }
+
+  // Voice vs target (violet) and the suggested EQ (dashed green), on the EQ
+  // overlay's centred +-EQ_RANGE dB scale.
+  function drawVocal() {
+    if (!vocal || !state.vocalOverlay) return;
+    const s = vocal.sessions[String(state.input)];
+    const r = s && s.result;
+    if (!r || !r.ok) return;
+    const top = PAD.t, bot = H - PAD.b;
+    const y = (db) => Math.min(bot, Math.max(top, (top + bot) / 2 - db / EQ_RANGE * (bot - top) / 2));
+    const line = (fs, vs, color, dash, width) => {
+      ctx.beginPath();
+      fs.forEach((f, i) => { const xx = xOf(f), yy = y(vs[i]); if (i) ctx.lineTo(xx, yy); else ctx.moveTo(xx, yy); });
+      ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash); ctx.stroke(); ctx.setLineDash([]);
+    };
+    if (!(state.showEq && eqAvailable)) {  // the EQ overlay draws this scale too
+      ctx.globalAlpha = 0.5; ctx.strokeStyle = C.vocal; ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
+      const y0 = Math.round(y(0)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(PAD.l, y0); ctx.lineTo(W - PAD.r, y0); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = C.vocal; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+      for (const db of [12, 6, 0, -6, -12]) ctx.fillText(`${db > 0 ? "+" : ""}${db}`, W - PAD.r - 4, y(db));
+      ctx.globalAlpha = 1;
+    }
+    line(r.points, r.deviation, C.vocal, [], 2);
+    line(r.curve_freqs, r.curve, C.eq, [6, 4], 2);
+    ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+    ctx.fillStyle = C.vocal; ctx.fillText("voice vs reference speech", PAD.l + 6, bot - 30);
+    ctx.fillStyle = C.eq; ctx.fillText("suggested EQ (dashed)", PAD.l + 6, bot - 16);
+    ctx.lineWidth = 1;
+  }
+
   function draw() {
     ctx.clearRect(0, 0, W, H);
     if (!state.meta || W < 100 || H < 80) return;
@@ -763,6 +908,7 @@
     if (state.showLive) trace(state.live, C.rta, null, 1);
     drawRingMarkers();
     drawEq();
+    drawVocal();
     ctx.restore();
     drawHover();
   }
@@ -1100,5 +1246,6 @@
 
   resize();
   connect();
+  pollVocal();
   requestAnimationFrame(loop);
 })();

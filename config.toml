@@ -75,6 +75,16 @@ fmin = 80.0                 # Hz, detection range
 fmax = 12000.0
 mains_hz = 60.0             # mains hum harmonics to skip (50 in Europe, 0 = off)
 
+[vocal]
+# Vocal EQ assist: during a mic check, listen to a vocal mic while the person
+# talks and suggest an HPF and PEQ settings (Mic check button on the audio
+# page). Suggestions only: nothing is ever changed on the console.
+enabled = false
+inputs = []                 # 0-based inputs that are vocal mics; [] = any input
+listen_s = 20.0             # seconds of speech to collect
+max_cut_db = 6.0            # largest cut / boost it will suggest
+max_boost_db = 3.0
+
 [tf5]
 # Read channel names and settings (fader, on, pan, colour) from the TF5 over the
 # network, using Yamaha's remote control protocol on TCP 49280. The server must

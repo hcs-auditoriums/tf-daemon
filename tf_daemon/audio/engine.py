@@ -110,6 +110,7 @@ class AudioEngine:
         # are the pinned inputs until the TF5 patch says otherwise.
         self._bus_inputs: frozenset[int] = self._pinned
         self.console: Any = None  # TF5Module when tf5.host is set: desk changes for /ws/audio
+        self._taps: list[Any] = []  # add_tap(): optional modules that see each analyzed input's samples
         self._console_gains: dict[int, float | None] = {}  # input -> fader dB, None = off / -inf
         self._usb_post_fader = bool(cfg["tf5"]["usb_post_fader"])
         self._attr_n = self._ring_settings.n_fft if self._ring_settings else 0
@@ -170,6 +171,14 @@ class AudioEngine:
             self.inputs = self._build_inputs(len(self.inputs))
             self._meta_version += 1
         log.info("Console channel names updated (%d named)", len(names))
+
+    def add_tap(self, fn: Any) -> None:
+        """Call ``fn(index, samples, stream_t)`` every hop for each analyzed input.
+
+        ``samples`` is the newest fft_size samples (float32, read-only; copy to
+        keep). Runs on the analysis thread, so it must be quick.
+        """
+        self._taps.append(fn)
 
     def set_console_gains(self, gains: dict[int, float | None]) -> None:
         """Fader level (dB) per input from the mixer; None = channel off or fader at -inf (thread-safe)."""
@@ -325,6 +334,8 @@ class AudioEngine:
                     if det is not None:
                         rings = det.process(frame[row], stream_t)
                         self.rings.update(index, self.inputs[index].label, rings, wall_t)
+                    for tap in self._taps:
+                        tap(index, frame[row], stream_t)
                 self._publish(active)
                 if detectors and self._frames % self.ATTRIBUTE_EVERY == 0:
                     self._attribute()
