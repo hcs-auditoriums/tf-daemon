@@ -1,0 +1,4 @@
+# Shell scripts and the systemd unit run on Linux; keep them LF even when
+# deployed with `git archive` from a Windows checkout (core.autocrlf=true).
+*.sh       text eol=lf
+*.service  text eol=lf
