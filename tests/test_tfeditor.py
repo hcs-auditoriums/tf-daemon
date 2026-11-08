@@ -1058,8 +1058,10 @@ def test_page_has_the_eq_toggle():
     assert not re.search(r"fetch\(`/api/tf5/eq[^`]*`\s*,", js)
     assert "--eq:" in (static / "style.css").read_text(encoding="utf-8")
     draw = re.search(r"function drawEq\(\) \{(.*?)\n  \}\n", js, re.S).group(1)
-    # Same dB scale as the spectrum (the View range), and the handles sit on the curve.
-    assert "state.dbMax - state.dbMin" in draw
+    # Same dB scale as the spectrum (the View range; shared with the vocal assist
+    # through eqHalf / eqY), and the handles sit on the curve.
+    assert re.search(r"const eqHalf = \(\) => \(state\.dbMax - state\.dbMin\) / 2", js)
+    assert "eqHalf()" in draw and "eqY" in draw
     assert "yEq(eqAt(f))" in draw
     # The console sidebar has its own EQ graph, redrawn on every pushed change.
     side = re.search(r"function drawPanelEq\(\) \{(.*?)\n  \}\n", js, re.S).group(1)
