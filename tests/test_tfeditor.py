@@ -1061,3 +1061,10 @@ def test_page_has_the_eq_toggle():
     # Same dB scale as the spectrum (the View range), and the handles sit on the curve.
     assert "state.dbMax - state.dbMin" in draw
     assert "yEq(eqAt(f))" in draw
+    # The console sidebar has its own EQ graph, redrawn on every pushed change.
+    side = re.search(r"function drawPanelEq\(\) \{(.*?)\n  \}\n", js, re.S).group(1)
+    assert "eqAt(f)" in side and "peqRange(d)" in side
+    on_eq = re.search(r"function onConsoleEq\(msg\) \{(.*?)\n  \}\n", js, re.S).group(1)
+    assert "drawPanelEq()" in on_eq
+    css = (static / "style.css").read_text(encoding="utf-8")
+    assert re.search(r"\.cp-eq \{[^}]*position: static", css)   # not the full-page canvas rule
