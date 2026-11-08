@@ -264,35 +264,51 @@
       const isOn = v("Fader/On") !== 0;
       items.push(el("div", `cp-on ${isOn ? "on" : "off"}`, isOn ? "ON" : "OFF"));
 
-      // Fader: scale, track and cap, with the value underneath.
+      // Fader: heading with the level, then a tall fader (scale, track, cap).
+      const section = (title, value) => {
+        const sec = el("div", "cp-section");
+        const hd = el("div", "cp-sechead");
+        hd.append(el("span", "cp-label", title), el("span", "cp-value", value));
+        sec.append(hd);
+        return sec;
+      };
+      const level = v("Fader/Level");
+      const faderSec = section("Fader", `${fmtDb(level)} dB`);
       const fader = el("div", "cp-fader");
       const scale = el("div", "cp-scale");
-      for (const d of [10, 0, -10, -20, -30, -40, null]) {
-        const t = el("span", d === 0 ? "zero" : "", d === null ? "−∞" : d > 0 ? `+${d}` : String(d));
-        t.style.bottom = `${faderPos(d) * 100}%`;
-        scale.append(t);
-      }
       const track = el("div", "cp-track");
-      const fill = el("div", "cp-fill"); fill.style.height = `${faderPos(v("Fader/Level")) * 100}%`;
-      const cap = el("div", "cp-cap"); cap.style.bottom = `${faderPos(v("Fader/Level")) * 100}%`;
+      for (const d of [10, 5, 0, -5, -10, -20, -30, -40, -60, null]) {
+        const pos = `${faderPos(d) * 100}%`;
+        const labelled = d === null || [10, 0, -10, -20, -30, -40, -60].includes(d);
+        if (labelled) {
+          const t = el("span", d === 0 ? "zero" : "", d === null ? "−∞" : d > 0 ? `+${d}` : String(d));
+          t.style.bottom = pos;
+          scale.append(t);
+        }
+        const tick = el("i", d === 0 ? "zero" : labelled ? "" : "minor");
+        tick.style.bottom = pos;
+        track.append(tick);
+      }
+      const fill = el("div", "cp-fill"); fill.style.height = `${faderPos(level) * 100}%`;
+      const cap = el("div", "cp-cap"); cap.style.bottom = `${faderPos(level) * 100}%`;
       track.append(fill, cap);
       fader.append(scale, track);
-      const faderBox = el("div", "cp-faderbox");
-      faderBox.append(fader, el("div", "cp-value", `${fmtDb(v("Fader/Level"))} dB`));
+      faderSec.append(fader);
+      items.push(faderSec);
 
-      // Pan (balance for ST) as a centre-detented bar.
+      // Pan (balance for ST) below the fader: a full-width, centre-detented bar.
       const panKey = p["ToStereo/Pan"] ? "ToStereo/Pan" : "Out/Balance";
-      const side = el("div", "cp-side");
       if (p[panKey]) {
         const pan = v(panKey);
+        const panSec = section(panKey === "Out/Balance" ? "Balance" : "Pan", fmtPan(pan));
         const bar = el("div", "cp-pan");
         const dot = el("span"); dot.style.left = `${(pan + 63) / 126 * 100}%`;
         bar.append(dot);
-        side.append(el("div", "cp-label", panKey === "Out/Balance" ? "Balance" : "Pan"), bar, el("div", "cp-panval", fmtPan(pan)));
+        const marks = el("div", "cp-panmarks");
+        marks.append(el("span", "", "L"), el("span", "", "C"), el("span", "", "R"));
+        panSec.append(bar, marks);
+        items.push(panSec);
       }
-      const top = el("div", "cp-top");
-      top.append(faderBox, side);
-      items.push(top);
 
       // Sends: by default only those that are on and above -inf.
       if (p["ToMix/Level"]) {
