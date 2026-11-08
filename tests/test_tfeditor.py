@@ -275,7 +275,7 @@ def test_send_passes_allowed_frames_through():
     assert client.sent == [("MMIX", SUBSCRIBE)]
 
 
-def test_module_has_a_single_send_path_and_no_write_builders():
+def test_module_has_a_single_send_path_and_one_guarded_write_builder():
     src = Path(tfe.__file__).read_text(encoding="utf-8")
     src_code = src.replace(tfe.__doc__, "")                            # the docstring documents the dangers
     code = "\n".join(line.split("#", 1)[0] for line in src_code.splitlines())   # ignore comments
@@ -283,8 +283,34 @@ def test_module_has_a_single_send_path_and_no_write_builders():
     assert not re.search(r"\.send\(|sendto\(|sendmsg\(", code)
     send_def = re.search(r"def _send\(self.*?\n(.*?)\n    def ", src, re.S).group(1)
     assert send_def.index("check_outbound(") < send_def.index("sendall(")
-    assert not re.search(r"message\(\s*(SET_PARAM|DUMP)", code), "no set-param / dump builder may exist"
+    assert not re.search(r"message\(\s*DUMP", code), "no dump builder may exist"
+    # Exactly one set-param builder, used only by write() (which the guard checks frame by frame).
+    assert len(re.findall(r"message\(\s*SET_PARAM", code)) == 1
+    assert re.search(r"def set_param_message\(.*?\n\s+return message\(SET_PARAM", code, re.S)
+    users = [m.start() for m in re.finditer(r"set_param_message\(", code)]
+    write_def = re.search(r"    def write\(self.*?(?=\n    def )", code, re.S)
+    assert len(users) == 2 and write_def.start() <= users[1] < write_def.end()
     assert "SYNCDIR:1" not in code and "TYPE:Editor" not in code
+
+
+def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
+    """write() <- TF5Module.write_eq <- VocalModule.apply_suggestion / undo <- POST /api/vocal/apply|undo
+    (which need "confirm": true). Nothing else in tf-daemon calls them, so nothing writes on its own."""
+    pkg = Path(tfe.__file__).parent
+    calls: dict[str, list[str]] = {}
+    for p in pkg.rglob("*.py"):
+        code = "\n".join(line.split("#", 1)[0] for line in p.read_text(encoding="utf-8").splitlines())
+        for name, pattern in (("write", r"(\beq_client|\bec|TFEditorClient\b.*)\.write\("), ("write_eq", r"\.write_eq\("),
+                              ("apply_suggestion", r"\.apply_suggestion\("), ("undo", r"\.undo\(")):
+            for _ in re.finditer(pattern, code):
+                calls.setdefault(name, []).append(p.name)
+    assert calls.get("write") == ["tf5.py"]                    # ec.write(...) in write_eq only
+    assert "ec = self.eq_client" in (pkg / "tf5.py").read_text(encoding="utf-8")
+    assert sorted(calls.get("write_eq", [])) == ["vocal.py", "vocal.py"]
+    vocal_src = (pkg / "vocal.py").read_text(encoding="utf-8")
+    assert re.search(r"desk_write\(self\.apply_suggestion\)", vocal_src) and re.search(r"desk_write\(self\.undo\)", vocal_src)
+    assert "apply_suggestion" not in calls and "undo" not in calls   # never called, only handed to desk_write
+    assert '.get("confirm") is not True' in vocal_src
 
 
 @pytest.mark.skipif(not REAL_CSV.exists(), reason="TF Editor capture not available")

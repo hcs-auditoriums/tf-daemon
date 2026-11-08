@@ -191,7 +191,8 @@ harmonics to skip: 60, 50 or 0). API: `GET /api/audio/rings`,
 ## Vocal EQ assist (mic checks)
 
 Optional and **off by default** (`[vocal] enabled = true` to turn it on). It
-**only suggests**: nothing is ever changed on the console.
+suggests; the console is changed only if you press **Apply to desk** and confirm
+(and `tf5.eq_write` is on), never automatically.
 
 During a mic check, show the vocal mic's input, press **Mic check** in the top
 bar and **Start listening**, and have the person talk normally at their usual
@@ -212,6 +213,17 @@ dashed curve on the same scale as the desk's EQ overlay (green), so the two can
 be compared directly; **Compare with desk EQ** turns that overlay on. A faint thin
 line shows the voice's difference from reference speech.
 
+**Apply to desk** (needs `tf5.eq = true` and `tf5.eq_write = true`): sets the
+input channel's EQ on the TF5 to the suggestion. A confirmation lists every
+change first: the EQ switched on if it was off, the HPF on at the suggested
+frequency, suggested bands as bells, and the remaining bands set flat (0 dB) so
+the desk matches the suggested curve. A low or high band used as an HPF / LPF is
+left alone. The panel then reports how many changes the desk confirmed (it echoes
+each one back). **Undo apply** puts back exactly the values it replaced. Only an
+input channel's PEQ can be written, not with 1-knob EQ on, and nothing in
+tf-daemon writes on its own. The analyzer taps the mic before the EQ, so the
+spectrum doesn't change after applying; the green desk EQ curve does.
+
 How it decides: it builds the voice's long-term average spectrum and compares
 its *shape* with the ANSI S3.5-1997 standard speech spectrum (normal vocal
 effort). Build-ups of 3 dB or more spanning at least 1/3 octave become cuts
@@ -225,7 +237,8 @@ and dynamics, so compression isn't included.
 
 `[vocal]`: `enabled`, `inputs` (0-based inputs that are vocal mics; `[]` = any),
 `listen_s` (20), `max_cut_db` (6), `max_boost_db` (3). API: `GET /api/vocal/status`,
-`POST /api/vocal/start|stop|clear` `{"channel": n}`.
+`POST /api/vocal/start|stop|clear` `{"channel": n}`, `POST /api/vocal/apply|undo`
+`{"channel": n, "confirm": true}`.
 
 ## Configuration
 
@@ -291,10 +304,13 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   curve on the spectrum (at the spectrum's dB scale from the View range, 0 dB at
   mid-height; band handles sit on the curve). The curve
   is computed with TF Editor's own filter maths (decompiled; see the guide's EQ
-  curve section). The client is **read-only**: it joins as a
+  curve section). The client is **read-only** by default: it joins as a
   StageMix client with `SYNCDIR:2` (console → client), and a guard refuses to
-  send anything but the subscribe / hash / sync / keepalive handshake, so it
-  cannot change a parameter. `GET /api/tf5/eq/<usb>` returns the settings and
+  send anything but the subscribe / hash / sync / keepalive handshake.
+  `tf5.eq_write` (default `false`) allows one exception, the vocal assist's
+  **Apply to desk** / **Undo**: on that click the guard lets through exactly the
+  confirmed set-param messages, only for input-channel PEQ parameters (switch,
+  HPF, bands) with values in range. `GET /api/tf5/eq/<usb>` returns the settings and
   curve. One-off read-only probe from a shell:
   `python -m tf_daemon.tfeditor <console-ip> --channels 1-8 [--watch]`.
 
