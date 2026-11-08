@@ -1065,7 +1065,9 @@ def test_page_has_the_eq_toggle():
     assert "yEq(eqAt(f))" in draw
     # The console sidebar has its own EQ graph, redrawn on every pushed change.
     side = re.search(r"function drawPanelEq\(\) \{(.*?)\n  \}\n", js, re.S).group(1)
-    assert "eqAt(f)" in side and "peqRange(d)" in side
+    assert "eqAt(f)" in side and "eqHalf()" in side and "peqRange" not in js   # the spectrum's scale
+    set_range = re.search(r"function setRange\(min, max\) \{(.*?)\n  \}\n", js, re.S).group(1)
+    assert "drawPanelEq()" in set_range
     on_eq = re.search(r"function onConsoleEq\(msg\) \{(.*?)\n  \}\n", js, re.S).group(1)
     assert "drawPanelEq()" in on_eq
     css = (static / "style.css").read_text(encoding="utf-8")

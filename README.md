@@ -294,7 +294,7 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   `guides/tf5_api.md`) and offer an **EQ** toggle that overlays the console's EQ
   curve on the spectrum (at the spectrum's dB scale from the View range, 0 dB at
   mid-height; band handles sit on the curve). The **Console** sidebar also gets an
-  **EQ** section: on/off, a small curve graph (±18 dB, widened to fit deep curves),
+  **EQ** section: on/off, a small curve graph (same scale as on the spectrum),
   and the HPF / low / high band shapes, live with every change on the desk. The curve
   is computed with TF Editor's own filter maths (decompiled; see the guide's EQ
   curve section). The client is **read-only**: it joins as a
