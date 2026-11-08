@@ -43,16 +43,18 @@
     return info;
   }
 
-  $("check").addEventListener("click", async () => {
-    setMsg("update-msg", "checking…");
+  async function checkForUpdates() {
+    $("latest").textContent = "checking…";
+    setMsg("update-msg", "");
     try {
       const r = await api("POST", "/api/system/check");
       $("latest").textContent = short(r.latest) + (r.up_to_date ? " (up to date)" : " (update available)");
-      setMsg("update-msg", "");
     } catch (e) {
+      $("latest").textContent = "couldn't check";
       setMsg("update-msg", e.message, true);
     }
-  });
+  }
+  $("check").addEventListener("click", checkForUpdates);
 
   $("update").addEventListener("click", async () => {
     if (!confirm("Pull the latest code and restart tf-daemon? Live views will drop for a few seconds.")) return;
@@ -182,6 +184,8 @@
         $("update").disabled = $("check").disabled = true;
         await followUpdate();
         $("update").disabled = $("check").disabled = false;
+      } else {
+        checkForUpdates();  // on opening the page, so "Latest" is filled in without a click
       }
     } catch (e) {
       setConn(false, "offline");

@@ -95,7 +95,7 @@ def undefined_constants(js: str) -> set[str]:
     return used - declared - BROWSER_GLOBALS
 
 
-@pytest.mark.parametrize("name", ["app.js", "rf.js", "qlxd.js", "config.js"])
+@pytest.mark.parametrize("name", ["app.js", "rf.js", "qlxd.js", "config.js", "nav.js"])
 def test_no_undefined_constants(name):
     """A constant renamed in one change but still used by another fails only in the
     browser (a ReferenceError on every frame); catch it here instead."""
@@ -109,3 +109,10 @@ def test_the_check_catches_a_missing_constant():
     assert undefined_constants("const r = /[A-Z]{2}OK/g; const Y = 1 / 2;") == set()
     assert undefined_constants("const AAA = 1, BBB = [1, 2], CCC = 3;\nf(AAA + BBB + CCC + JSON.x);") == set()
     assert undefined_constants("const T = { ALKA: 1, NIMH: 2 };") == set()
+
+
+@pytest.mark.parametrize("page", ["index.html", "rf.html", "qlxd.html", "config.html"])
+def test_every_page_has_tab_shortcuts(page):
+    html = (STATIC / page).read_text(encoding="utf-8")
+    assert '<script src="/static/nav.js"></script>' in html and 'class="tabs"' in html
+    assert html.count('aria-current="page"') == 1
