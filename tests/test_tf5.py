@@ -152,10 +152,12 @@ def test_names_and_settings_flow_into_the_engine(console):
                       tone_hz=2500, tone_db=-15)
     engine = AudioEngine(cfg, src)
     patch = [("InCh", 0), ("InCh", 1), ("St", 0), None]
-    client = TF5Client("127.0.0.1", console.port, patch, poll_s=30, on_names=engine.set_console_names)
+    client = TF5Client("127.0.0.1", console.port, patch, poll_s=30, on_names=engine.set_console_names,
+                       on_gains=engine.set_console_gains)
     client.start()
     try:
         wait_until(lambda: engine.inputs[2].label == "ST L")
+        wait_until(lambda: engine._console_gains.get(1) == -12.5)  # fader + on reach the engine
         assert [c.label for c in engine.inputs] == ["Main", "Lead Vox", "ST L", "Ch 4"]
         version = engine.meta_version
 
@@ -187,6 +189,7 @@ def test_names_and_settings_flow_into_the_engine(console):
         wait_until(lambda: engine.inputs[1].label == "Pastor")
         assert engine.meta_version > version
         wait_until(lambda: client.channels()[1]["params"]["Fader/On"]["value"] == 0)
+        wait_until(lambda: 1 in engine._console_gains and engine._console_gains[1] is None)  # off: out of the loop
 
         # A scene recall makes the client read everything again.
         n_gets = sum(r.startswith("get") for r in console.requests)

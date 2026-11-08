@@ -87,6 +87,10 @@ poll_s = 30.0               # full re-read; changes on the desk arrive in betwee
 # the protocol doesn't expose: "InCh N", "St L", "St R", or "" for none.
 # [] = the TF default: USB 1-32 = InCh 1-32, USB 33-34 = St L/R.
 usb_patch = []
+# Are the USB Direct Outs tapped after the fader (Post ON)? Ring attribution adds
+# each channel's fader to its USB level unless they are. Pre DG / Pre HPF / Pre
+# Fader taps are all before the fader: leave false.
+usb_post_fader = false
 
 # Named inputs. index is the 0-based capture channel on the device. Every input
 # can be viewed in the browser; these get buttons and are always analyzed, the

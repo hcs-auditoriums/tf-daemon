@@ -532,7 +532,8 @@
     if (live.length) {
       const e = live[0], sev = severity(e);
       alert.className = `ring-alert ${sev}`;
-      alert.textContent = `${SEV[sev].label} ${fmtHz(e.freq)} · ${e.label}` + (live.length > 1 ? ` +${live.length - 1}` : "");
+      const src = e.sources && e.sources[0] ? ` ← ${e.sources[0].label}` : "";
+      alert.textContent = `${SEV[sev].label} ${fmtHz(e.freq)} · ${e.label}${src}` + (live.length > 1 ? ` +${live.length - 1}` : "");
       alert.title = `Show ${e.label}`;
       alert.onclick = () => { if (e.channel !== state.input) selectInput(e.channel); };
     }
@@ -562,6 +563,7 @@
       const sub = el("div", "rl-sub",
         `${e.label} · GEQ ${fmtBand(e.geq)} · ${e.active ? "now" : ago(e.last_seen)}`);
       main.append(top, sub);
+      if (e.sources && e.sources.length) main.append(sourcesLine(e));
       const ign = el("button", "rl-btn", "Ignore");
       ign.type = "button";
       ign.title = "Not feedback (a steady tone): stop reporting this frequency";
@@ -570,6 +572,27 @@
       rows.push(row);
     }
     list.replaceChildren(...rows);
+  }
+
+  // Which inputs feed a ring on the mains, strongest first: "from ROEDER · KAT −5 dB".
+  // Ranked by each input's level at the ring frequency plus its fader (the USB
+  // feeds are pre-fader); channels that are off are left out.
+  function sourcesLine(e) {
+    const line = el("div", "rl-src");
+    line.title = e.sources_basis === "fader"
+      ? "Inputs feeding this ring, by level at the ring frequency + fader. Channel EQ isn't included (the USB feeds are pre-EQ)."
+      : "Inputs feeding this ring, by level at the ring frequency (fader levels unknown: no TF5 connection).";
+    line.append("from ");
+    e.sources.forEach((s, i) => {
+      if (i) line.append(" · ");
+      const b = el("button", i ? "rl-srcname" : "rl-srcname top", s.label);
+      b.type = "button";
+      b.title = `Show ${s.label}`;
+      b.onclick = () => selectInput(s.channel);
+      line.append(b);
+      if (i) line.append(` ${s.rel_db.toFixed(0)} dB`);
+    });
+    return line;
   }
 
   // Markers on the spectrum for the input being shown: live rings solid, recent dashed.

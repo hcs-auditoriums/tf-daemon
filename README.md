@@ -131,6 +131,21 @@ time, plus whatever input someone is viewing. A ring shows up as:
   feedback, until restart); **Clear** forgets past rings. The **Rings** checkbox
   hides the markers and the list (the alert stays).
 
+**Which input is ringing.** For a ring on the mains (the TF's St L/R on USB
+33/34, or the pinned inputs without a TF5), the list and the alert also name the
+inputs feeding it, strongest first: `from ROEDER · KAT −4 dB` (click a name to
+view it). A ring is the loop loudspeaker → room → mic → channel → mains; every
+open mic hears the PA, but the loop gain at the ring frequency is set by how much
+of it each channel sends back to the mains. So every input is measured at the
+ring frequency (a single-frequency DFT over ~0.34 s, four times a second while a
+ring is live) and the channel's fader from the TF5 is added; channels that are
+off are left out. This relies on the USB feeds being **pre-fader**: on the TF,
+USB 1–32 are the channel Direct Outs with a per-channel tap point (Pre DG, Pre
+HPF, Pre Fader or Post ON; Reference Manual p. 67). If yours are Post ON, set
+`tf5.usb_post_fader = true` so the fader isn't counted twice. Taps before the
+EQ also mean a notch already applied on a channel's EQ isn't seen (EQ can't be
+read over the network).
+
 It works the same during a mic check and mid-show, and does not need the ring to
 be louder than the voice. Just below feedback, the system acts as a very narrow
 resonant boost (with loop gain g the boost is 1/(1−g): +26 dB and ~0.5 Hz wide at
@@ -193,7 +208,8 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   set on the `/qlxd` page (**Network…**); that choice is saved to `state_file`
   (default `qlxd_state.json` in the working directory) and overrides config.toml.
 - `[tf5]`: `host` (console IP; `""` = off), `port` (49280), `username` /
-  `password`, `poll_s`, `usb_patch`. With a host set, the server reads the TF5's
+  `password`, `poll_s`, `usb_patch`, `usb_post_fader` (default `false`: the USB
+  Direct Outs are tapped before the fader; see Ring detection). With a host set, the server reads the TF5's
   channel names over Yamaha's remote control protocol and uses them as input
   labels (an explicit `[[channels]]` label still wins). The audio page also shows
   a **Console** sidebar (toggle in the header; stacks under the spectrum on
