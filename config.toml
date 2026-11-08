@@ -93,6 +93,12 @@ usb_patch = []
 # each channel's fader to its USB level unless they are. Pre DG / Pre HPF / Pre
 # Fader taps are all before the fader: leave false.
 usb_post_fader = false
+# Also read every channel's EQ, for the "EQ" overlay on the spectrum. RCP has no
+# EQ, so this uses the TF Editor / StageMix protocol on TCP 50368, strictly
+# read-only (the client cannot send anything that changes the console). It joins
+# as a StageMix client, so it can run alongside TF Editor.
+eq = false
+eq_port = 50368
 
 # Named inputs. index is the 0-based capture channel on the device. Every input
 # can be viewed in the browser; these get buttons and are always analyzed, the
