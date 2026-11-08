@@ -374,3 +374,8 @@ main.page {
 .rl-src { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rl-srcname { font: inherit; color: var(--text); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; }
 .rl-srcname.top { font-weight: 700; }
+
+/* ---------------------------------------------------------------- audio waterfall */
+
+.menu-panel fieldset.seg { flex-direction: row; flex-wrap: wrap; gap: 4px 14px; }
+.menu-panel fieldset.seg legend { width: 100%; }

@@ -14,6 +14,12 @@
     <details class="menu" id="view-menu">
       <summary>View</summary>
       <div class="menu-panel">
+        <fieldset class="seg" id="layout">
+          <legend>Layout</legend>
+          <label><input type="radio" name="layout" value="spectrum"> Spectrum</label>
+          <label><input type="radio" name="layout" value="both"> Both</label>
+          <label><input type="radio" name="layout" value="waterfall"> Waterfall</label>
+        </fieldset>
         <fieldset>
           <legend>Traces</legend>
           <label><input type="checkbox" id="show-avg" checked> Average</label>
@@ -27,6 +33,24 @@
             <option value="-80,-20">−80…−20 dB</option>
           </select>
         </label>
+        <fieldset>
+          <legend>Waterfall</legend>
+          <label class="menu-row">History
+            <select id="wf-span">
+              <option value="10">10 s</option>
+              <option value="30">30 s</option>
+              <option value="60">1 min</option>
+              <option value="120">2 min</option>
+              <option value="300">5 min</option>
+            </select>
+          </label>
+          <label class="menu-row">Source
+            <select id="wf-source">
+              <option value="live">Real-time</option>
+              <option value="avg">Average (3 s)</option>
+            </select>
+          </label>
+        </fieldset>
         <fieldset>
           <legend>Show</legend>
           <label><input type="checkbox" id="show-rings" checked> Rings</label>
@@ -42,8 +66,13 @@
     </div>
   </header>
   <div class="workspace">
-    <main>
-      <canvas id="spectrum" aria-label="Spectrum analyzer"></canvas>
+    <main class="split">
+      <div class="pane spectrum" id="spec-pane">
+        <canvas id="spectrum" aria-label="Spectrum analyzer"></canvas>
+      </div>
+      <div class="pane waterfall" id="wf-pane" hidden>
+        <canvas id="waterfall" aria-label="Waterfall"></canvas>
+      </div>
       <div id="readout" class="readout"></div>
       <div id="ring-list" class="ring-list" hidden></div>
     </main>
