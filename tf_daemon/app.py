@@ -23,6 +23,7 @@ from .rf.engine import RangeHint, RFEngine, fit_span
 from .rf.module import RFModule
 from .system import register_system
 from .tf5 import TF5Module
+from .vocal import VocalModule
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +77,8 @@ def build_modules(cfg: dict[str, Any], source_kind: str, wav_path: str | None = 
         modules.append(QLXDModule(qlxd))
     if str(cfg["tf5"]["host"]).strip():
         modules.append(TF5Module(cfg, modules[0].engine))
+    if cfg["vocal"]["enabled"]:
+        modules.append(VocalModule(cfg, modules[0].engine))
     return modules
 
 

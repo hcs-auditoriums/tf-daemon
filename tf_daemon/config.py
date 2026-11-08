@@ -71,6 +71,14 @@ DEFAULTS: dict[str, Any] = {
         "fmax": 12000.0,
         "mains_hz": 60.0,         # skip mains hum harmonics up to 1 kHz (50 in Europe; 0 = off)
     },
+    "vocal": {
+        # Vocal EQ assist for mic checks (suggestions only; never changes the desk).
+        "enabled": False,
+        "inputs": [],        # 0-based inputs that are vocal mics; [] = any input
+        "listen_s": 20.0,    # seconds of speech to collect
+        "max_cut_db": 6.0,
+        "max_boost_db": 3.0,
+    },
     "tf5": {
         # Read channel names (and settings) from the mixer over the network.
         "host": "",          # console IP; "" = don't connect
@@ -191,6 +199,16 @@ def _validate(cfg: dict[str, Any]) -> None:
         raise ConfigError("ring.fmin / ring.fmax must satisfy 20 <= fmin < fmax <= 20000")
     if float(r["mains_hz"]) not in (0.0, 50.0, 60.0):
         raise ConfigError("ring.mains_hz must be 50, 60 or 0")
+
+    v = cfg["vocal"]
+    if not isinstance(v["enabled"], bool):
+        raise ConfigError("vocal.enabled must be true or false")
+    if not isinstance(v["inputs"], list) or not all(isinstance(i, int) and i >= 0 for i in v["inputs"]):
+        raise ConfigError("vocal.inputs must be a list of input indices (0-based)")
+    if not 6 <= float(v["listen_s"]) <= 120:
+        raise ConfigError("vocal.listen_s must be between 6 and 120")
+    if not 1 <= float(v["max_cut_db"]) <= 12 or not 0 <= float(v["max_boost_db"]) <= 6:
+        raise ConfigError("vocal.max_cut_db must be 1..12 and vocal.max_boost_db 0..6")
 
     t = cfg["tf5"]
     if not isinstance(t["host"], str):

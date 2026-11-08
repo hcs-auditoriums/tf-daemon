@@ -12,6 +12,7 @@
   --rta: #c9d1d9;   /* real-time trace (neutral, so green stays the EQ's) */
   --eq: #3ee66e;    /* console EQ overlay: green, as the TF5 draws it */
   --eq-fill: rgba(62, 230, 110, 0.10);
+  --vocal: #b48cff;  /* vocal assist: voice vs reference */
   --ok: #4cd07d;
   --bad: #ff5d5d;
   color-scheme: dark;
@@ -386,3 +387,38 @@ main.page {
 
 .menu-panel fieldset.seg { flex-direction: row; flex-wrap: wrap; gap: 4px 14px; }
 .menu-panel fieldset.seg legend { width: 100%; }
+
+/* ---------------------------------------------------------------- vocal EQ assist */
+
+.mic-btn {
+  font: inherit; color: var(--text); background: #1e242c; border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 12px; min-height: 34px; cursor: pointer;
+}
+.mic-btn[hidden] { display: none; }
+.mic-btn[aria-expanded="true"] { border-color: var(--vocal); }
+.vocal-panel {
+  position: absolute; top: 44px; right: 16px; z-index: 10; width: 380px; max-width: calc(100% - 32px);
+  max-height: calc(100% - 60px); overflow: auto;
+  display: flex; flex-direction: column; gap: 8px; padding: 12px;
+  background: rgba(22, 26, 32, 0.96); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); font-size: 12px;
+}
+.vocal-panel[hidden] { display: none; }
+.vocal-panel p { margin: 0; }
+.vp-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.vp-x { font: inherit; font-size: 16px; color: var(--muted); background: none; border: 0; cursor: pointer; }
+.vp-row { display: flex; gap: 8px; }
+.vp-btn { font: inherit; color: var(--text); background: #1e242c; border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+.vp-btn.primary { border-color: var(--vocal); }
+.vp-bar { height: 8px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
+.vp-bar span { display: block; height: 100%; background: var(--vocal); transition: width 0.4s linear; }
+.vp-note { color: var(--muted); }
+.vp-error { color: var(--bad); }
+.vp-foot { color: var(--muted); font-size: 11px; border-top: 1px solid var(--border); padding-top: 6px; }
+.vp-check { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.vp-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.vp-table th { text-align: left; color: var(--muted); font-weight: 400; font-size: 11px; padding: 2px 4px; }
+.vp-table td { padding: 4px; border-top: 1px solid var(--border); vertical-align: top; }
+.vp-table td:first-child { font-weight: 700; color: var(--text); width: 30px; }
+.vp-table tr.boost td:nth-child(2) { color: var(--eq); }
+.vp-table tr.notch td:nth-child(3) { color: var(--peak); }
