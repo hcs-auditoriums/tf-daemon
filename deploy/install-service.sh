@@ -15,8 +15,17 @@ APP_USER=${SUDO_USER:-$(stat -c %U "$APP_DIR")}
 echo "==> app dir $APP_DIR, service user $APP_USER"
 
 echo "==> installing system packages"
-apt-get update -q
-DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3-venv libportaudio2 alsa-utils
+# Only install what's missing: never upgrade (and so never fight an apt-mark hold).
+missing=()
+for pkg in python3-venv libportaudio2 alsa-utils; do
+  dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed" || missing+=("$pkg")
+done
+if ((${#missing[@]})); then
+  apt-get update -q
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-upgrade "${missing[@]}"
+else
+  echo "    all present"
+fi
 
 echo "==> building venv"
 sudo -u "$APP_USER" bash -c "
