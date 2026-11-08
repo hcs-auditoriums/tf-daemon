@@ -978,3 +978,7 @@ def test_page_has_the_eq_toggle():
     # The page only ever reads the EQ.
     assert not re.search(r"fetch\(`/api/tf5/eq[^`]*`\s*,", js)
     assert "--eq:" in (static / "style.css").read_text(encoding="utf-8")
+    draw = re.search(r"function drawEq\(\) \{(.*?)\n  \}\n", js, re.S).group(1)
+    # Same dB scale as the spectrum (the View range), and the handles sit on the curve.
+    assert "state.dbMax - state.dbMin" in draw
+    assert "yEq(eqAt(f))" in draw
