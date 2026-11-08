@@ -128,8 +128,8 @@ time, plus whatever input someone is viewing. A ring shows up as:
 - the **Rings list** (bottom left of the spectrum): frequency, input, the
   nearest 1/3-octave **GEQ band** to pull down, how often it came back (`×3`)
   and when. **Ignore** stops reporting a frequency (a steady tone that isn't
-  feedback, until restart); **Clear** forgets past rings. The **Rings** checkbox
-  hides the markers and the list (the alert stays).
+  feedback, until restart); **Clear** forgets past rings. **Rings** in the
+  **View** menu hides the markers and the list (the alert stays).
 
 **Which input is ringing.** For a ring on the mains (the TF's St L/R on USB
 33/34, or the pinned inputs without a TF5), the list and the alert also name the
@@ -212,7 +212,7 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   Direct Outs are tapped before the fader; see Ring detection). With a host set, the server reads the TF5's
   channel names over Yamaha's remote control protocol and uses them as input
   labels (an explicit `[[channels]]` label still wins). The audio page also shows
-  a **Console** sidebar (toggle in the header; stacks under the spectrum on
+  a **Console** sidebar (toggle in the **View** menu; stacks under the spectrum on
   narrow screens) for the shown input: name and colour, on/off, a fader with its
   level, pan, and the channel's sends to the mixes (by mix name; stereo pairs
   shown once), FX 1/2 and mono. Only active sends are listed unless **all** is

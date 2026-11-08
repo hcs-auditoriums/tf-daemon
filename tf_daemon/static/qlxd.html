@@ -8,10 +8,8 @@
 </head>
 <body class="scroll">
   <header>
-    <h1>tf-daemon · Wireless</h1>
-    <a class="navlink" href="/">‹ Audio</a>
-    <a class="navlink" href="/rf">RF</a>
-    <a class="navlink" href="/config">Config</a>
+    <h1>tf-daemon</h1>
+    <nav class="tabs" aria-label="Pages"><a href="/">Audio</a><a href="/rf">RF</a><a href="/qlxd" aria-current="page">Wireless</a><a href="/config">Config</a></nav>
     <div class="controls">
       <label>Sort
         <select id="sort">
@@ -22,8 +20,10 @@
       </label>
       <button id="toggle-net" type="button" aria-expanded="false">Network…</button>
     </div>
-    <span id="error" class="error"></span>
-    <div id="conn" class="conn" title="Connection">connecting…</div>
+    <div class="status">
+      <span id="error" class="error"></span>
+      <div id="conn" class="conn" title="Connection">connecting…</div>
+    </div>
   </header>
 
   <section id="net" class="netpanel" hidden>

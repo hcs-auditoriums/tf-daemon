@@ -353,6 +353,11 @@
     renderPanel();
   };
 
+  // View menu (a <details>): close on a click outside it or Escape.
+  const viewMenu = $("view-menu");
+  document.addEventListener("click", (e) => { if (viewMenu.open && !viewMenu.contains(e.target)) viewMenu.open = false; });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") viewMenu.open = false; });
+
   $("show-avg").onchange = (e) => { state.showAvg = e.target.checked; state.dirty = true; };
   $("show-peak").onchange = (e) => { state.showPeak = e.target.checked; state.dirty = true; };
   $("show-live").onchange = (e) => { state.showLive = e.target.checked; state.dirty = true; };
