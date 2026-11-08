@@ -10,6 +10,7 @@
   --avg-fill: rgba(63, 182, 255, 0.16);
   --peak: #ffb547;
   --rta: #8ee6a8;   /* real-time trace */
+  --eq: #e879f9;    /* console EQ overlay */
   --ok: #4cd07d;
   --bad: #ff5d5d;
   color-scheme: dark;

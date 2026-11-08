@@ -78,6 +78,8 @@ DEFAULTS: dict[str, Any] = {
         "password": "",
         "poll_s": 30.0,      # full re-read period (changes on the desk are pushed in between)
         "usb_patch": [],     # per USB capture channel: "InCh N", "St L", "St R" or ""; [] = TF default
+        "eq": False,         # also read the EQ (TF Editor protocol, read-only) for the spectrum overlay
+        "eq_port": 50368,
     },
     "update": {
         # Where the /config page's Update button pulls from.
@@ -202,6 +204,10 @@ def _validate(cfg: dict[str, Any]) -> None:
             parse_patch_entry(entry)
         except ValueError as e:
             raise ConfigError(f"[tf5] {e}") from None
+    if not isinstance(t["eq"], bool):
+        raise ConfigError("tf5.eq must be true or false")
+    if not 1 <= int(t["eq_port"]) <= 65535:
+        raise ConfigError(f"tf5.eq_port must be 1..65535, got {t['eq_port']}")
 
     q = cfg["qlxd"]
     if str(q["source"]).lower() not in ("device", "demo"):

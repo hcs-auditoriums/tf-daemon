@@ -18,7 +18,8 @@ What gets read for each patched source: name, colour, fader level, on, pan
 (balance for ST) and, for input channels, the sends to the mixes, FX and mono;
 plus the mix names. On connect the console is also asked for its parameter
 list (``prminfo``); any input-channel gain / EQ / HPF / dynamics parameters it
-lists are read as well. The TF5 this was built against lists none of those.
+lists are read as well. The TF5 this was built against lists none of those;
+its EQ is read over the TF Editor protocol instead (``tf5.eq``, tfeditor.py).
 
 USB capture channels carry whatever the TF's USB output patch routes to them;
 RCP doesn't expose that patch, so ``tf5.usb_patch`` describes it (default: the
@@ -39,6 +40,8 @@ from typing import Any
 
 from flask import Blueprint, Flask, jsonify
 from flask_sock import Sock
+
+from .tfeditor import CURVE_FREQS, TFEditorClient, eq_curve
 
 log = logging.getLogger(__name__)
 
@@ -368,9 +371,14 @@ class TF5Client:
 class TF5Module:
     """Reads the TF5's channel names and settings; feeds names to the audio engine.
 
+    With ``tf5.eq`` it also reads every channel's EQ over the TF Editor protocol
+    (tfeditor.py, read-only) for the spectrum overlay.
+
     Routes:
       GET /api/tf5/status     connection state, discovered parameters
       GET /api/tf5/channels   per USB input: console source and its settings; mix names
+      GET /api/tf5/eq/<usb>   EQ of the console channel on that USB input + its curve
+                              (404 when tf5.eq is off)
     """
 
     name = "tf5"
@@ -379,8 +387,28 @@ class TF5Module:
         t = cfg["tf5"]
         if t["username"] or t["password"]:
             log.info("tf5.username/password are set, but the TF5's remote protocol has no login; not sent")
-        self.client = TF5Client(str(t["host"]), int(t["port"]), patch_from(cfg), float(t["poll_s"]),
+        self.patch = patch_from(cfg)
+        self.client = TF5Client(str(t["host"]), int(t["port"]), self.patch, float(t["poll_s"]),
                                 audio_engine.set_console_names)
+        self.eq_client: TFEditorClient | None = None
+        if t["eq"]:
+            self.eq_client = TFEditorClient(str(t["host"]), int(t["eq_port"]))
+
+    def eq(self, usb: int) -> dict[str, Any]:
+        """EQ of the console channel feeding USB input ``usb`` and its response curve (dB)."""
+        ec = self.eq_client
+        assert ec is not None
+        src = self.patch[usb] if 0 <= usb < len(self.patch) else None
+        settings = ec.eq(*src) if src is not None else None
+        return {
+            "index": usb,
+            "source": source_label(src) if src is not None else None,
+            "connected": ec.connected,
+            "synced": ec.synced,
+            "eq": settings,
+            "freqs": [round(float(f), 2) for f in CURVE_FREQS] if settings else [],
+            "curve": [round(float(v), 2) for v in eq_curve(settings)] if settings else [],
+        }
 
     def register(self, app: Flask, sock: Sock) -> None:
         client = self.client
@@ -388,20 +416,32 @@ class TF5Module:
 
         @bp.get("/status")
         def status():
-            return jsonify(client.status())
+            return jsonify(self.status())
 
         @bp.get("/channels")
         def channels():
             return jsonify({"connected": client.connected, "channels": client.channels(),
                             "mixes": client.mixes()})
 
+        @bp.get("/eq/<int:usb>")
+        def eq(usb: int):
+            if self.eq_client is None:
+                return jsonify({"error": "tf5.eq is off"}), 404
+            return jsonify(self.eq(usb))
+
         app.register_blueprint(bp)
 
     def start(self) -> None:
         self.client.start()
+        if self.eq_client is not None:
+            self.eq_client.start()
 
     def stop(self) -> None:
         self.client.stop()
+        if self.eq_client is not None:
+            self.eq_client.stop()
 
     def status(self) -> dict[str, Any]:
-        return self.client.status()
+        st = self.client.status()
+        st["eq"] = self.eq_client.status() if self.eq_client is not None else None
+        return st

@@ -13,6 +13,7 @@
   const C = {
     grid: color("--grid"), gridStrong: color("--grid-strong"), muted: color("--muted"),
     avg: color("--avg"), avgFill: color("--avg-fill"), peak: color("--peak"), rta: color("--rta"),
+    eq: color("--eq"),
   };
 
   const state = {
@@ -171,6 +172,8 @@
     markSelected(index);
     send({ cmd: "view", channel: index });
     renderPanel();
+    state.eq = null;
+    if (state.showEq) fetchEq();
     state.dirty = true;
   }
 
@@ -353,6 +356,120 @@
     renderPanel();
   };
 
+  // ------------------------------------------------------------------ console EQ overlay
+
+  // The EQ set on the console for the channel on the shown input
+  // (GET /api/tf5/eq/<usb>; only when tf5.eq is on). Read-only: this page
+  // never changes the console. Drawn on its own ±EQ_RANGE dB scale, centred.
+  const EQ_RANGE = 18;
+  state.showEq = loadInt("tf.eq", 0) === 1;
+  state.eq = null;         // last /api/tf5/eq response for state.input
+  let eqAvailable = null;  // null = not known yet, false = tf5.eq off (404)
+
+  async function fetchEq() {
+    const want = state.input;
+    try {
+      const r = await fetch(`/api/tf5/eq/${want}`);
+      if (r.status === 404) { eqAvailable = false; state.eq = null; }
+      else if (r.ok) {
+        eqAvailable = true;
+        const d = await r.json();
+        if (want === state.input) state.eq = d;
+      }
+    } catch {
+      if (state.eq) state.eq = { ...state.eq, connected: false };
+    }
+    $("eq-toggle").hidden = !eqAvailable;
+    state.dirty = true;
+  }
+
+  async function pollEq() {
+    if (eqAvailable === null || (eqAvailable && state.showEq)) await fetchEq();
+    if (eqAvailable !== false) setTimeout(pollEq, 1000);
+  }
+
+  $("show-eq").checked = state.showEq;
+  $("show-eq").onchange = (e) => {
+    state.showEq = e.target.checked;
+    save("tf.eq", state.showEq ? 1 : 0);
+    if (state.showEq) fetchEq();
+    state.dirty = true;
+  };
+
+  // EQ value (dB) at f, interpolated on the curve's log-spaced points.
+  function eqAt(f) {
+    const d = state.eq;
+    if (!d || !d.freqs || !d.freqs.length) return null;
+    const fr = d.freqs, c = d.curve;
+    if (f <= fr[0]) return c[0];
+    for (let i = 1; i < fr.length; i++) {
+      if (f <= fr[i]) {
+        const t = (Math.log(f) - Math.log(fr[i - 1])) / (Math.log(fr[i]) - Math.log(fr[i - 1]));
+        return c[i - 1] + t * (c[i] - c[i - 1]);
+      }
+    }
+    return c[c.length - 1];
+  }
+
+  function eqNote(d) {
+    if (!d.connected) return "EQ · console not connected";
+    if (!d.synced) return "EQ · reading console…";
+    if (!d.source) return `EQ · USB ${d.index + 1} is not on the console patch`;
+    if (!d.eq) return `EQ · not available for ${d.source}`;
+    return `EQ ${d.source}${d.eq.on ? "" : " · OFF"}${d.eq.one_knob ? " · 1-knob on" : ""} · approx.`;
+  }
+
+  function drawEq() {
+    const d = state.eq;
+    if (!state.showEq || !eqAvailable || !d || d.index !== state.input) return;
+    const top = PAD.t, bot = H - PAD.b, x0 = PAD.l, x1 = W - PAD.r;
+    const yEq = (db) => (top + bot) / 2 - db / EQ_RANGE * (bot - top) / 2;
+    const yc = (db) => Math.min(bot, Math.max(top, yEq(db)));
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = C.eq; ctx.fillStyle = C.eq;
+
+    // Its scale: 0 dB line plus labels at the right edge.
+    ctx.globalAlpha = 0.4;
+    ctx.setLineDash([2, 4]);
+    const y0 = Math.round(yEq(0)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.85;
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (const db of [12, 6, 0, -6, -12]) ctx.fillText(`${db > 0 ? "+" : ""}${db}`, x1 - 4, yEq(db));
+    ctx.textAlign = "left"; ctx.textBaseline = "top";
+    ctx.fillText(eqNote(d), x0 + 6, top + 4);
+    ctx.globalAlpha = 1;
+    const eq = d.eq;
+    if (!eq || !d.freqs.length) return;
+
+    // The response curve; dashed and dim when the EQ is switched off on the desk.
+    ctx.globalAlpha = eq.on ? 1 : 0.45;
+    ctx.lineWidth = 2;
+    if (!eq.on) ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    d.freqs.forEach((f, i) => { const x = xOf(f), y = yc(d.curve[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // A handle per band (filled when it does something) and the HPF.
+    ctx.lineWidth = 1.5;
+    ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+    const handle = (f, db, label, active) => {
+      const x = xOf(f), y = yc(db);
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, 2 * Math.PI);
+      if (active) ctx.fill(); else ctx.stroke();
+      ctx.fillText(label, x, y - 6);
+    };
+    if (eq.hpf && eq.hpf.on) handle(eq.hpf.freq, 0, "HPF", true);
+    for (const b of eq.bands) {
+      const filter = b.type === "hpf" || b.type === "lpf";
+      handle(b.freq, filter ? 0 : b.gain, filter ? b.type.toUpperCase() : b.label, filter || b.gain !== 0);
+    }
+    ctx.globalAlpha = 1; ctx.lineWidth = 1;
+  }
+
   $("show-avg").onchange = (e) => { state.showAvg = e.target.checked; state.dirty = true; };
   $("show-peak").onchange = (e) => { state.showPeak = e.target.checked; state.dirty = true; };
   $("show-live").onchange = (e) => { state.showLive = e.target.checked; state.dirty = true; };
@@ -471,6 +588,8 @@
     const a = state.avg[i], p = state.peak[i], l = state.live[i];
     ro.textContent = `${fBin >= 1000 ? (fBin / 1000).toFixed(2) + " kHz" : fBin.toFixed(1) + " Hz"}` +
       `  now ${l.toFixed(1)} dB  avg ${a.toFixed(1)} dB  peak ${p.toFixed(1)} dB  cursor ${dbOfY(h.y).toFixed(1)} dB`;
+    const eqDb = state.showEq && state.eq && state.eq.eq ? eqAt(f) : null;
+    if (eqDb !== null) ro.textContent += `  EQ ${eqDb > 0 ? "+" : ""}${eqDb.toFixed(1)} dB`;
     ro.style.display = "block";
   }
 
@@ -486,6 +605,7 @@
     if (state.showAvg) trace(state.avg, C.avg, C.avgFill);
     if (state.showLive) trace(state.live, C.rta, null, 1);
     drawRingMarkers();
+    drawEq();
     ctx.restore();
     drawHover();
   }
@@ -614,5 +734,6 @@
   resize();
   connect();
   pollConsole();
+  pollEq();
   requestAnimationFrame(loop);
 })();
