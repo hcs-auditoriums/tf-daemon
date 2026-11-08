@@ -24,14 +24,17 @@
         </select>
       </label>
       <button id="reset-peak" type="button">Reset peak</button>
+      <label id="console-toggle" hidden><input type="checkbox" id="show-console" checked> Console</label>
     </div>
     <div id="conn" class="conn" title="Connection">connecting…</div>
   </header>
-  <div id="console-strip" class="strip" hidden></div>
-  <main>
-    <canvas id="spectrum" aria-label="Spectrum analyzer"></canvas>
-    <div id="readout" class="readout"></div>
-  </main>
+  <div class="workspace">
+    <main>
+      <canvas id="spectrum" aria-label="Spectrum analyzer"></canvas>
+      <div id="readout" class="readout"></div>
+    </main>
+    <aside id="console-panel" class="console-panel" aria-label="Console channel" hidden></aside>
+  </div>
   <footer id="info"></footer>
   <script src="/static/app.js"></script>
 </body>
