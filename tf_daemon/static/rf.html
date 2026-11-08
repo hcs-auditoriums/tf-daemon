@@ -8,10 +8,14 @@
 </head>
 <body>
   <header>
-    <h1>tf-daemon · RF</h1>
-    <a class="navlink" href="/">‹ Audio</a>
-    <a class="navlink" href="/qlxd">Wireless ›</a>
-    <a class="navlink" href="/config">Config</a>
+    <h1>tf-daemon</h1>
+    <nav class="tabs" aria-label="Pages"><a href="/">Audio</a><a href="/rf" aria-current="page">RF</a><a href="/qlxd">Wireless</a><a href="/config">Config</a></nav>
+    <div class="status">
+      <span id="error" class="error"></span>
+      <div id="conn" class="conn" title="Connection">connecting…</div>
+    </div>
+  </header>
+  <div class="toolbar">
     <div class="controls">
       <button id="connect" type="button">Connect</button>
       <div class="group">
@@ -40,9 +44,7 @@
         <button id="reset-peak" type="button" disabled>Reset peak</button>
       </div>
     </div>
-    <span id="error" class="error"></span>
-    <div id="conn" class="conn" title="Connection">connecting…</div>
-  </header>
+  </div>
   <main class="split">
     <div class="pane spectrum">
       <canvas id="spectrum" aria-label="RF spectrum"></canvas>

@@ -62,7 +62,7 @@ select {
   border: 1px solid var(--border); border-radius: 6px; padding: 5px 6px;
 }
 
-.conn { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.conn { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .conn::before {
   content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   margin-right: 6px; background: var(--bad); vertical-align: 0;
@@ -86,13 +86,50 @@ footer {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------------------------------------------------------------- page nav */
+/* ---------------------------------------------------------------- top bar: page tabs, status, menus */
 
-.navlink {
-  color: var(--muted); text-decoration: none; font-size: 13px;
-  border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px;
+.tabs { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex-wrap: nowrap; }
+.tabs a {
+  color: var(--muted); text-decoration: none; font-size: 13px; padding: 6px 12px;
+  border-left: 1px solid var(--border); min-height: 32px; display: flex; align-items: center;
 }
-.navlink:hover { color: var(--text); border-color: var(--muted); }
+.tabs a:first-child { border-left: 0; }
+.tabs a:hover { color: var(--text); background: #1e242c; }
+.tabs a[aria-current="page"] { color: var(--text); background: #24435c; font-weight: 600; }
+
+.status { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+
+/* Page-specific controls under the top bar (RF sweep form). */
+.toolbar { padding: 8px 16px; background: var(--bg); border-bottom: 1px solid var(--border); }
+
+/* Dropdown menu (native <details>): the summary is the button. */
+.menu { position: relative; }
+.menu summary {
+  list-style: none; cursor: pointer; user-select: none;
+  font: inherit; color: var(--text); background: #1e242c;
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; min-height: 34px;
+  display: flex; align-items: center; gap: 6px;
+}
+.menu summary::-webkit-details-marker { display: none; }
+.menu summary::after { content: "▾"; color: var(--muted); font-size: 11px; }
+.menu[open] summary { border-color: var(--avg); }
+.menu summary:hover { border-color: var(--muted); }
+.menu-panel {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 20; min-width: 220px;
+  display: flex; flex-direction: column; gap: 12px; padding: 12px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.menu-panel fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.menu-panel legend { padding: 0 0 4px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.menu-panel label { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.menu-panel label[hidden] { display: none; }
+.menu-row { justify-content: space-between; }
+.menu-panel button {
+  font: inherit; color: var(--text); background: #1e242c; border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 12px; cursor: pointer;
+}
+.menu-panel button:hover { border-color: var(--muted); }
 
 /* ---------------------------------------------------------------- RF page */
 
@@ -334,3 +371,6 @@ main.page {
   border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; cursor: pointer;
 }
 .rl-btn:hover { border-color: var(--muted); }
+.rl-src { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-srcname { font: inherit; color: var(--text); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; }
+.rl-srcname.top { font-weight: 700; }

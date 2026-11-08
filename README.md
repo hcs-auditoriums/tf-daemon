@@ -128,8 +128,23 @@ time, plus whatever input someone is viewing. A ring shows up as:
 - the **Rings list** (bottom left of the spectrum): frequency, input, the
   nearest 1/3-octave **GEQ band** to pull down, how often it came back (`×3`)
   and when. **Ignore** stops reporting a frequency (a steady tone that isn't
-  feedback, until restart); **Clear** forgets past rings. The **Rings** checkbox
-  hides the markers and the list (the alert stays).
+  feedback, until restart); **Clear** forgets past rings. **Rings** in the
+  **View** menu hides the markers and the list (the alert stays).
+
+**Which input is ringing.** For a ring on the mains (the TF's St L/R on USB
+33/34, or the pinned inputs without a TF5), the list and the alert also name the
+inputs feeding it, strongest first: `from ROEDER · KAT −4 dB` (click a name to
+view it). A ring is the loop loudspeaker → room → mic → channel → mains; every
+open mic hears the PA, but the loop gain at the ring frequency is set by how much
+of it each channel sends back to the mains. So every input is measured at the
+ring frequency (a single-frequency DFT over ~0.34 s, four times a second while a
+ring is live) and the channel's fader from the TF5 is added; channels that are
+off are left out. This relies on the USB feeds being **pre-fader**: on the TF,
+USB 1–32 are the channel Direct Outs with a per-channel tap point (Pre DG, Pre
+HPF, Pre Fader or Post ON; Reference Manual p. 67). If yours are Post ON, set
+`tf5.usb_post_fader = true` so the fader isn't counted twice. Taps before the
+EQ also mean a notch already applied on a channel's EQ isn't seen (EQ can't be
+read over the network).
 
 It works the same during a mic check and mid-show, and does not need the ring to
 be louder than the voice. Just below feedback, the system acts as a very narrow
@@ -170,9 +185,18 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
 `tf_daemon/config.py`. Highlights:
 
 - `audio.device`: case-insensitive substring of the capture device name (default `"TF"`).
-  All channels the device offers are opened, and every one can be picked in the
-  browser (the input menu). An input is analyzed only while someone views it,
-  except the `[[channels]]` ones, which are always analyzed.
+  `audio.channels` (34) channels are opened (a device with fewer is zero-padded),
+  and every one can be picked in the browser (the input menu). An input is
+  analyzed only while someone views it, except the `[[channels]]` ones, which
+  are always analyzed.
+- **Unplugged devices don't stop anything.** The server starts without the TF5
+  connected and opens it when it appears (retrying every 3 s; the reason shows in
+  `GET /api/audio/status` under `source_stats.error`). If the USB audio stops
+  delivering for 2 s (unplugged, power-cycled) the stream is closed, PortAudio
+  rescanned and the device reopened when it's back; the audio page shows
+  "no audio" meanwhile. The tinySA, the TF5's network control and the QLX-D
+  receivers reconnect on their own the same way, and a tinySA that stops
+  answering times out after 20 s instead of tsapython's 120 s.
 - `audio.samplerate`: must be 48000 (the TF5 is fixed at 48 kHz).
 - `dsp.fft_size` (32768, ~1.46 Hz bins), `dsp.hop` (2400, ~20 updates/s),
   `dsp.average_tau` (3 s).
@@ -193,10 +217,11 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   set on the `/qlxd` page (**Network…**); that choice is saved to `state_file`
   (default `qlxd_state.json` in the working directory) and overrides config.toml.
 - `[tf5]`: `host` (console IP; `""` = off), `port` (49280), `username` /
-  `password`, `poll_s`, `usb_patch`. With a host set, the server reads the TF5's
+  `password`, `poll_s`, `usb_patch`, `usb_post_fader` (default `false`: the USB
+  Direct Outs are tapped before the fader; see Ring detection). With a host set, the server reads the TF5's
   channel names over Yamaha's remote control protocol and uses them as input
   labels (an explicit `[[channels]]` label still wins). The audio page also shows
-  a **Console** sidebar (toggle in the header; stacks under the spectrum on
+  a **Console** sidebar (toggle in the **View** menu; stacks under the spectrum on
   narrow screens) for the shown input: name and colour, on/off, a fader with its
   level, pan, and the channel's sends to the mixes (by mix name; stereo pairs
   shown once), FX 1/2 and mono. Only active sends are listed unless **all** is

@@ -9,6 +9,8 @@ port = 8080
 [audio]
 # Case-insensitive substring of the capture device name (DeviceSource only).
 device = "TF"
+# Capture channels (TF5: 32 inputs + St L/R). A device with fewer is zero-padded.
+channels = 34
 # The TF5 runs at a fixed 48 kHz. Other rates are rejected.
 samplerate = 48000
 # Frames per capture callback / per synthetic block.
@@ -87,6 +89,10 @@ poll_s = 30.0               # full re-read; changes on the desk arrive in betwee
 # the protocol doesn't expose: "InCh N", "St L", "St R", or "" for none.
 # [] = the TF default: USB 1-32 = InCh 1-32, USB 33-34 = St L/R.
 usb_patch = []
+# Are the USB Direct Outs tapped after the fader (Post ON)? Ring attribution adds
+# each channel's fader to its USB level unless they are. Pre DG / Pre HPF / Pre
+# Fader taps are all before the fader: leave false.
+usb_post_fader = false
 # Also read every channel's EQ, for the "EQ" overlay on the spectrum. RCP has no
 # EQ, so this uses the TF Editor / StageMix protocol on TCP 50368, strictly
 # read-only (the client cannot send anything that changes the console). It joins

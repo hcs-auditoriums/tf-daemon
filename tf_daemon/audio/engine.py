@@ -36,8 +36,8 @@ from typing import Any
 import numpy as np
 
 from ..config import Channel, channels_from
-from ..dsp.ring import RingDetector, RingLog, RingSettings
-from ..dsp.spectrum import SpectrumAnalyzer
+from ..dsp.ring import RingDetector, RingLog, RingSettings, narrowband_levels
+from ..dsp.spectrum import SpectrumAnalyzer, blackman_harris
 from ..hub import FrameHub
 from .ringbuffer import RingBuffer
 from .sources import Source, SourceError
@@ -106,6 +106,15 @@ class AudioEngine:
             self._ring_settings = RingSettings(**{**rs.__dict__, "n_fft": min(rs.n_fft, self.n_fft)})
         self._detectors: dict[int, RingDetector] = {i: d for i in self._analyzers if (d := self._new_detector())}
 
+        # Which input feeds a ring on a bus (Main L/R): see dsp/ring.py. Buses
+        # are the pinned inputs until the TF5 patch says otherwise.
+        self._bus_inputs: frozenset[int] = self._pinned
+        self._console_gains: dict[int, float | None] = {}  # input -> fader dB, None = off / -inf
+        self._usb_post_fader = bool(cfg["tf5"]["usb_post_fader"])
+        self._attr_n = self._ring_settings.n_fft if self._ring_settings else 0
+        self._attr_window = blackman_harris(self._attr_n) if self._attr_n else None
+        self._attr_buf = np.zeros((source.channels, self._attr_n), dtype=np.float32)
+
         n_bins = self.analyzer.bins.count
         self._frame = np.zeros((source.channels, self.n_fft), dtype=np.float32)
         self._scaled = np.zeros(n_bins, dtype=np.float32)
@@ -160,6 +169,53 @@ class AudioEngine:
             self.inputs = self._build_inputs(len(self.inputs))
             self._meta_version += 1
         log.info("Console channel names updated (%d named)", len(names))
+
+    def set_console_gains(self, gains: dict[int, float | None]) -> None:
+        """Fader level (dB) per input from the mixer; None = channel off or fader at -inf (thread-safe)."""
+        with self._lock:
+            self._console_gains = dict(gains)
+
+    def set_bus_inputs(self, indices: list[int]) -> None:
+        """Inputs that carry a mix (e.g. the TF's St L/R), not a source: rings there get attributed."""
+        if indices:
+            with self._lock:
+                self._bus_inputs = frozenset(i for i in indices if 0 <= i < len(self.inputs))
+
+    ATTRIBUTE_EVERY = 5      # hops (4 per second at the default hop)
+    ATTRIBUTE_MIN_DB = -100.0  # an input quieter than this at the ring frequency isn't ranked
+
+    def _attribute(self) -> None:
+        """Rank the source inputs feeding each live ring on a bus."""
+        with self._lock:
+            bus, gains = self._bus_inputs, dict(self._console_gains)
+        rings = self.rings.active_on(bus)
+        if not rings or self._attr_window is None:
+            return
+        sources = [i for i in range(len(self.inputs)) if i not in bus]
+        if not sources:
+            return
+        buf = self._attr_buf[:len(sources)]
+        self.ring.read_latest(buf, sources)
+        freqs = sorted({f for _, f in rings})
+        levels = narrowband_levels(buf, freqs, self.analyzer.samplerate, self._attr_window)
+        basis = "fader" if gains and not self._usb_post_fader else "level"
+        for channel, f in rings:
+            k = freqs.index(f)
+            contributions = []
+            for row, i in enumerate(sources):
+                db = float(levels[row, k])
+                if db < self.ATTRIBUTE_MIN_DB:
+                    continue  # nothing at this frequency on this input (unused or silent)
+                if gains:
+                    if i not in gains:
+                        continue  # not on the console patch
+                    g = gains[i]
+                    if g is None:
+                        continue  # channel off: not in the loop
+                    if not self._usb_post_fader:
+                        db += g
+                contributions.append((i, self.inputs[i].label, db))
+            self.rings.set_sources(channel, f, contributions, basis)
 
     @property
     def meta_version(self) -> int:
@@ -249,8 +305,9 @@ class AudioEngine:
 
     def _run(self) -> None:
         target = self.n_fft  # wait until one full frame exists
-        try:
-            while not self._stop.is_set():
+        last_err = 0.0
+        while not self._stop.is_set():
+            try:
                 written = self.ring.wait_for(target, timeout=0.5)
                 if written < target:
                     continue
@@ -268,6 +325,8 @@ class AudioEngine:
                         rings = det.process(frame[row], stream_t)
                         self.rings.update(index, self.inputs[index].label, rings, wall_t)
                 self._publish(active)
+                if detectors and self._frames % self.ATTRIBUTE_EVERY == 0:
+                    self._attribute()
                 dt = time.perf_counter() - t0
                 self._proc_time_ewma += 0.05 * (dt - self._proc_time_ewma)
                 self._frames += 1
@@ -276,9 +335,13 @@ class AudioEngine:
                 if written - target > self.n_fft:  # fell behind: drop to the newest data
                     self._skipped_hops += (written - target) // self.hop
                     target = written + self.hop
-        except Exception:
-            log.exception("Analysis thread crashed")
-            raise
+            except Exception:
+                # Never let one bad hop stop the analysis; log at most every 10 s.
+                if time.monotonic() - last_err > 10:
+                    log.exception("Analysis error (continuing)")
+                    last_err = time.monotonic()
+                target = self.ring.written + self.hop  # skip past the frame that failed
+                self._stop.wait(0.05)
 
     def _publish(self, active: list[tuple[int, SpectrumAnalyzer]]) -> None:
         n_bins = self.analyzer.bins.count

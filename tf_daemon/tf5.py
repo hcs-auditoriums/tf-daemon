@@ -147,13 +147,18 @@ def format_value(p: Param, raw: str | None) -> Any:
 class TF5Client:
     """Keeps a connection to the console and the latest values for ``patch``.
 
-    ``on_names`` gets {usb_index: name} every time a name changes.
+    ``on_names`` gets {usb_index: name} every time a name changes; ``on_gains``
+    gets {usb_index: fader dB or None (off / -inf)} every time a fader or on
+    switch changes.
     """
 
     def __init__(self, host: str, port: int, patch: list[tuple[str, int] | None], poll_s: float,
-                 on_names: Callable[[dict[int, str]], None]) -> None:
+                 on_names: Callable[[dict[int, str]], None],
+                 on_gains: Callable[[dict[int, float | None]], None] | None = None) -> None:
         self.host, self.port, self.patch, self.poll_s = host, port, patch, poll_s
         self.on_names = on_names
+        self.on_gains = on_gains
+        self._gains_dirty = False
         self._lock = threading.Lock()
         self._params: dict[str, dict[str, Param]] = {k: {p.path: p for p in ps} for k, ps in BASE_PARAMS.items()}
         self._values: dict[tuple[str, int, str, int], str] = {}  # (kind, x, path, y) -> raw value
@@ -292,6 +297,9 @@ class TF5Client:
                         names_changed |= self._handle(sock, line)
                 if names_changed:
                     self._report()
+                if self._gains_dirty:
+                    self._gains_dirty = False
+                    self._report_gains()
 
     def _send(self, sock: socket.socket, lines: list[str]) -> None:
         for i in range(0, len(lines), SEND_CHUNK):
@@ -336,6 +344,8 @@ class TF5Client:
                 return False
             self._values[key] = args[3]
         self.updated = time.time()
+        if path in ("Fader/Level", "Fader/On") and kind != "Mix":
+            self._gains_dirty = True
         return path == NAME.path and kind != "Mix"
 
     def _on_prminfo(self, sock: socket.socket, status: str, args: list[str]) -> None:
@@ -360,6 +370,28 @@ class TF5Client:
             log.info("TF5 lists %d parameters; reading %d extra input-channel parameter(s)", n, extras)
             if extras:
                 self._request_all(sock)
+
+    def gains(self) -> dict[int, float | None]:
+        """Per USB input whose channel state is known: fader dB, or None if off or at -inf."""
+        out: dict[int, float | None] = {}
+        with self._lock:
+            for i, src in enumerate(self.patch):
+                if src is None:
+                    continue
+                on = self._values.get((src[0], src[1], "Fader/On", 0))
+                level = self._values.get((src[0], src[1], "Fader/Level", 0))
+                if on is None or level is None:
+                    continue
+                out[i] = None if on == "0" else format_value(LEVEL, level)
+        return out
+
+    def _report_gains(self) -> None:
+        if self.on_gains is None:
+            return
+        try:
+            self.on_gains(self.gains())
+        except Exception:
+            log.exception("Applying TF5 fader levels failed")
 
     def _report(self) -> None:
         try:
@@ -387,9 +419,11 @@ class TF5Module:
         t = cfg["tf5"]
         if t["username"] or t["password"]:
             log.info("tf5.username/password are set, but the TF5's remote protocol has no login; not sent")
-        self.patch = patch_from(cfg)
-        self.client = TF5Client(str(t["host"]), int(t["port"]), self.patch, float(t["poll_s"]),
-                                audio_engine.set_console_names)
+        self.patch = patch = patch_from(cfg)
+        self.client = TF5Client(str(t["host"]), int(t["port"]), patch, float(t["poll_s"]),
+                                audio_engine.set_console_names, audio_engine.set_console_gains)
+        # USB channels carrying the stereo bus are mixes, not sources (for ring attribution).
+        audio_engine.set_bus_inputs([i for i, src in enumerate(patch) if src is not None and src[0] == "St"])
         self.eq_client: TFEditorClient | None = None
         if t["eq"]:
             self.eq_client = TFEditorClient(str(t["host"]), int(t["eq_port"]))

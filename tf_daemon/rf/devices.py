@@ -26,6 +26,8 @@ BASIC_LOW_MAX_HZ = 350_000_000   # LOW input:  0.1 - 350 MHz
 BASIC_HIGH_MIN_HZ = 240_000_000  # HIGH input: 240 - 960 MHz
 
 
+SERIAL_TIMEOUT_S = 20.0  # longest wait for a tinySA reply (a 450-point sweep takes a few seconds)
+
 class RFDeviceError(RuntimeError):
     pass
 
@@ -86,7 +88,12 @@ class TinySADevice(RFDevice):
             from tsapython import tinySA
         except ImportError:
             raise RFDeviceError("tsapython is not installed (pip install -e '.[rf]')") from None
-        tsa = tinySA()
+        # A tinySA that hangs without an error must not block the sweep thread
+        # (and the device lock) for tsapython's default 120 s.
+        try:
+            tsa = tinySA(serial_timeout=SERIAL_TIMEOUT_S)
+        except TypeError:  # tsapython < 4 has no serial_timeout
+            tsa = tinySA()
         tsa.set_error_byte_return(True)
         found, connected = tsa.autoconnect()
         if not found:
