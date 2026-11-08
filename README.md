@@ -13,6 +13,10 @@ average), and the Rings / Console overlays. Choices are remembered per browser.
 On the waterfall, speech shows as gliding harmonics and a ring as a straight
 vertical line; hovering shows frequency, how long ago, and level.
 
+**Shift+← / Shift+→** switches between the pages (Audio, RF, Wireless, Config),
+except while typing or choosing in a field. The Config page checks for updates by
+itself when it opens.
+
 A second page, **`/rf`**, is an RF spectrum analyzer for a **tinySA** on USB
 serial (connect, sweep, live trace + peak hold, waterfall, and lines at the
 QLX-D receivers' frequencies), ported from
