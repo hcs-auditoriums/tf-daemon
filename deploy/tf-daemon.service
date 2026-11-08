@@ -1,8 +1,6 @@
-# systemd unit for tf-daemon on the Raspberry Pi.
-# Install:
-#   sudo cp deploy/tf-daemon.service /etc/systemd/system/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now tf-daemon
-# Adjust User / WorkingDirectory if the repo isn't at /home/pi/tf-daemon.
+# systemd unit template for tf-daemon.
+# Don't copy this by hand: deploy/install-service.sh fills in @USER@ and @DIR@
+# and installs it to /etc/systemd/system/tf-daemon.service.
 
 [Unit]
 Description=tf-daemon spectrum analyzer for Yamaha TF5
@@ -11,12 +9,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-Group=audio
-WorkingDirectory=/home/pi/tf-daemon
-Environment=TF_DAEMON_CONFIG=/home/pi/tf-daemon/config.toml
+User=@USER@
+# ALSA devices are root:audio 0660; the service user needn't be in the group.
+SupplementaryGroups=audio
+WorkingDirectory=@DIR@
+Environment=TF_DAEMON_CONFIG=@DIR@/config.toml
 Environment=TF_DAEMON_SOURCE=device
-ExecStart=/home/pi/tf-daemon/.venv/bin/gunicorn -c gunicorn.conf.py tf_daemon.wsgi:app
+ExecStart=@DIR@/.venv/bin/gunicorn -c gunicorn.conf.py tf_daemon.wsgi:app
 Restart=on-failure
 RestartSec=3
 # Audio capture benefits from a little scheduling priority.

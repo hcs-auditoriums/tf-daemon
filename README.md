@@ -32,27 +32,39 @@ python -m tf_daemon --source device               # real capture (default)
 
 Run the tests with `pytest`.
 
-## Raspberry Pi install
+## Server install (Raspberry Pi OS or Ubuntu)
 
-Target: Raspberry Pi 4, Raspberry Pi OS Lite (Trixie). The system Python is
-"externally managed", so everything goes in a venv.
+Targets: Raspberry Pi 4 on Raspberry Pi OS Lite (Trixie), or an x86 Ubuntu
+server. The system Python is "externally managed", so everything goes in a venv
+(`python3-venv`); sounddevice needs `libportaudio2`.
+
+From your workstation, copy the committed code to the server (no GitHub access
+needed on the server):
 
 ```bash
-sudo apt update
-sudo apt install -y git python3-venv libportaudio2
-git clone <this repo> ~/tf-daemon && cd ~/tf-daemon
-python3 -m venv .venv
-.venv/bin/pip install -e .
-.venv/bin/python -m tf_daemon --list-devices      # the TF5 should show up with 34 inputs
+NO_RESTART=1 deploy/deploy.sh user@host
 ```
 
-Edit `config.toml` (channels, labels), then run in production with gunicorn:
+Then on the server, once:
+
+```bash
+cd ~/tf-daemon && sudo bash deploy/install-service.sh
+```
+
+That installs `python3-venv libportaudio2 alsa-utils`, builds `.venv` as your
+user, and installs/starts the `tf-daemon` systemd service (with the `audio`
+group so it can open the ALSA device). After that, `deploy/deploy.sh user@host`
+pushes new commits and restarts the service. The server's `config.toml` is
+never overwritten by a deploy, so edit it there.
+
+Useful on the server: `journalctl -u tf-daemon -f`,
+`~/tf-daemon/.venv/bin/python -m tf_daemon --list-devices`.
+
+To run gunicorn by hand instead of the service:
 
 ```bash
 .venv/bin/gunicorn -c gunicorn.conf.py tf_daemon.wsgi:app
 ```
-
-or install the systemd unit in `deploy/tf-daemon.service`.
 
 > **One worker only.** The audio device can be opened exactly once and all
 > analysis state lives in one process. `gunicorn.conf.py` sets
