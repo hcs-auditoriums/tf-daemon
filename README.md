@@ -1,8 +1,16 @@
 # tf-daemon
 
 A Raspberry Pi appliance that captures audio from a **Yamaha TF5** over USB and
-serves a real-time **spectrum analyzer** with a **ring / feedback detector** to
-any browser on the network.
+serves a real-time **spectrum analyzer** and **waterfall** with a **ring /
+feedback detector** to any browser on the network.
+
+The audio page's **View** menu picks the layout (**Spectrum**, **Waterfall** or
+**Both**, stacked with aligned frequency columns), the traces (average,
+real-time, peak hold), the dB range (which also sets the waterfall's colours),
+the waterfall's history (10 s to 5 min) and source (real-time or the 3 s
+average), and the Rings / Console overlays. Choices are remembered per browser.
+On the waterfall, speech shows as gliding harmonics and a ring as a straight
+vertical line; hovering shows frequency, how long ago, and level.
 
 A second page, **`/rf`**, is an RF spectrum analyzer for a **tinySA** on USB
 serial (connect, sweep, live trace + peak hold, waterfall, and lines at the
