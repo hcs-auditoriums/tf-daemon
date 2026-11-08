@@ -9,27 +9,36 @@
 <body>
   <header>
     <h1>tf-daemon</h1>
-    <a class="navlink" href="/rf">RF ›</a>
-    <a class="navlink" href="/qlxd">Wireless ›</a>
-    <a class="navlink" href="/config">Config</a>
+    <nav class="tabs" aria-label="Pages"><a href="/" aria-current="page">Audio</a><a href="/rf">RF</a><a href="/qlxd">Wireless</a><a href="/config">Config</a></nav>
     <nav id="channels" aria-label="Channel"></nav>
-    <div class="controls">
-      <label><input type="checkbox" id="show-avg" checked> Average</label>
-      <label><input type="checkbox" id="show-live" checked> Real-time</label>
-      <label><input type="checkbox" id="show-peak" checked> Peak hold</label>
-      <label>Range
-        <select id="range">
-          <option value="-120,0">−120…0 dB</option>
-          <option value="-100,-20" selected>−100…−20 dB</option>
-          <option value="-80,-20">−80…−20 dB</option>
-        </select>
-      </label>
-      <button id="reset-peak" type="button">Reset peak</button>
-      <label><input type="checkbox" id="show-rings" checked> Rings</label>
-      <label id="console-toggle" hidden><input type="checkbox" id="show-console" checked> Console</label>
+    <details class="menu" id="view-menu">
+      <summary>View</summary>
+      <div class="menu-panel">
+        <fieldset>
+          <legend>Traces</legend>
+          <label><input type="checkbox" id="show-avg" checked> Average</label>
+          <label><input type="checkbox" id="show-live" checked> Real-time</label>
+          <label><input type="checkbox" id="show-peak" checked> Peak hold</label>
+        </fieldset>
+        <label class="menu-row">Range
+          <select id="range">
+            <option value="-120,0">−120…0 dB</option>
+            <option value="-100,-20" selected>−100…−20 dB</option>
+            <option value="-80,-20">−80…−20 dB</option>
+          </select>
+        </label>
+        <fieldset>
+          <legend>Show</legend>
+          <label><input type="checkbox" id="show-rings" checked> Rings</label>
+          <label id="console-toggle" hidden><input type="checkbox" id="show-console" checked> Console</label>
+        </fieldset>
+        <button id="reset-peak" type="button">Reset peak hold</button>
+      </div>
+    </details>
+    <div class="status">
+      <button id="ring-alert" class="ring-alert" type="button" hidden></button>
+      <div id="conn" class="conn" title="Connection">connecting…</div>
     </div>
-    <button id="ring-alert" class="ring-alert" type="button" hidden></button>
-    <div id="conn" class="conn" title="Connection">connecting…</div>
   </header>
   <div class="workspace">
     <main>
