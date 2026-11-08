@@ -108,7 +108,10 @@ checkout() {
 
 install_pkg() {
   echo "==> installing python package"
-  .venv/bin/pip install -q -e '.[rf]'
+  # ignore::UserWarning drops setuptools' "Editable installation" notice (the
+  # checkout *is* the package, so its shadowing caveat doesn't apply); errors
+  # and deprecation warnings still show.
+  PYTHONWARNINGS=ignore::UserWarning .venv/bin/pip install -q -e '.[rf]'
 }
 
 # healthy REV: wait for the service to answer and report REV.

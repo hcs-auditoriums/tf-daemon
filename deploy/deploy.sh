@@ -30,7 +30,7 @@ echo "==> updating venv and restarting"
 ssh -t "$HOST" "
   set -e
   cd '$DIR'
-  if [ -x .venv/bin/pip ]; then .venv/bin/pip install -q -e '.[rf]'; fi
+  if [ -x .venv/bin/pip ]; then PYTHONWARNINGS=ignore::UserWarning .venv/bin/pip install -q -e '.[rf]'; fi
   if systemctl cat tf-daemon >/dev/null 2>&1; then
     sudo systemctl restart tf-daemon && sleep 2 && systemctl --no-pager --lines=8 status tf-daemon
   else
