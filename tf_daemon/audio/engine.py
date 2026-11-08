@@ -28,6 +28,7 @@ import numpy as np
 
 from ..config import Channel, channels_from
 from ..dsp.spectrum import SpectrumAnalyzer
+from ..hub import FrameHub
 from .ringbuffer import RingBuffer
 from .sources import Source, SourceError
 
@@ -35,34 +36,6 @@ log = logging.getLogger(__name__)
 
 MAGIC = b"TFS1"
 _HEADER = struct.Struct("<4sIHH")
-
-
-class FrameHub:
-    """Holds only the latest published frame; readers wait for a newer one."""
-
-    def __init__(self) -> None:
-        self._cond = threading.Condition()
-        self._seq = 0
-        self._payload: bytes = b""
-        self._closed = False
-
-    def publish(self, payload: bytes) -> None:
-        with self._cond:
-            self._seq += 1
-            self._payload = payload
-            self._cond.notify_all()
-
-    def wait(self, last_seq: int, timeout: float) -> tuple[int, bytes | None]:
-        with self._cond:
-            self._cond.wait_for(lambda: self._closed or self._seq != last_seq, timeout)
-            if self._seq == last_seq or self._closed:
-                return last_seq, None
-            return self._seq, self._payload
-
-    def close(self) -> None:
-        with self._cond:
-            self._closed = True
-            self._cond.notify_all()
 
 
 class AudioEngine:

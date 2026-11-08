@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .rf.engine import SweepSettings
+
 log = logging.getLogger(__name__)
 
 REQUIRED_SAMPLERATE = 48000
@@ -40,6 +42,15 @@ DEFAULTS: dict[str, Any] = {
         "tone_hz": 2500.0,
         "tone_db": -15.0,
         "seed": 1,
+    },
+    "rf": {
+        "enabled": True,
+        "source": "device",  # device (tinySA) | demo
+        "start_hz": 88_000_000,
+        "stop_hz": 108_000_000,
+        "points": 290,
+        "rbw": "auto",
+        "interval_s": 0.5,
     },
     "channels": [
         {"index": 0, "label": "Main L"},
@@ -123,3 +134,11 @@ def _validate(cfg: dict[str, Any]) -> None:
         if idx in seen:
             raise ConfigError(f"channel index {idx} listed twice")
         seen.add(idx)
+
+    rf = cfg["rf"]
+    if str(rf["source"]).lower() not in ("device", "demo"):
+        raise ConfigError(f"rf.source must be 'device' or 'demo', got {rf['source']!r}")
+    try:
+        SweepSettings.from_dict(rf)
+    except ValueError as e:
+        raise ConfigError(f"[rf] {e}") from None

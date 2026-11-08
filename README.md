@@ -4,8 +4,9 @@ A Raspberry Pi appliance that captures audio from a **Yamaha TF5** over USB and
 serves a real-time **spectrum analyzer** (and, coming next, a feedback/ringing
 detector) to any browser on the network.
 
-Scope is audio analysis only. RF / wireless-mic monitoring is planned as a
-separate module (see [Architecture](#architecture)).
+A second page, **`/rf`**, is an RF spectrum analyzer for a **tinySA** on USB
+serial (connect, sweep, live trace + peak hold, waterfall), ported from
+tinysa-visualizer. It is its own module; see [Architecture](#architecture).
 
 ## Quick start (development: macOS / Windows / Linux, no TF5 needed)
 
@@ -15,10 +16,10 @@ Requires Python 3.11+.
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e '.[dev]'
-python -m tf_daemon --source synth
+python -m tf_daemon --source synth --rf-source demo
 ```
 
-Open <http://localhost:8080>. The synthetic source plays pink noise, speech-like
+Open <http://localhost:8080> (audio) or <http://localhost:8080/rf> (RF). The synthetic source plays pink noise, speech-like
 gliding harmonics, and a faint steady 2.5 kHz sine (the feedback-detector test
 case).
 
@@ -28,7 +29,11 @@ Other sources:
 python -m tf_daemon --source wav recording.wav    # loops a 48 kHz PCM WAV in real time
 python -m tf_daemon --list-devices                # show PortAudio devices
 python -m tf_daemon --source device               # real capture (default)
+python -m tf_daemon --rf-source device            # real tinySA (default; pip install -e '.[rf]')
+python -m tf_daemon --rf-source off               # no RF module
 ```
+
+The RF demo device plays three synthetic carriers over a −80 dBm noise floor.
 
 Run the tests with `pytest`.
 
@@ -36,7 +41,8 @@ Run the tests with `pytest`.
 
 Targets: Raspberry Pi 4 on Raspberry Pi OS Lite (Trixie), or an x86 Ubuntu
 server. The system Python is "externally managed", so everything goes in a venv
-(`python3-venv`); sounddevice needs `libportaudio2`.
+(`python3-venv`); sounddevice needs `libportaudio2`. For the tinySA page,
+install the extra too: `.venv/bin/pip install -e '.[rf]'`.
 
 From your workstation, copy the committed code to the server (no GitHub access
 needed on the server):
@@ -69,7 +75,8 @@ To run gunicorn by hand instead of the service:
 > **One worker only.** The audio device can be opened exactly once and all
 > analysis state lives in one process. `gunicorn.conf.py` sets
 > `-w 1 -k gthread --threads 8` and refuses to start with more workers. Each
-> open browser tab holds one thread, so 8 threads ≈ 6–7 simultaneous viewers.
+> open browser tab holds one thread (audio and RF pages alike), so 8 threads ≈
+> 6–7 simultaneous viewers.
 
 gunicorn is configured through environment variables:
 
@@ -78,6 +85,7 @@ gunicorn is configured through environment variables:
 | `TF_DAEMON_CONFIG` | `config.toml` | config path |
 | `TF_DAEMON_SOURCE` | `device` | `device`, `synth` or `wav` |
 | `TF_DAEMON_WAV` | | WAV path for `wav` |
+| `TF_DAEMON_RF_SOURCE` | `rf.source` | `device`, `demo` or `off` |
 | `TF_DAEMON_BIND` | `0.0.0.0:8080` | listen address |
 | `TF_DAEMON_THREADS` | `8` | gunicorn threads |
 | `TF_DAEMON_LOG` | `INFO` | log level |
@@ -94,6 +102,9 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   `dsp.average_tau` (3 s).
 - `[[channels]]`: `index` (0-based device input) and `label`.
 - `[synth]`: test-signal levels and the ring tone frequency/level.
+- `[rf]`: `enabled`, `source` (`device` = tinySA, `demo`) and the default sweep
+  (`start_hz`, `stop_hz`, `points` ≤ 450, `rbw` `"auto"` or kHz, `interval_s`).
+  The tinySA is opened only when someone clicks **Connect** on `/rf`.
 
 Levels are dBFS with AES17 convention: a full-scale sine reads 0 dBFS.
 
@@ -113,7 +124,12 @@ tf_daemon/
     module.py      HTTP + WebSocket routes for audio
   dsp/
     spectrum.py    windowed FFT, averaging, peak hold, log display bins
-  static/          index.html, app.js, style.css (no build step)
+  rf/              ── the RF (tinySA) module ──
+    devices.py     TinySADevice (tsapython, USB serial), DemoDevice
+    engine.py      connect/disconnect, sweep thread, peak hold, JSON state hub
+    module.py      /rf page, HTTP + WebSocket routes for RF
+  hub.py           FrameHub: latest-value broadcast shared by both modules
+  static/          index.html + app.js (audio), rf.html + rf.js (RF), style.css
 ```
 
 Data flow:
@@ -131,9 +147,15 @@ Data flow:
    simply skip frames.
 
 Feature areas are **modules** (`tf_daemon/modules.py`). The audio module owns
-its device, threads and routes (`/api/audio/*`, `/ws/audio`). A future RF module
-would live in `tf_daemon/rf/` with its own routes (`/api/rf/*`, `/ws/rf`) and be
-added in `app.build_modules`; nothing in the audio code needs to change.
+its device, threads and routes (`/api/audio/*`, `/ws/audio`); the RF module owns
+the tinySA and `/rf`, `/api/rf/*`, `/ws/rf`. Both are assembled in
+`app.build_modules`.
+
+RF data flow: the **sweep thread** calls the tinySA's `scan` (blocking, one
+sweep per call), updates peak hold, and publishes a full JSON state snapshot to
+the RF hub, then waits `interval_s`. Connect/disconnect/start/stop also publish,
+so every viewer sees the same state. The browser computes frequencies as
+`linspace(start_hz, stop_hz, points)` and keeps its own 200-row waterfall.
 
 ### HTTP / WebSocket API
 
@@ -149,8 +171,23 @@ Binary frame (little-endian): `"TFS1"`, `uint32 seq`, `uint16 channels`,
 `uint16 bins`, then `int16[channels][2][bins]` in centi-dBFS (`[c][0]` average,
 `[c][1]` peak hold). Clients may send `{"cmd": "reset_peak", "channel": n|null}`.
 
+RF:
+
+| | |
+|---|---|
+| `GET /rf` | RF web UI |
+| `GET /api/rf/status` | connection / sweep counters |
+| `GET /api/rf/state` | full state snapshot (same as a `/ws/rf` message) |
+| `POST /api/rf/connect` | open the tinySA (503 with `error` if not found) |
+| `POST /api/rf/disconnect` | stop sweeping and close it |
+| `POST /api/rf/scan/start` | body: any of `start_hz`, `stop_hz`, `points`, `rbw`, `interval_s` |
+| `POST /api/rf/scan/stop` | |
+| `POST /api/rf/reset-peak` | |
+| `WS /ws/rf` | JSON state snapshots (format in `rf/engine.py`) |
+
 ## Roadmap
 
 - Feedback / ringing detector (narrow, persistent peaks rising above the
   averaged spectrum), shown as markers and a list in the UI.
-- RF / wireless mic module.
+- RF: port the rest of tinysa-visualizer (points of interest, noise-floor
+  dropout events, scan recording and browsing).
