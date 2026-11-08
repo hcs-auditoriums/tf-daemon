@@ -19,7 +19,7 @@ from .modules import Module
 from .qlxd.engine import QLXDEngine
 from .qlxd.module import QLXDModule
 from .rf.devices import DemoDevice, RFDevice, TinySADevice
-from .rf.engine import RFEngine
+from .rf.engine import RangeHint, RFEngine, fit_span
 from .rf.module import RFModule
 from .system import register_system
 
@@ -62,15 +62,25 @@ def build_modules(cfg: dict[str, Any], source_kind: str, wav_path: str | None = 
     """``rf_source`` / ``qlxd_source`` override ``rf.source`` / ``qlxd.source``; ``"off"`` disables."""
     source = build_source(cfg, source_kind, wav_path)
     modules: list[Module] = [AudioModule(AudioEngine(cfg, source))]
-    rf_kind = (rf_source or str(cfg["rf"]["source"])).lower()
-    if cfg["rf"]["enabled"] and rf_kind != "off":
-        modules.append(RFModule(RFEngine(cfg, build_rf_device(rf_kind))))
+
     qlxd_kind = (qlxd_source or str(cfg["qlxd"]["source"])).lower()
     if qlxd_kind not in ("device", "demo", "off"):
         raise SourceError(f"unknown qlxd source {qlxd_kind!r} (expected device, demo or off)")
-    if cfg["qlxd"]["enabled"] and qlxd_kind != "off":
-        modules.append(QLXDModule(QLXDEngine(cfg, demo=qlxd_kind == "demo")))
+    qlxd = QLXDEngine(cfg, demo=qlxd_kind == "demo") if cfg["qlxd"]["enabled"] and qlxd_kind != "off" else None
+
+    rf_kind = (rf_source or str(cfg["rf"]["source"])).lower()
+    if cfg["rf"]["enabled"] and rf_kind != "off":
+        modules.append(RFModule(RFEngine(cfg, build_rf_device(rf_kind), range_hint=receiver_range(qlxd))))
+    if qlxd is not None:
+        modules.append(QLXDModule(qlxd))
     return modules
+
+
+def receiver_range(qlxd: QLXDEngine | None) -> RangeHint | None:
+    """Integration: the RF sweep's default range spans the known QLX-D receivers."""
+    if qlxd is None:
+        return None
+    return lambda: fit_span(r["frequency_mhz"] for r in qlxd.frequencies())
 
 
 def create_app(cfg: dict[str, Any], modules: list[Module], start: bool = True,

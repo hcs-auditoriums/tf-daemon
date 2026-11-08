@@ -46,6 +46,7 @@ DEFAULTS: dict[str, Any] = {
     "rf": {
         "enabled": True,
         "source": "device",  # device (tinySA) | demo
+        "auto_connect": True,  # keep the tinySA connected and sweeping (range: the QLX-D receivers)
         "start_hz": 88_000_000,
         "stop_hz": 108_000_000,
         "points": 290,

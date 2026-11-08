@@ -31,7 +31,7 @@ class RFModule:
         self.engine = engine
 
     def start(self) -> None:
-        pass  # the device is opened on demand via /api/rf/connect
+        self.engine.start()  # auto mode connects and sweeps; otherwise opened via /api/rf/connect
 
     def stop(self) -> None:
         self.engine.stop()
@@ -58,21 +58,21 @@ class RFModule:
         @bp.post("/connect")
         def connect():
             try:
-                info = engine.connect()
+                info = engine.connect(by_user=True)
             except RFDeviceError as e:
                 return jsonify({"ok": False, "error": str(e)}), 503
             return jsonify({"ok": True, "device": engine.device.name, "info": info})
 
         @bp.post("/disconnect")
         def disconnect():
-            engine.disconnect()
+            engine.disconnect(by_user=True)
             return jsonify({"ok": True})
 
         @bp.post("/scan/start")
         def scan_start():
             body = request.get_json(silent=True) or {}
             try:
-                settings = engine.start_scan(body)
+                settings = engine.start_scan(body, by_user=True)
             except ValueError as e:
                 return jsonify({"ok": False, "error": str(e)}), 400
             except RFDeviceError as e:
@@ -81,7 +81,7 @@ class RFModule:
 
         @bp.post("/scan/stop")
         def scan_stop():
-            engine.stop_scan()
+            engine.stop_scan(by_user=True)
             return jsonify({"ok": True})
 
         @bp.post("/reset-peak")
