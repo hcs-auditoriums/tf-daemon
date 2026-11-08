@@ -132,9 +132,12 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   buttons, a name in the input menu, and continuous analysis (their average and
   peak hold are already warm when you switch to them).
 - `[synth]`: test-signal levels and the ring tone frequency/level.
-- `[rf]`: `enabled`, `source` (`device` = tinySA, `demo`) and the default sweep
-  (`start_hz`, `stop_hz`, `points` ≤ 450, `rbw` `"auto"` or kHz, `interval_s`).
-  The tinySA is opened only when someone clicks **Connect** on `/rf`.
+- `[rf]`: `enabled`, `source` (`device` = tinySA, `demo`), `auto_connect`
+  (default `true`) and the default sweep (`start_hz`, `stop_hz`, `points` ≤ 450,
+  `rbw` `"auto"` or kHz, `interval_s`). With `auto_connect` the tinySA is opened
+  and swept from startup, nobody needs to press Connect, and the range is the
+  span of the known QLX-D receivers (`start_hz`/`stop_hz` only apply when none
+  are known). With `auto_connect = false` it opens only on **Connect**.
 - `[qlxd]`: `enabled`, `source` (`device`, `demo`), `interface` (NIC the
   receivers are on; `""` = first physical, up interface with a 169.254.x.x
   address), `hosts` (receivers to always monitor, `"ip"` or `"ip:port"`),
@@ -215,6 +218,17 @@ sweep per call), updates peak hold, and publishes a full JSON state snapshot to
 the RF hub, then waits `interval_s`. Connect/disconnect/start/stop also publish,
 so every viewer sees the same state. The browser computes frequencies as
 `linspace(start_hz, stop_hz, points)` and keeps its own 200-row waterfall.
+
+RF auto mode: a **supervisor thread** keeps the tinySA connected and sweeping
+whether or not anyone has the page open. It retries every 3 s while the device
+is absent, and a failed sweep (unplugged) closes the device so it is reopened
+when it comes back. The default range comes from an integration hook in
+`app.py` (`receiver_range`): the known QLX-D receivers' frequencies ±2 MHz,
+whole MHz, at least 10 MHz wide (**Fit to receivers** uses the same span), at
+the device's maximum points. While on that range the sweep follows receivers
+being added or retuned; a range set by hand on the page is kept. **Stop** or
+**Disconnect** on the page pause auto mode (to free the device) until **Start**
+or **Connect**.
 
 QLX-D data flow: Shure devices periodically announce themselves with SLP
 multicast (239.255.254.253:8427). The engine listens on the selected interface,
