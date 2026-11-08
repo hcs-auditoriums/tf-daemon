@@ -284,7 +284,7 @@
     if (!tf5.connected || !ch || !ch.source) return JSON.stringify([state.input, tf5.connected, ch && ch.source]);
     const p = ch.params, rows = p["ToMix/Level"] ? sendRows(p, tf5.mixes || []) : [];
     const shown = (state.allSends ? rows : rows.filter((r) => r.on && r.db !== null)).map((r) => r.name);
-    return JSON.stringify([state.input, ch.source, p["Label/Name"]?.value, p["Label/Color"]?.value,
+    return JSON.stringify([state.input, ch.source, !!eqAvailable, p["Label/Name"]?.value, p["Label/Color"]?.value,
                            !!p["ToStereo/Pan"], !!p["Out/Balance"], !!p["ToMix/Level"], state.allSends, shown,
                            Object.keys(p).sort()]);
   }
@@ -350,7 +350,6 @@
       refs.on = el("div", "cp-on");
       items.push(refs.on);
 
-      // Fader: heading with the level, then a tall fader (scale, track, cap).
       const section = (title) => {
         const sec = el("div", "cp-section");
         const hd = el("div", "cp-sechead");
@@ -359,6 +358,20 @@
         sec.append(hd);
         return [sec, value];
       };
+
+      // EQ (only with tf5.eq): the console's curve for this channel, like the TF5's
+      // channel screen; redrawn whenever the desk pushes a change.
+      if (eqAvailable) {
+        const [eqSec, eqVal] = section("EQ");
+        refs.eqVal = eqVal;
+        refs.eqCanvas = el("canvas", "cp-eq");
+        refs.eqCanvas.setAttribute("aria-label", "Console EQ curve");
+        refs.eqInfo = el("div", "cp-eqinfo");
+        eqSec.append(refs.eqCanvas, refs.eqInfo);
+        items.push(eqSec);
+      }
+
+      // Fader: heading with the level, then a tall fader (scale, track, cap).
       const [faderSec, levelEl] = section("Fader");
       refs.level = levelEl;
       const fader = el("div", "cp-fader");
@@ -438,7 +451,97 @@
     }
     panel.replaceChildren(...items);
     if (refs.on) updatePanel(ch);
+    drawPanelEq();
   }
+
+  // ------------------------------------------------------------------ sidebar EQ
+
+  // dB above / below 0: ±18 as the TF5's EQ screen, widened in 6 dB steps (to ±48) when
+  // the curve goes further between 40 Hz and 16 kHz (no View range applies here).
+  const PEQ_RANGE_MIN = 18, PEQ_RANGE_MAX = 48;
+  function peqRange(d) {
+    let peak = 0;
+    if (d && d.eq && d.eq.on) d.freqs.forEach((f, i) => { if (f >= 40 && f <= 16000) peak = Math.max(peak, Math.abs(d.curve[i])); });
+    return Math.min(PEQ_RANGE_MAX, Math.max(PEQ_RANGE_MIN, Math.ceil(peak / 6) * 6));
+  }
+  const PEQ_GRID_F = [100, 1000, 10000], PEQ_FMIN = 20, PEQ_FMAX = 20000;
+  const fmtF0 = (f) => (f >= 1000 ? `${+(f / 1000).toFixed(f >= 10000 ? 0 : 1)}k` : `${Math.round(f)}`);
+  const BAND_SHAPE = { bell: "bell", low_shelf: "shelf", high_shelf: "shelf", hpf: "HPF", lpf: "LPF" };
+
+  function drawPanelEq() {
+    const cv = refs && refs.eqCanvas;
+    if (!cv || !cv.isConnected) return;
+    const d = state.eq && state.eq.index === state.input ? state.eq : null;
+    const eq = d && d.eq;
+    refs.eqVal.textContent = !d ? "…" : !eq ? "—" : !eq.on ? "OFF" : eq.one_knob ? "1-knob" : "ON";
+    refs.eqVal.className = `cp-value${eq && !eq.on ? " cp-off" : ""}`;
+    refs.eqInfo.textContent = !d ? "Reading console…" : !eq ? (d.source ? `No EQ for ${d.source}` : "Not on the console patch") :
+      [eq.hpf && eq.hpf.on ? `HPF ${fmtF0(eq.hpf.freq)}` : "HPF off",
+       ...eq.bands.filter((b) => b.label === "L" || b.label === "H")
+         .map((b) => `${b.label} ${BAND_SHAPE[b.type] || b.type}${b.on === false ? " off" : ""}`)].join(" · ");
+
+    const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+    if (!w || !h) return;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    }
+    const g = cv.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    const lo = Math.log10(PEQ_FMIN), hi = Math.log10(PEQ_FMAX);
+    const x = (f) => (Math.log10(f) - lo) / (hi - lo) * w;
+    const range = peqRange(d);
+    const y = (db) => h / 2 - db / range * (h / 2 - 3);
+
+    // Grid: 0 dB, ±6 / ±12 dB, 100 Hz / 1k / 10k.
+    g.lineWidth = 1;
+    g.strokeStyle = C.grid;
+    g.beginPath();
+    const step = range > 24 ? 12 : 6;
+    for (let db = step; db < range; db += step) {
+      for (const yy of [Math.round(y(db)) + 0.5, Math.round(y(-db)) + 0.5]) { g.moveTo(0, yy); g.lineTo(w, yy); }
+    }
+    for (const f of PEQ_GRID_F) { const xx = Math.round(x(f)) + 0.5; g.moveTo(xx, 0); g.lineTo(xx, h); }
+    g.stroke();
+    g.strokeStyle = C.gridStrong;
+    g.beginPath(); g.moveTo(0, Math.round(y(0)) + 0.5); g.lineTo(w, Math.round(y(0)) + 0.5); g.stroke();
+    g.fillStyle = C.muted;
+    g.font = "9px system-ui, sans-serif";
+    g.textBaseline = "bottom"; g.textAlign = "left";
+    for (const f of PEQ_GRID_F) g.fillText(fmtF0(f), x(f) + 2, h - 1);
+    g.textBaseline = "top";
+    g.fillText(`±${range} dB`, 2, 1);
+    if (!eq || !d.freqs.length) return;
+
+    // Curve (clipped by the canvas), shaded to 0 dB when the EQ is on, dashed when off.
+    const path = () => { g.beginPath(); d.freqs.forEach((f, i) => (i ? g.lineTo : g.moveTo).call(g, x(f), y(d.curve[i]))); };
+    if (eq.on) {
+      path();
+      g.lineTo(x(d.freqs[d.freqs.length - 1]), y(0)); g.lineTo(x(d.freqs[0]), y(0)); g.closePath();
+      g.fillStyle = C.eqFill; g.fill();
+    }
+    g.globalAlpha = eq.on ? 1 : 0.45;
+    g.strokeStyle = C.eq; g.fillStyle = C.eq;
+    g.lineWidth = 1.5;
+    if (!eq.on) g.setLineDash([4, 3]);
+    path(); g.stroke();
+    g.setLineDash([]);
+
+    // Band handles on the curve: filled when the band does something.
+    const dot = (f, active) => {
+      const yy = Math.min(h - 3, Math.max(3, y(eqAt(f))));
+      g.beginPath(); g.arc(x(f), yy, 2.5, 0, 2 * Math.PI);
+      if (active) g.fill(); else g.stroke();
+    };
+    if (eq.hpf && eq.hpf.on) dot(eq.hpf.freq, true);
+    for (const b of eq.bands) {
+      const filter = b.type === "hpf" || b.type === "lpf";
+      dot(b.freq, filter ? b.on !== false : b.gain !== 0);
+    }
+    g.globalAlpha = 1;
+  }
+
+  new ResizeObserver(() => drawPanelEq()).observe($("console-panel"));
 
   $("show-console").checked = state.showConsole;
   $("show-console").onchange = (e) => {
@@ -465,10 +568,12 @@
   // Pushed over /ws/audio for the viewed input whenever it changes on the desk
   // (or the view changes); nothing arrives when tf5.eq is off.
   function onConsoleEq(msg) {
+    const first = !eqAvailable;
     eqAvailable = true;
     if (msg.index === state.input) state.eq = msg;
     $("eq-toggle").hidden = false;
     state.dirty = true;
+    if (first) { panelSig = null; schedulePanel(); } else drawPanelEq();
   }
 
   $("show-eq").checked = state.showEq;

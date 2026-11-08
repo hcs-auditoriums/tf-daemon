@@ -1063,3 +1063,10 @@ def test_page_has_the_eq_toggle():
     assert re.search(r"const eqHalf = \(\) => \(state\.dbMax - state\.dbMin\) / 2", js)
     assert "eqHalf()" in draw and "eqY" in draw
     assert "yEq(eqAt(f))" in draw
+    # The console sidebar has its own EQ graph, redrawn on every pushed change.
+    side = re.search(r"function drawPanelEq\(\) \{(.*?)\n  \}\n", js, re.S).group(1)
+    assert "eqAt(f)" in side and "peqRange(d)" in side
+    on_eq = re.search(r"function onConsoleEq\(msg\) \{(.*?)\n  \}\n", js, re.S).group(1)
+    assert "drawPanelEq()" in on_eq
+    css = (static / "style.css").read_text(encoding="utf-8")
+    assert re.search(r"\.cp-eq \{[^}]*position: static", css)   # not the full-page canvas rule
