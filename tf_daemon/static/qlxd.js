@@ -126,10 +126,14 @@
     return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`;
   }
 
+  // Receivers sometimes report TX_TYPE UNKN for a transmitter that is clearly on
+  // (battery bars and RF present), so either one counts.
+  const hasTx = (r) => !!r.tx_type || r.batt_bars != null;
+
   // Severity drives the card's left border: battery and RF problems.
   function severity(r) {
     if (!r.online) return "offline";
-    if (!r.tx_type) return "idle";
+    if (!hasTx(r)) return "idle";
     if (r.interference) return "bad";
     if (r.batt_run_min != null) {
       if (r.batt_run_min < RUN_BAD_MIN) return "bad";
@@ -146,16 +150,19 @@
 
   function battHtml(r) {
     if (!r.online) return "";
-    if (!r.tx_type) return `<div class="batt"><span class="batt-time muted">No transmitter</span></div>`;
+    if (!hasTx(r)) return `<div class="batt"><span class="batt-time muted">No transmitter</span></div>`;
     const lvl = battLevel(r);
     const bars = r.batt_bars ?? 0;
     const icon = `<span class="batt-icon lvl-${lvl}" title="${r.batt_bars ?? "?"}/5 bars">` +
       [1, 2, 3, 4, 5].map((i) => `<i class="${i <= bars ? "on" : ""}"></i>`).join("") + "</span>";
-    const time = r.batt_run_min != null
-      ? `<span class="batt-time ${lvl === "ok" ? "" : lvl}">${fmtRun(r.batt_run_min)}</span>`
-      : `<span class="batt-time muted">${r.batt_calculating ? "Calculating…" : "Runtime n/a"}</span>`;
-    const detail = [BATT_NAMES[r.batt_type] || r.batt_type, r.batt_charge != null ? `${r.batt_charge}%` : null]
-      .filter(Boolean).join(" · ");
+    // Runtime minutes only exist for Shure rechargeables; AA packs report bars only.
+    const cls = `batt-time ${lvl === "ok" ? "" : lvl}`;
+    const time = r.batt_run_min != null ? `<span class="${cls}">${fmtRun(r.batt_run_min)}</span>`
+      : r.batt_calculating ? `<span class="batt-time muted">Calculating…</span>`
+      : r.batt_bars != null ? `<span class="${cls}">${r.batt_bars}/5</span>`
+      : `<span class="batt-time muted">Battery n/a</span>`;
+    const detail = [BATT_NAMES[r.batt_type] || r.batt_type, r.batt_charge != null ? `${r.batt_charge}%` : null,
+      r.batt_run_min == null && r.batt_bars != null ? "bars" : null].filter(Boolean).join(" · ");
     return `<div class="batt">${icon}<div>${time}<div class="batt-detail">${esc(detail)}</div></div></div>`;
   }
 
@@ -176,7 +183,7 @@
     const name = r.name || r.device_id || r.host;
     const freq = r.frequency_mhz != null ? `${r.frequency_mhz.toFixed(3)} MHz` : "—";
     const gc = r.group_chan ? `G/Ch ${esc(r.group_chan)}` : "";
-    const live = r.online && r.tx_type;
+    const live = r.online && hasTx(r);
     const ants = `<div class="meter-row"><span>Ant</span><div class="ants">` +
       `<span class="ant ${live && r.ant_a ? "on" : ""}">A</span><span class="ant ${live && r.ant_b ? "on" : ""}">B</span>` +
       `</div><span></span></div>`;
@@ -199,7 +206,7 @@
     const out = [...list];
     if (state.sort === "battery") {
       // Online transmitters with known runtime first (lowest first), then the rest.
-      const key = (r) => (!r.online || !r.tx_type) ? 1e9 : r.batt_run_min ?? (r.batt_bars != null ? r.batt_bars * 60 : 1e8);
+      const key = (r) => (!r.online || !hasTx(r)) ? 1e9 : r.batt_run_min ?? (r.batt_bars != null ? r.batt_bars * 60 : 1e8);
       out.sort((a, b) => key(a) - key(b) || byName(a, b));
     } else if (state.sort === "freq") {
       out.sort((a, b) => (a.frequency_mhz ?? 1e9) - (b.frequency_mhz ?? 1e9) || byName(a, b));
