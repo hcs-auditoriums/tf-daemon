@@ -11,12 +11,14 @@ one float32 array of levels in dBm. Calls come from a single thread at a time
 from __future__ import annotations
 
 import logging
+import re
 
 import numpy as np
 
 log = logging.getLogger(__name__)
 
-MAX_POINTS = 450  # tinySA Ultra firmware limit
+MAX_POINTS = 450        # tinySA Ultra firmware limit
+BASIC_MAX_POINTS = 290  # original tinySA (no scan data comes back above this)
 
 
 class RFDeviceError(RuntimeError):
@@ -25,6 +27,7 @@ class RFDeviceError(RuntimeError):
 
 class RFDevice:
     name = "rf"
+    max_points = MAX_POINTS  # may be lowered by open() once the model is known
 
     def open(self) -> str:
         """Connect; returns a human-readable device description."""
@@ -40,8 +43,10 @@ class RFDevice:
         raise NotImplementedError
 
 
-def parse_scan(raw: bytes | bytearray) -> np.ndarray:
+def parse_scan(raw: bytes | bytearray | None) -> np.ndarray:
     """Parse ``scan ... 2`` output (one level per line) into dBm values."""
+    if raw is None:
+        return np.zeros(0, dtype=np.float32)
     # Known firmware bug: some values come back as '-:.0' instead of '-10.0'.
     text = bytes(raw).replace(b"-:.0", b"-10.0").decode("utf-8", errors="replace")
     levels = []
@@ -75,8 +80,11 @@ class TinySADevice(RFDevice):
         if not connected:
             raise RFDeviceError("tinySA found but its serial port could not be opened")
         self._tsa = tsa
-        info = bytes(tsa.info()).decode("utf-8", errors="replace").strip()
-        log.info("tinySA connected: %s", info.splitlines()[0] if info else "(no info)")
+        info = bytes(tsa.info() or b"").decode("utf-8", errors="replace").strip()
+        # The Ultra identifies as "tinySA4" / "ULTRA"; the original model only sweeps 290 points.
+        self.max_points = MAX_POINTS if re.search(r"tinySA4|ultra", info, re.I) else BASIC_MAX_POINTS
+        log.info("tinySA connected: %s (max %d points)", info.splitlines()[0] if info else "(no info)",
+                 self.max_points)
         return info
 
     def close(self) -> None:

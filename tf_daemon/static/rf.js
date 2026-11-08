@@ -59,6 +59,7 @@
   function onState(s) {
     state.snap = s;
     if (!state.inputsLoaded) loadInputs(s);
+    $("points").max = s.max_points;  // drops to 290 once an original tinySA connects
     if (s.sweep && s.sweeps !== state.lastSweeps) {
       const sw = s.sweep;
       const geomChanged = !state.sweep || state.sweep.start_hz !== sw.start_hz ||
@@ -85,7 +86,6 @@
     $("start").value = +(st.start_hz / 1e6).toFixed(6);
     $("stop").value = +(st.stop_hz / 1e6).toFixed(6);
     $("points").value = st.points;
-    $("points").max = s.max_points;
     rbw.value = st.rbw;
     $("interval").value = st.interval_s;
     state.inputsLoaded = true;

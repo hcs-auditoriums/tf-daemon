@@ -75,6 +75,25 @@ def test_rf_module_end_to_end_with_demo():
         app.extensions["tf_stop"]()
 
 
+def test_points_limited_to_device_maximum():
+    cfg = load_config(None)
+    dev = DemoDevice()
+    dev.max_points = 290  # what an original (non-Ultra) tinySA reports
+    engine = RFEngine(cfg, dev)
+    engine.connect()
+    try:
+        with pytest.raises(ValueError, match="at most 290"):
+            engine.start_scan({"points": 450})
+        assert engine.snapshot()["max_points"] == 290
+        engine.start_scan({"points": 290})
+    finally:
+        engine.stop()
+
+
+def test_parse_scan_none_is_empty():
+    assert parse_scan(None).size == 0
+
+
 def test_rf_off_and_sweep_failure():
     cfg = load_config(None)
     assert [m.name for m in build_modules(cfg, "synth", rf_source="off", qlxd_source="off")] == ["audio"]

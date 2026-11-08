@@ -123,6 +123,8 @@ class RFEngine:
             settings = self.settings.updated(overrides or {})
             if not self._connected:
                 raise RFDeviceError("not connected")
+            if settings.points > self.device.max_points:
+                raise ValueError(f"this {self.device.name} sweeps at most {self.device.max_points} points")
             self.stop_scan()
             with self._device_lock:
                 try:
@@ -196,7 +198,7 @@ class RFEngine:
                 "info": self._info,
                 "settings": asdict(self.settings),
                 "rbw_choices": list(RBW_CHOICES),
-                "max_points": MAX_POINTS,
+                "max_points": self.device.max_points,
                 "sweeps": self._sweeps,
                 "sweep": sweep,
             }
