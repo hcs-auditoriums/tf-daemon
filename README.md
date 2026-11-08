@@ -249,8 +249,9 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
 - `tf5.eq` (default `false`) / `tf5.eq_port` (50368): also read every channel's
   EQ over the TF Editor protocol (`tf_daemon/tfeditor.py`, protocol notes in
   `guides/tf5_api.md`) and offer an **EQ** toggle that overlays the console's EQ
-  curve on the spectrum (own ±18 dB scale; analog filter models, so close to but
-  not exactly Yamaha's curve). The client is **read-only**: it joins as a
+  curve on the spectrum (own scale: ±18 dB, widened to fit deep curves). The curve
+  is computed with TF Editor's own filter maths (decompiled; see the guide's EQ
+  curve section). The client is **read-only**: it joins as a
   StageMix client with `SYNCDIR:2` (console → client), and a guard refuses to
   send anything but the subscribe / hash / sync / keepalive handshake, so it
   cannot change a parameter. `GET /api/tf5/eq/<usb>` returns the settings and

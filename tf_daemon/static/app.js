@@ -455,8 +455,9 @@
 
   // The EQ set on the console for the channel on the shown input (pushed as
   // "tf5-eq" over /ws/audio; only when tf5.eq is on). Read-only: this page
-  // never changes the console. Drawn on its own ±EQ_RANGE dB scale, centred.
-  const EQ_RANGE = 18;
+  // never changes the console. Drawn on its own dB scale, centred: ±18 dB, widened
+  // in 6 dB steps (up to ±48) so the whole curve fits between the shown frequencies.
+  const EQ_RANGE_MIN = 18, EQ_RANGE_MAX = 48;
   state.showEq = loadInt("tf.eq", 0) === 1;
   state.eq = null;         // last "tf5-eq" message for state.input
   let eqAvailable = null;  // null = not known yet, false = tf5.eq off (404)
@@ -497,15 +498,28 @@
     if (!d.synced) return "EQ · reading console…";
     if (!d.source) return `EQ · USB ${d.index + 1} is not on the console patch`;
     if (!d.eq) return `EQ · not available for ${d.source}`;
-    return `EQ ${d.source}${d.eq.on ? "" : " · OFF"}${d.eq.one_knob ? " · 1-knob on" : ""} · approx.`;
+    return `EQ ${d.source}${d.eq.on ? "" : " · OFF"}${d.eq.one_knob ? " · 1-knob on" : ""}`;
+  }
+
+  // Half-height of the EQ scale in dB: fits the curve between the shown frequencies.
+  function eqRange(d) {
+    let peak = 0;
+    if (d.eq) {
+      d.freqs.forEach((f, i) => {
+        if (f >= state.freqs[0] && f <= state.freqs[state.freqs.length - 1]) peak = Math.max(peak, Math.abs(d.curve[i]));
+      });
+      for (const b of d.eq.bands) peak = Math.max(peak, Math.abs(b.gain));
+    }
+    return Math.min(EQ_RANGE_MAX, Math.max(EQ_RANGE_MIN, Math.ceil((peak + 1) / 6) * 6));
   }
 
   function drawEq() {
     const d = state.eq;
     if (!state.showEq || !eqAvailable || !d || d.index !== state.input) return;
     const top = PAD.t, bot = H - PAD.b, x0 = PAD.l, x1 = W - PAD.r;
-    const yEq = (db) => (top + bot) / 2 - db / EQ_RANGE * (bot - top) / 2;
-    const yc = (db) => Math.min(bot, Math.max(top, yEq(db)));
+    const range = eqRange(d);
+    const yEq = (db) => (top + bot) / 2 - db / range * (bot - top) / 2;
+    const yc = (db) => Math.min(bot, Math.max(top, yEq(db)));   // handles stay on the plot
     ctx.font = "11px system-ui, sans-serif";
     ctx.lineWidth = 1;
     ctx.strokeStyle = C.eq; ctx.fillStyle = C.eq;
@@ -518,7 +532,10 @@
     ctx.setLineDash([]);
     ctx.globalAlpha = 0.85;
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
-    for (const db of [12, 6, 0, -6, -12]) ctx.fillText(`${db > 0 ? "+" : ""}${db}`, x1 - 4, yEq(db));
+    const step = range > 24 ? 12 : 6;
+    for (let db = range - step; db >= -(range - step); db -= step) {
+      ctx.fillText(`${db > 0 ? "+" : ""}${db}`, x1 - 4, yEq(db));
+    }
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     ctx.fillText(eqNote(d), x0 + 6, top + 4);
     ctx.globalAlpha = 1;
@@ -528,7 +545,7 @@
     // Shade between the curve and 0 dB, as the TF5's EQ screen does (only when on).
     if (eq.on) {
       ctx.beginPath();
-      d.freqs.forEach((f, i) => { const x = xOf(f), y = yc(d.curve[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+      d.freqs.forEach((f, i) => { const x = xOf(f), y = yEq(d.curve[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
       ctx.lineTo(xOf(d.freqs[d.freqs.length - 1]), yEq(0));
       ctx.lineTo(xOf(d.freqs[0]), yEq(0));
       ctx.closePath();
@@ -537,12 +554,13 @@
       ctx.fillStyle = C.eq;
     }
 
-    // The response curve; dashed and dim when the EQ is switched off on the desk.
+    // The response curve (clipped by the plot, not flattened onto its edge); dashed
+    // and dim when the EQ is switched off on the desk.
     ctx.globalAlpha = eq.on ? 1 : 0.45;
     ctx.lineWidth = 2;
     if (!eq.on) ctx.setLineDash([6, 4]);
     ctx.beginPath();
-    d.freqs.forEach((f, i) => { const x = xOf(f), y = yc(d.curve[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    d.freqs.forEach((f, i) => { const x = xOf(f), y = yEq(d.curve[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
     ctx.stroke();
     ctx.setLineDash([]);
 
@@ -558,7 +576,8 @@
     if (eq.hpf && eq.hpf.on) handle(eq.hpf.freq, 0, "HPF", true);
     for (const b of eq.bands) {
       const filter = b.type === "hpf" || b.type === "lpf";
-      handle(b.freq, filter ? 0 : b.gain, filter ? b.type.toUpperCase() : b.label, filter || b.gain !== 0);
+      const on = b.on !== false;
+      handle(b.freq, filter ? 0 : b.gain, filter ? b.type.toUpperCase() : b.label, filter ? on : b.gain !== 0);
     }
     ctx.globalAlpha = 1; ctx.lineWidth = 1;
   }

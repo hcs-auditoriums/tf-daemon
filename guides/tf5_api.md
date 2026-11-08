@@ -251,6 +251,37 @@ Ch1 as captured:
 6. Answer `EEVT KeepAlive` with a dir=10 echo, and send your own every ≤15 s.
 7. Write: send `01 11` with origin 0xA0 (see the 4.4 example). The console echo confirms it.
 
+### 6.1 Drawing the EQ curve like TF Editor [VERIFIED-CODE]
+
+PEQ graph painters (`FUN_00545970`, `FUN_00555300`, `FUN_00592770`) run:
+1. `FUN_0051a080` builds 6 sections `{freq, gain-or-on, Q, type}`;
+2. `FUN_00519f50` designs them with `FUN_005196e0`;
+3. `FUN_00546ae0` sums `10*log10|H|^2` per section.
+
+Sample rate: 48000 (`0xbb80` in the widget ctors).
+
+Section table (Ghidra shows these integer constants as tiny floats, e.g. 1.4e-45 = 1):
+- slot 0, the HPF block: slope 6 → type 7, 12 → type 5; Q 0.707106; on → 1.0;
+- slots 2.., the bands, `{freq, gain dB, Q}`:
+  - low band: Type 0 → 0 (bell), 1 → 2 (low shelf), 2 → 5 (HPF, Q 0.707106; on only if `HPFOn` = 1);
+  - high band: Type 0 → 0, 1 → 3 (high shelf), 2 → 4 (LPF; on only if `LPFOn` = 1).
+- A section whose gain / on value is 0 contributes 0 dB.
+
+Designer `FUN_005196e0(coef, fs, Q, gain, freq, type)`:
+- Clamps: fs ≥ 44100, freq ≥ 16, Q ≥ 0.1.
+- K = tan(π·f/fs), V = 10^(|gain|/20).
+- Output layout: `coef = [-a2, -a1, b2, b1, b0]`, with a0 = 1.
+
+| type | filter |
+|---|---|
+| 0 bell (Zölzer) | boost: num 1+K²±VK/Q, den 1+K²±K/Q. Cut: VK/Q moves to the denominator (exact mirror of the boost). |
+| 2 / 3 shelves | **Q is ignored.** Two cascaded first-order shelves. Low: (1+K√V)+(K√V−1)z⁻¹ over (1+K)+(K−1)z⁻¹. High: (K+√V)+(K−√V)z⁻¹ over the same. Swap num/den for a cut. |
+| 4 / 5 | 2nd-order LPF / HPF with Q |
+| 6 / 7 | 1st-order LPF / HPF |
+| 8–11 | first-order shelf variants (unused by the PEQ table) |
+
+`tf_daemon/tfeditor.py` (`biquad`, `eq_curve`) implements this. `tests/tf_editor_reference.py` is a literal transcription of the decompiled code that the tests compare against.
+
 ---
 
 ## 7. Password [VERIFIED-CODE `FUN_00474030`]

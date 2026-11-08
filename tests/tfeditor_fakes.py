@@ -132,7 +132,8 @@ def default_mixing_values() -> dict[str, int | str]:
                   f"{b}/Bank/Band:0/Frequency": 10000, f"{b}/Bank/Band:0/Q": 700,
                   f"{b}/Bank/Band:1/Frequency": 40000, f"{b}/Bank/Band:1/Q": 700,
                   f"{b}/Bank/BandH/Frequency": 100000, f"{b}/Bank/BandH/Q": 700})
-    v["Stereo:1/PEQ/Bank/BandL/HPFOn"] = 1
+    v["Stereo:1/PEQ/Bank/BandL/Type"] = 2      # the low band as a high-pass filter...
+    v["Stereo:1/PEQ/Bank/BandL/HPFOn"] = 1     # ...switched on
     v["Stereo:1/PEQ/Bank/BandL/Frequency"] = 800
     v["Stereo:1/PEQ/Bank/Band:1/Gain"] = -300
     return v
