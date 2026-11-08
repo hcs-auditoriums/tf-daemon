@@ -1,8 +1,8 @@
 # tf-daemon
 
 A Raspberry Pi appliance that captures audio from a **Yamaha TF5** over USB and
-serves a real-time **spectrum analyzer** (and, coming next, a feedback/ringing
-detector) to any browser on the network.
+serves a real-time **spectrum analyzer** with a **ring / feedback detector** to
+any browser on the network.
 
 A second page, **`/rf`**, is an RF spectrum analyzer for a **tinySA** on USB
 serial (connect, sweep, live trace + peak hold, waterfall, and lines at the
@@ -115,6 +115,54 @@ gunicorn is configured through environment variables:
 | `TF_DAEMON_BIND` | `0.0.0.0:8080` | listen address |
 | `TF_DAEMON_THREADS` | `8` | gunicorn threads |
 | `TF_DAEMON_LOG` | `INFO` | log level |
+
+## Ring detection
+
+Always on, nothing to set up. It watches every analyzed input: Main L/R all the
+time, plus whatever input someone is viewing. A ring shows up as:
+
+- a **header alert** (`RING 2.50 kHz · Main L`; pulsing red `FEEDBACK` when it
+  is growing). Click it to show that input.
+- a **marker** on the spectrum at the ring's frequency (dashed once it's gone,
+  for five minutes).
+- the **Rings list** (bottom left of the spectrum): frequency, input, the
+  nearest 1/3-octave **GEQ band** to pull down, how often it came back (`×3`)
+  and when. **Ignore** stops reporting a frequency (a steady tone that isn't
+  feedback, until restart); **Clear** forgets past rings. The **Rings** checkbox
+  hides the markers and the list (the alert stays).
+
+It works the same during a mic check and mid-show, and does not need the ring to
+be louder than the voice. Just below feedback, the system acts as a very narrow
+resonant boost (with loop gain g the boost is 1/(1−g): +26 dB and ~0.5 Hz wide at
+g = 0.95), so a ring is the programme's own energy at one frequency, boosted and
+smeared out in time. Three things give it away:
+
+| | what the detector sees | typical situation |
+|---|---|---|
+| **feedback** | a steady frequency whose level keeps rising for a second or more | gain pushed too far |
+| **ring** (sustained) | a narrow peak at a fixed frequency in a ~1 s average, where moving speech harmonics smear out; found even 25 dB under the voice | pushing gain at mic check; a ring under dialogue |
+| **ring** (tail) | after a phrase ends the room dies away (~60 dB/s) but this frequency decays much slower (a ring near feedback: ~15–30 dB/s) | "it rings after every line" |
+
+To keep speech and music from triggering it, a candidate must stand ≥ 10 dB above
+the spectrum around it, hold its frequency to ~0.3% (voiced speech glides, singing
+has vibrato) and have no harmonic series: nothing comparable at 2× and 3× its
+frequency (the peak-to-harmonic power ratio, the strongest single criterion in
+van Waterschoot & Moonen, *JAES* 58(11), 2010), and no louder steady peak at
+1/2…1/10 of it (an upper partial of a note). A single tail is shown as
+*possible* without an alert: a slowly decaying instrument note (piano, vibes)
+can look like one. When it recurs at the same frequency, it's a ring.
+
+`tests/test_ring.py` checks this against synthetic speech with rings 5–25 dB
+under the voice, speech through a simulated loop at gain 0.95, runaway feedback
+and tails (all must be found within 1–2.5 s), and speech, reverberant speech,
+vibrato, organ chords, room-decaying notes and mains hum (must stay silent).
+
+`[ring]` in `config.toml`: `enabled`, `sensitivity` (`low` | `normal` | `high`),
+`fmin` / `fmax` (detection range, default 80 Hz–12 kHz), `mains_hz` (hum
+harmonics to skip: 60, 50 or 0). API: `GET /api/audio/rings`,
+`POST /api/audio/rings/clear`, `POST /api/audio/rings/ignore` `{"freq": hz}`,
+`POST /api/audio/rings/unignore` `{"freq": hz}` or `{}`; live updates arrive on
+`/ws/audio` as `{"type": "rings", ...}`.
 
 ## Configuration
 
@@ -305,7 +353,7 @@ Wireless (QLX-D):
 
 ## Roadmap
 
-- Feedback / ringing detector (narrow, persistent peaks rising above the
-  averaged spectrum), shown as markers and a list in the UI.
+- Ring detection: remember ignored frequencies across restarts; per-input
+  on/off for instrument channels that ring by nature.
 - RF: port the rest of tinysa-visualizer (points of interest, noise-floor
   dropout events, scan recording and browsing).

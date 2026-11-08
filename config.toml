@@ -65,6 +65,14 @@ state_file = "qlxd_state.json"
 meter_poll_s = 1.0          # RF / antenna / audio level poll period
 full_poll_s = 10.0          # full parameter refresh (receivers also push changes)
 
+[ring]
+# Ring / feedback detection on every analyzed input (Main L/R always).
+enabled = true
+sensitivity = "normal"      # low | normal | high
+fmin = 80.0                 # Hz, detection range
+fmax = 12000.0
+mains_hz = 60.0             # mains hum harmonics to skip (50 in Europe, 0 = off)
+
 [tf5]
 # Read channel names and settings (fader, on, pan, colour) from the TF5 over the
 # network, using Yamaha's remote control protocol on TCP 49280. The server must

@@ -24,14 +24,17 @@
         </select>
       </label>
       <button id="reset-peak" type="button">Reset peak</button>
+      <label><input type="checkbox" id="show-rings" checked> Rings</label>
       <label id="console-toggle" hidden><input type="checkbox" id="show-console" checked> Console</label>
     </div>
+    <button id="ring-alert" class="ring-alert" type="button" hidden></button>
     <div id="conn" class="conn" title="Connection">connecting…</div>
   </header>
   <div class="workspace">
     <main>
       <canvas id="spectrum" aria-label="Spectrum analyzer"></canvas>
       <div id="readout" class="readout"></div>
+      <div id="ring-list" class="ring-list" hidden></div>
     </main>
     <aside id="console-panel" class="console-panel" aria-label="Console channel" hidden></aside>
   </div>
