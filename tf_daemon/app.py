@@ -34,7 +34,7 @@ def build_source(cfg: dict[str, Any], kind: str, wav_path: str | None = None) ->
     blocksize = int(audio["blocksize"])
     fs = int(audio["samplerate"])
     if kind == "device":
-        return DeviceSource(str(audio["device"]), blocksize, fs)
+        return DeviceSource(str(audio["device"]), blocksize, fs, channels=int(audio["channels"]))
     if kind == "synth":
         idx = [c.index for c in channels_from(cfg)]
         s = cfg["synth"]

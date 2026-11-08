@@ -305,8 +305,9 @@ class AudioEngine:
 
     def _run(self) -> None:
         target = self.n_fft  # wait until one full frame exists
-        try:
-            while not self._stop.is_set():
+        last_err = 0.0
+        while not self._stop.is_set():
+            try:
                 written = self.ring.wait_for(target, timeout=0.5)
                 if written < target:
                     continue
@@ -334,9 +335,13 @@ class AudioEngine:
                 if written - target > self.n_fft:  # fell behind: drop to the newest data
                     self._skipped_hops += (written - target) // self.hop
                     target = written + self.hop
-        except Exception:
-            log.exception("Analysis thread crashed")
-            raise
+            except Exception:
+                # Never let one bad hop stop the analysis; log at most every 10 s.
+                if time.monotonic() - last_err > 10:
+                    log.exception("Analysis error (continuing)")
+                    last_err = time.monotonic()
+                target = self.ring.written + self.hop  # skip past the frame that failed
+                self._stop.wait(0.05)
 
     def _publish(self, active: list[tuple[int, SpectrumAnalyzer]]) -> None:
         n_bins = self.analyzer.bins.count
