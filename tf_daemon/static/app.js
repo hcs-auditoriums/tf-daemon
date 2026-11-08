@@ -1,5 +1,7 @@
 // tf-daemon spectrum view. Plain JS, no build step.
-// Protocol: see tf_daemon/audio/engine.py (binary "TFS1" frames) and module.py.
+// Protocol: see tf_daemon/audio/engine.py (binary "TFS2" frames) and module.py.
+// The server analyzes an input only while some client views it, so we tell it
+// which one we show ({"cmd": "view"}) and pick that input's record out of each frame.
 (() => {
   "use strict";
 
@@ -15,12 +17,12 @@
 
   const state = {
     meta: null,
-    channel: loadInt("tf.channel", 0),
+    input: loadInt("tf.input", -1),  // device input index being shown
     showAvg: true,
     showPeak: true,
     dbMin: -100,
     dbMax: -20,
-    avg: null,   // Float32Array per channel
+    avg: null,   // Float32Array for the shown input
     peak: null,
     dirty: true,
     frames: 0,
@@ -71,11 +73,14 @@
     state.freqs = Float32Array.from(meta.freqs);
     state.logMin = Math.log10(meta.freqs[0]);
     state.logMax = Math.log10(meta.freqs[meta.freqs.length - 1]);
-    const n = meta.channels.length, b = meta.freqs.length;
-    state.avg = Array.from({ length: n }, () => new Float32Array(b).fill(meta.db_floor));
-    state.peak = Array.from({ length: n }, () => new Float32Array(b).fill(meta.db_floor));
-    if (state.channel >= n) state.channel = 0;
-    buildChannelButtons();
+    const b = meta.freqs.length;
+    state.avg = new Float32Array(b);
+    state.peak = new Float32Array(b);
+    if (!meta.channels.some((c) => c.index === state.input)) {
+      state.input = (meta.channels.find((c) => c.pinned) || meta.channels[0]).index;
+    }
+    buildChannelPicker();
+    selectInput(state.input);
     $("info").textContent =
       `${meta.source} · ${meta.samplerate} Hz · FFT ${meta.fft_size} ` +
       `(${(meta.samplerate / meta.fft_size).toFixed(2)} Hz/bin) · ` +
@@ -87,42 +92,65 @@
     if (!state.meta) return;
     const dv = new DataView(buf);
     const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
-    if (magic !== "TFS1") return;
+    if (magic !== "TFS2") return;
     state.lastSeq = dv.getUint32(4, true);
-    const nCh = dv.getUint16(8, true), nBins = dv.getUint16(10, true);
-    if (nCh !== state.avg.length || nBins !== state.freqs.length) return;
-    const data = new Int16Array(buf, 12, nCh * 2 * nBins);
-    for (let c = 0; c < nCh; c++) {
-      const a = state.avg[c], p = state.peak[c];
-      const base = c * 2 * nBins;
+    const nRec = dv.getUint16(8, true), nBins = dv.getUint16(10, true);
+    if (nBins !== state.freqs.length) return;
+    const recSize = 4 + 4 * nBins;
+    for (let r = 0; r < nRec; r++) {
+      const off = 12 + r * recSize;
+      if (dv.getUint16(off, true) !== state.input) continue;
+      const data = new Int16Array(buf, off + 4, 2 * nBins);
       for (let i = 0; i < nBins; i++) {
-        a[i] = data[base + i] / 100;
-        p[i] = data[base + nBins + i] / 100;
+        state.avg[i] = data[i] / 100;
+        state.peak[i] = data[nBins + i] / 100;
       }
+      state.frames++;
+      state.dirty = true;
+      return;
     }
-    state.frames++;
-    state.dirty = true;
   }
 
   // ------------------------------------------------------------------ controls
 
-  function buildChannelButtons() {
+  // Buttons for the inputs named in config.toml, plus a menu with every input.
+  function buildChannelPicker() {
     const nav = $("channels");
     nav.replaceChildren();
-    state.meta.channels.forEach((ch, i) => {
+    for (const ch of state.meta.channels.filter((c) => c.pinned)) {
       const b = document.createElement("button");
       b.type = "button";
       b.textContent = ch.label;
       b.title = `Input ${ch.index + 1}`;
-      b.setAttribute("aria-pressed", String(i === state.channel));
-      b.onclick = () => {
-        state.channel = i;
-        save("tf.channel", i);
-        [...nav.children].forEach((el, j) => el.setAttribute("aria-pressed", String(j === i)));
-        state.dirty = true;
-      };
+      b.dataset.input = ch.index;
+      b.onclick = () => selectInput(ch.index);
       nav.appendChild(b);
-    });
+    }
+    const sel = document.createElement("select");
+    sel.id = "input";
+    sel.setAttribute("aria-label", "Input");
+    for (const ch of state.meta.channels) {
+      const o = document.createElement("option");
+      o.value = ch.index;
+      const n = `In ${ch.index + 1}`;
+      o.textContent = ch.label === `Ch ${ch.index + 1}` ? n : `${n} · ${ch.label}`;
+      sel.appendChild(o);
+    }
+    sel.onchange = () => selectInput(Number(sel.value));
+    nav.appendChild(sel);
+  }
+
+  function selectInput(index) {
+    state.input = index;
+    save("tf.input", index);
+    state.avg.fill(state.meta.db_floor);
+    state.peak.fill(state.meta.db_floor);
+    for (const b of $("channels").querySelectorAll("button")) {
+      b.setAttribute("aria-pressed", String(Number(b.dataset.input) === index));
+    }
+    $("input").value = index;
+    send({ cmd: "view", channel: index });
+    state.dirty = true;
   }
 
   $("show-avg").onchange = (e) => { state.showAvg = e.target.checked; state.dirty = true; };
@@ -131,7 +159,7 @@
     [state.dbMin, state.dbMax] = e.target.value.split(",").map(Number);
     state.dirty = true;
   };
-  $("reset-peak").onclick = () => send({ cmd: "reset_peak", channel: state.channel });
+  $("reset-peak").onclick = () => send({ cmd: "reset_peak", channel: state.input });
 
   canvas.addEventListener("pointermove", (e) => {
     const r = canvas.getBoundingClientRect();
@@ -239,7 +267,7 @@
       if (d < best) { best = d; i = k; }
     }
     const fBin = state.freqs[i];
-    const a = state.avg[state.channel][i], p = state.peak[state.channel][i];
+    const a = state.avg[i], p = state.peak[i];
     ro.textContent = `${fBin >= 1000 ? (fBin / 1000).toFixed(2) + " kHz" : fBin.toFixed(1) + " Hz"}` +
       `  avg ${a.toFixed(1)} dB  peak ${p.toFixed(1)} dB  cursor ${dbOfY(h.y).toFixed(1)} dB`;
     ro.style.display = "block";
@@ -253,9 +281,8 @@
     ctx.beginPath();
     ctx.rect(PAD.l, PAD.t, W - PAD.l - PAD.r, H - PAD.t - PAD.b);
     ctx.clip();
-    const ch = state.channel;
-    if (state.showPeak) trace(state.peak[ch], C.peak, null);
-    if (state.showAvg) trace(state.avg[ch], C.avg, C.avgFill);
+    if (state.showPeak) trace(state.peak, C.peak, null);
+    if (state.showAvg) trace(state.avg, C.avg, C.avgFill);
     ctx.restore();
     drawHover();
   }

@@ -60,7 +60,9 @@ state_file = "qlxd_state.json"
 meter_poll_s = 1.0          # RF / antenna / audio level poll period
 full_poll_s = 10.0          # full parameter refresh (receivers also push changes)
 
-# Channels to analyze. index is the 0-based capture channel on the device.
+# Named inputs. index is the 0-based capture channel on the device. Every input
+# can be viewed in the browser; these get buttons and are always analyzed, the
+# rest only while someone is looking at them.
 [[channels]]
 index = 0
 label = "Main L"

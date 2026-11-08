@@ -98,18 +98,71 @@ def test_engine_end_to_end_with_synth():
         while time.time() < deadline and payload is None:
             seq, payload = engine.hub.wait(seq, timeout=0.5)
         assert payload is not None, "no frame within 5 s"
-        magic, s, nch, nb = struct.unpack_from("<4sIHH", payload)
-        assert magic == MAGIC and nch == 2 and nb == engine.analyzer.bins.count
-        assert len(payload) == 12 + nch * 2 * nb * 2
+        nb = engine.analyzer.bins.count
+        assert _records(payload, nb) == [0, 1]  # the listed inputs are always analyzed
 
         client = app.test_client()
         meta = client.get("/api/audio/meta").get_json()
-        assert [c["label"] for c in meta["channels"]] == ["Main L", "Main R"]
+        assert [(c["label"], c["pinned"]) for c in meta["channels"]] == [("Main L", True), ("Main R", True)]
         assert client.post("/api/audio/reset-peak", json={"channel": 1}).get_json() == {"ok": True}
         assert client.post("/api/audio/reset-peak", json={"channel": 9}).status_code == 400
         assert client.get("/api/status").get_json()["modules"]["audio"]["frames"] >= 1
     finally:
         app.extensions["tf_stop"]()
+
+
+def _records(payload, n_bins):
+    """Input indices carried by a TFS2 frame (and a check of its layout)."""
+    magic, _, count, nb = struct.unpack_from("<4sIHH", payload)
+    assert magic == MAGIC and nb == n_bins
+    rec = 4 + 4 * nb
+    assert len(payload) == 12 + count * rec
+    return [struct.unpack_from("<H", payload, 12 + k * rec)[0] for k in range(count)]
+
+
+def _next_frame(engine, seq, timeout=5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        seq, payload = engine.hub.wait(seq, timeout=0.5)
+        if payload is not None:
+            return seq, payload
+    raise AssertionError("no frame in time")
+
+
+def test_unlisted_inputs_are_analyzed_only_while_viewed():
+    from tf_daemon.audio.engine import AudioEngine
+    cfg = load_config(None)
+    cfg["channels"] = [{"index": 1, "label": "Vox"}]
+    src = SynthSource(channels=4, active=[0, 1, 2, 3], blocksize=1200, speech_db=-20, noise_db=-50,
+                      tone_hz=2500, tone_db=-15)
+    engine = AudioEngine(cfg, src)
+    nb = engine.analyzer.bins.count
+    assert [(c.index, c.label) for c in engine.inputs] == [(0, "Ch 1"), (1, "Vox"), (2, "Ch 3"), (3, "Ch 4")]
+    engine.start()
+    try:
+        seq, payload = _next_frame(engine, 0)
+        assert _records(payload, nb) == [1]
+
+        engine.acquire(3)
+        engine.acquire(3)  # two viewers
+        seq, payload = _next_frame(engine, seq)
+        seq, payload = _next_frame(engine, seq)
+        assert _records(payload, nb) == [1, 3]
+        k = _records(payload, nb).index(3)
+        avg = np.frombuffer(payload, "<i2", count=nb, offset=12 + k * (4 + 4 * nb) + 4) / 100
+        assert avg.max() > -60  # real signal, not the floor
+
+        engine.release(3)
+        assert engine.active_inputs() == [1, 3]  # still one viewer
+        engine.release(3)
+        engine.release(1)  # listed inputs stay analyzed regardless
+        assert engine.active_inputs() == [1]
+        with pytest.raises(ValueError):
+            engine.acquire(4)
+        with pytest.raises(ValueError):
+            engine.reset_peak(3)
+    finally:
+        engine.stop()
 
 
 def test_engine_rejects_missing_channel():
