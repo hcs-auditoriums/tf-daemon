@@ -6,7 +6,8 @@ feedback detector** to any browser on the network.
 
 The audio page's **View** menu picks the layout (**Spectrum**, **Waterfall** or
 **Both**, stacked with aligned frequency columns), the traces (average,
-real-time, peak hold), the dB range (which also sets the waterfall's colours),
+real-time, peak hold), the dB range (**Auto**, the default, keeps a 70 dB window on the shown input's
+level; fixed choices from −90…−10 to −130…0 dB; it also sets the waterfall's colours),
 the waterfall's history (10 s to 5 min) and source (real-time or the 3 s
 average), and the Rings / Console overlays. Choices are remembered per browser.
 On the waterfall, speech shows as gliding harmonics and a ring as a straight
