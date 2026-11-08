@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tf-daemon</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>tf-daemon</h1>
+    <nav id="channels" aria-label="Channel"></nav>
+    <div class="controls">
+      <label><input type="checkbox" id="show-avg" checked> Average</label>
+      <label><input type="checkbox" id="show-peak" checked> Peak hold</label>
+      <label>Range
+        <select id="range">
+          <option value="-120,0">−120…0 dB</option>
+          <option value="-100,-20" selected>−100…−20 dB</option>
+          <option value="-80,-20">−80…−20 dB</option>
+        </select>
+      </label>
+      <button id="reset-peak" type="button">Reset peak</button>
+    </div>
+    <div id="conn" class="conn" title="Connection">connecting…</div>
+  </header>
+  <main>
+    <canvas id="spectrum" aria-label="Spectrum analyzer"></canvas>
+    <div id="readout" class="readout"></div>
+  </main>
+  <footer id="info"></footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>

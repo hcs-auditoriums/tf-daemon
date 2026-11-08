@@ -1,0 +1,125 @@
+"""Configuration loading.
+
+A single ``config.toml`` is read at startup and deep-merged over DEFAULTS, so
+any missing key gets a sensible value.
+"""
+
+from __future__ import annotations
+
+import copy
+import logging
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+log = logging.getLogger(__name__)
+
+REQUIRED_SAMPLERATE = 48000
+
+DEFAULTS: dict[str, Any] = {
+    "server": {"host": "0.0.0.0", "port": 8080},
+    "audio": {
+        "device": "TF",
+        "samplerate": REQUIRED_SAMPLERATE,
+        "blocksize": 1200,
+        "buffer_seconds": 2.0,
+    },
+    "dsp": {
+        "fft_size": 32768,
+        "hop": 2400,
+        "average_tau": 3.0,
+        "display_fmin": 50.0,
+        "display_fmax": 16000.0,
+        "display_bands_per_octave": 48,
+        "db_floor": -140.0,
+    },
+    "synth": {
+        "speech_db": -20.0,
+        "noise_db": -50.0,
+        "tone_hz": 2500.0,
+        "tone_db": -15.0,
+        "seed": 1,
+    },
+    "channels": [
+        {"index": 0, "label": "Main L"},
+        {"index": 1, "label": "Main R"},
+    ],
+}
+
+
+class ConfigError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class Channel:
+    index: int
+    label: str
+
+
+def _merge(base: dict, override: dict) -> dict:
+    out = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _merge(out[key], value)
+        else:
+            out[key] = copy.deepcopy(value)
+    return out
+
+
+def load_config(path: str | Path | None) -> dict[str, Any]:
+    """Load ``path`` (if it exists) over DEFAULTS and validate the result."""
+    user: dict[str, Any] = {}
+    if path is not None:
+        p = Path(path)
+        if p.exists():
+            with p.open("rb") as f:
+                user = tomllib.load(f)
+            log.info("Loaded config from %s", p)
+        else:
+            log.warning("Config file %s not found; using defaults", p)
+    cfg = _merge(DEFAULTS, user)
+    _validate(cfg)
+    return cfg
+
+
+def channels_from(cfg: dict[str, Any]) -> list[Channel]:
+    return [Channel(int(c["index"]), str(c.get("label", f"Ch {int(c['index']) + 1}"))) for c in cfg["channels"]]
+
+
+def _validate(cfg: dict[str, Any]) -> None:
+    sr = int(cfg["audio"]["samplerate"])
+    if sr != REQUIRED_SAMPLERATE:
+        raise ConfigError(f"audio.samplerate must be {REQUIRED_SAMPLERATE} (TF5 is fixed at 48 kHz), got {sr}")
+
+    dsp = cfg["dsp"]
+    n = int(dsp["fft_size"])
+    if n < 1024 or n & (n - 1):
+        raise ConfigError(f"dsp.fft_size must be a power of two >= 1024, got {n}")
+    hop = int(dsp["hop"])
+    if not 1 <= hop <= n:
+        raise ConfigError(f"dsp.hop must be between 1 and fft_size, got {hop}")
+    if float(dsp["average_tau"]) <= 0:
+        raise ConfigError("dsp.average_tau must be > 0")
+    fmin, fmax = float(dsp["display_fmin"]), float(dsp["display_fmax"])
+    if not 0 < fmin < fmax <= sr / 2:
+        raise ConfigError(f"need 0 < display_fmin < display_fmax <= {sr / 2}")
+
+    buf_frames = float(cfg["audio"]["buffer_seconds"]) * sr
+    if buf_frames < n + hop:
+        raise ConfigError("audio.buffer_seconds is too short to hold one FFT frame plus a hop")
+
+    chans = cfg["channels"]
+    if not isinstance(chans, list) or not chans:
+        raise ConfigError("at least one [[channels]] entry is required")
+    seen = set()
+    for c in chans:
+        if "index" not in c:
+            raise ConfigError(f"[[channels]] entry missing 'index': {c}")
+        idx = int(c["index"])
+        if idx < 0:
+            raise ConfigError(f"channel index must be >= 0, got {idx}")
+        if idx in seen:
+            raise ConfigError(f"channel index {idx} listed twice")
+        seen.add(idx)

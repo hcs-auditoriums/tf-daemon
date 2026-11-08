@@ -1,0 +1,46 @@
+# tf-daemon configuration.
+# Every key is optional; anything missing falls back to the defaults in
+# tf_daemon/config.py.
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[audio]
+# Case-insensitive substring of the capture device name (DeviceSource only).
+device = "TF"
+# The TF5 runs at a fixed 48 kHz. Other rates are rejected.
+samplerate = 48000
+# Frames per capture callback / per synthetic block.
+blocksize = 1200
+# Length of the per-channel ring buffers, in seconds.
+buffer_seconds = 2.0
+
+[dsp]
+fft_size = 32768            # ~1.46 Hz bins at 48 kHz
+hop = 2400                  # ~20 updates/sec
+average_tau = 3.0           # exponential averaging time constant, seconds
+display_fmin = 50.0
+display_fmax = 16000.0
+display_bands_per_octave = 48
+db_floor = -140.0
+
+[synth]
+# Levels are AES17 dBFS (full-scale sine = 0 dBFS).
+# Speech-like content level (RMS while voiced), dBFS.
+speech_db = -20.0
+# Pink noise bed level (RMS), dBFS.
+noise_db = -50.0
+# The steady "ringing" tone the feedback detector should find.
+tone_hz = 2500.0
+tone_db = -15.0             # relative to speech_db
+seed = 1
+
+# Channels to analyze. index is the 0-based capture channel on the device.
+[[channels]]
+index = 0
+label = "Main L"
+
+[[channels]]
+index = 1
+label = "Main R"
