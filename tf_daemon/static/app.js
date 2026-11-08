@@ -64,6 +64,9 @@
       if (typeof ev.data !== "string") { onFrame(ev.data); return; }
       const msg = JSON.parse(ev.data);
       if (msg.type === "rings") onRings(msg);
+      else if (msg.type === "tf5") onConsoleSnapshot(msg);
+      else if (msg.type === "tf5-changes") onConsoleChanges(msg);
+      else if (msg.type === "tf5-eq") onConsoleEq(msg);
       else onMeta(msg);
     };
   }
@@ -179,28 +182,49 @@
     send({ cmd: "view", channel: index });
     renderPanel();
     state.eq = null;
-    if (state.showEq) fetchEq();
     state.dirty = true;
   }
 
   // ------------------------------------------------------------------ console panel
 
   // Sidebar with the TF5 channel feeding the shown input: name, on, fader,
-  // pan and its sends (GET /api/tf5/channels; only when tf5.host is set).
+  // pan and its sends. The desk's state arrives over /ws/audio: a snapshot on
+  // connect ("tf5"), then each change as it happens on the desk ("tf5-changes");
+  // nothing arrives when tf5.host isn't set, and the sidebar stays hidden.
   let tf5 = null;   // null = no TF5 module; {connected, channels, mixes} otherwise
   state.showConsole = loadInt("tf.console", 1) === 1;
   state.allSends = loadInt("tf.allSends", 0) === 1;
 
-  async function pollConsole() {
-    try {
-      const r = await fetch("/api/tf5/channels");
-      if (r.status === 404) { tf5 = null; renderPanel(); return; }  // TF5 not configured: stop polling
-      tf5 = await r.json();
-    } catch {
-      if (tf5) tf5.connected = false;
+  function onConsoleSnapshot(msg) {
+    tf5 = msg;
+    panelSig = null;  // rebuild
+    schedulePanel();
+  }
+
+  function onConsoleChanges(msg) {
+    if (!tf5) return;
+    tf5.connected = msg.connected;
+    for (const [m, name] of Object.entries(msg.mixes || {})) tf5.mixes[Number(m)] = name;
+    for (const c of msg.changes) {
+      const ch = tf5.channels[c.i];
+      if (!ch) continue;
+      let p = ch.params[c.p];
+      if (c.y === null) {
+        ch.params[c.p] = { value: c.v, unit: c.u };
+      } else {
+        if (!p || !Array.isArray(p.value)) p = ch.params[c.p] = { value: [], unit: c.u };
+        p.value[c.y] = c.v;
+      }
     }
-    renderPanel();
-    setTimeout(pollConsole, 1000);
+    schedulePanel();
+  }
+
+  // Many changes can arrive per frame while a fader moves: render once per frame.
+  let panelQueued = false;
+  function schedulePanel() {
+    if (panelQueued) return;
+    panelQueued = true;
+    requestAnimationFrame(() => { panelQueued = false; renderPanel(); });
   }
 
   const TF_COLORS = {
@@ -248,6 +272,49 @@
     return rows;
   }
 
+  // The sidebar is rebuilt only when its structure changes (another input, a
+  // send appearing, ...); otherwise values are updated in place, so a fader
+  // moving on the desk moves smoothly here (with a short CSS transition).
+  let panelSig = null, refs = null;
+
+  function panelStructure(ch) {
+    if (!tf5.connected || !ch || !ch.source) return JSON.stringify([state.input, tf5.connected, ch && ch.source]);
+    const p = ch.params, rows = p["ToMix/Level"] ? sendRows(p, tf5.mixes || []) : [];
+    const shown = (state.allSends ? rows : rows.filter((r) => r.on && r.db !== null)).map((r) => r.name);
+    return JSON.stringify([state.input, ch.source, p["Label/Name"]?.value, p["Label/Color"]?.value,
+                           !!p["ToStereo/Pan"], !!p["Out/Balance"], !!p["ToMix/Level"], state.allSends, shown,
+                           Object.keys(p).sort()]);
+  }
+
+  function updatePanel(ch) {
+    const p = ch.params, v = (k) => p[k]?.value;
+    const isOn = v("Fader/On") !== 0;
+    refs.on.className = `cp-on ${isOn ? "on" : "off"}`;
+    refs.on.textContent = isOn ? "ON" : "OFF";
+    const level = v("Fader/Level"), pos = `${faderPos(level) * 100}%`;
+    refs.level.textContent = `${fmtDb(level)} dB`;
+    refs.fill.style.height = pos;
+    refs.cap.style.bottom = pos;
+    if (refs.panKey && p[refs.panKey]) {
+      const pan = v(refs.panKey);
+      refs.panVal.textContent = fmtPan(pan);
+      refs.panDot.style.left = `${(pan + 63) / 126 * 100}%`;
+    }
+    if (refs.sends.size) {
+      for (const r of sendRows(p, tf5.mixes || [])) {
+        const s = refs.sends.get(r.name);
+        if (!s) continue;
+        s.row.className = `cp-send${r.on && r.db !== null ? "" : " off"}`;
+        s.fill.style.width = `${faderPos(r.db) * 100}%`;
+        s.val.textContent = r.on ? fmtDb(r.db) : "off";
+      }
+    }
+    for (const [k, dd] of refs.extra) {
+      const x = p[k];
+      if (x) dd.textContent = `${x.value ?? "−∞"}${x.unit ? " " + x.unit : ""}`;
+    }
+  }
+
   function renderPanel() {
     const panel = $("console-panel"), toggle = $("console-toggle");
     toggle.hidden = tf5 === null;
@@ -255,6 +322,13 @@
     if (panel.hidden) return;
 
     const ch = tf5.channels && tf5.channels.find((c) => c.index === state.input);
+    const sig = panelStructure(ch);
+    if (sig === panelSig && refs) {
+      updatePanel(ch);
+      return;
+    }
+    panelSig = sig;
+    refs = { sends: new Map(), extra: new Map() };
     const items = [];
     if (!tf5.connected) {
       items.push(el("p", "cp-note", "TF5 not connected"));
@@ -270,19 +344,20 @@
       head.append(sw, title);
       items.push(head);
 
-      const isOn = v("Fader/On") !== 0;
-      items.push(el("div", `cp-on ${isOn ? "on" : "off"}`, isOn ? "ON" : "OFF"));
+      refs.on = el("div", "cp-on");
+      items.push(refs.on);
 
       // Fader: heading with the level, then a tall fader (scale, track, cap).
-      const section = (title, value) => {
+      const section = (title) => {
         const sec = el("div", "cp-section");
         const hd = el("div", "cp-sechead");
-        hd.append(el("span", "cp-label", title), el("span", "cp-value", value));
+        const value = el("span", "cp-value");
+        hd.append(el("span", "cp-label", title), value);
         sec.append(hd);
-        return sec;
+        return [sec, value];
       };
-      const level = v("Fader/Level");
-      const faderSec = section("Fader", `${fmtDb(level)} dB`);
+      const [faderSec, levelEl] = section("Fader");
+      refs.level = levelEl;
       const fader = el("div", "cp-fader");
       const scale = el("div", "cp-scale");
       const track = el("div", "cp-track");
@@ -298,9 +373,9 @@
         tick.style.bottom = pos;
         track.append(tick);
       }
-      const fill = el("div", "cp-fill"); fill.style.height = `${faderPos(level) * 100}%`;
-      const cap = el("div", "cp-cap"); cap.style.bottom = `${faderPos(level) * 100}%`;
-      track.append(fill, cap);
+      refs.fill = el("div", "cp-fill");
+      refs.cap = el("div", "cp-cap");
+      track.append(refs.fill, refs.cap);
       fader.append(scale, track);
       faderSec.append(fader);
       items.push(faderSec);
@@ -308,11 +383,11 @@
       // Pan (balance for ST) below the fader: a full-width, centre-detented bar.
       const panKey = p["ToStereo/Pan"] ? "ToStereo/Pan" : "Out/Balance";
       if (p[panKey]) {
-        const pan = v(panKey);
-        const panSec = section(panKey === "Out/Balance" ? "Balance" : "Pan", fmtPan(pan));
+        const [panSec, panVal] = section(panKey === "Out/Balance" ? "Balance" : "Pan");
         const bar = el("div", "cp-pan");
-        const dot = el("span"); dot.style.left = `${(pan + 63) / 126 * 100}%`;
+        const dot = el("span");
         bar.append(dot);
+        Object.assign(refs, { panKey, panVal, panDot: dot });
         const marks = el("div", "cp-panmarks");
         marks.append(el("span", "", "L"), el("span", "", "C"), el("span", "", "R"));
         panSec.append(bar, marks);
@@ -327,17 +402,19 @@
         const hdr = el("div", "cp-sendhdr");
         const lbl = el("label");
         const cb = el("input"); cb.type = "checkbox"; cb.checked = state.allSends;
-        cb.onchange = () => { state.allSends = cb.checked; save("tf.allSends", cb.checked ? 1 : 0); renderPanel(); };
+        cb.onchange = () => { state.allSends = cb.checked; save("tf.allSends", cb.checked ? 1 : 0); panelSig = null; renderPanel(); };
         lbl.append(cb, " all");
         hdr.append(el("h3", "", "Sends"), lbl);
         sends.append(hdr);
         if (!shown.length) sends.append(el("p", "cp-note", "No active sends"));
         for (const r of shown) {
-          const row = el("div", `cp-send${r.on && r.db !== null ? "" : " off"}`);
+          const row = el("div", "cp-send");
           const bar = el("div", "cp-sendbar");
-          const f = el("span"); f.style.width = `${faderPos(r.db) * 100}%`;
+          const f = el("span");
           bar.append(f);
-          row.append(el("span", "cp-sendname", r.name), bar, el("span", "cp-sendval", r.on ? fmtDb(r.db) : "off"));
+          const val = el("span", "cp-sendval");
+          row.append(el("span", "cp-sendname", r.name), bar, val);
+          refs.sends.set(r.name, { row, fill: f, val });
           sends.append(row);
         }
         items.push(sends);
@@ -348,11 +425,16 @@
       const extra = Object.entries(p).filter(([k]) => !known.has(k));
       if (extra.length) {
         const dl = el("dl", "cp-extra");
-        for (const [k, x] of extra) dl.append(el("dt", "", k), el("dd", "", `${x.value ?? "−∞"}${x.unit ? " " + x.unit : ""}`));
+        for (const [k] of extra) {
+          const dd = el("dd");
+          refs.extra.set(k, dd);
+          dl.append(el("dt", "", k), dd);
+        }
         items.push(dl);
       }
     }
     panel.replaceChildren(...items);
+    if (refs.on) updatePanel(ch);
   }
 
   $("show-console").checked = state.showConsole;
@@ -369,41 +451,27 @@
 
   // ------------------------------------------------------------------ console EQ overlay
 
-  // The EQ set on the console for the channel on the shown input
-  // (GET /api/tf5/eq/<usb>; only when tf5.eq is on). Read-only: this page
+  // The EQ set on the console for the channel on the shown input (pushed as
+  // "tf5-eq" over /ws/audio; only when tf5.eq is on). Read-only: this page
   // never changes the console. Drawn on its own ±EQ_RANGE dB scale, centred.
   const EQ_RANGE = 18;
   state.showEq = loadInt("tf.eq", 0) === 1;
-  state.eq = null;         // last /api/tf5/eq response for state.input
+  state.eq = null;         // last "tf5-eq" message for state.input
   let eqAvailable = null;  // null = not known yet, false = tf5.eq off (404)
 
-  async function fetchEq() {
-    const want = state.input;
-    try {
-      const r = await fetch(`/api/tf5/eq/${want}`);
-      if (r.status === 404) { eqAvailable = false; state.eq = null; }
-      else if (r.ok) {
-        eqAvailable = true;
-        const d = await r.json();
-        if (want === state.input) state.eq = d;
-      }
-    } catch {
-      if (state.eq) state.eq = { ...state.eq, connected: false };
-    }
-    $("eq-toggle").hidden = !eqAvailable;
+  // Pushed over /ws/audio for the viewed input whenever it changes on the desk
+  // (or the view changes); nothing arrives when tf5.eq is off.
+  function onConsoleEq(msg) {
+    eqAvailable = true;
+    if (msg.index === state.input) state.eq = msg;
+    $("eq-toggle").hidden = false;
     state.dirty = true;
-  }
-
-  async function pollEq() {
-    if (eqAvailable === null || (eqAvailable && state.showEq)) await fetchEq();
-    if (eqAvailable !== false) setTimeout(pollEq, 1000);
   }
 
   $("show-eq").checked = state.showEq;
   $("show-eq").onchange = (e) => {
     state.showEq = e.target.checked;
     save("tf.eq", state.showEq ? 1 : 0);
-    if (state.showEq) fetchEq();
     state.dirty = true;
   };
 
@@ -958,7 +1026,5 @@
 
   resize();
   connect();
-  pollConsole();
-  pollEq();
   requestAnimationFrame(loop);
 })();

@@ -243,3 +243,117 @@ def test_tf5_routes(console):
         assert client.get("/api/status").get_json()["modules"]["tf5"]["connected"]
     finally:
         app.extensions["tf_stop"]()
+
+
+# ---------------------------------------------------------------- desk changes pushed to the page
+
+def test_change_feed(console):
+    client = TF5Client("127.0.0.1", console.port, [("InCh", 0), ("InCh", 1)], poll_s=30, on_names=lambda n: None)
+    client.start()
+    try:
+        wait_until(lambda: client.names().get(1) == "Lead Vox")
+        seq, snap = client.snapshot()
+        assert snap["type"] == "tf5" and snap["channels"][1]["params"]["Label/Name"]["value"] == "Lead Vox"
+        assert client.changes_since(seq) == (seq, {})  # nothing new
+
+        console.push(f"NOTIFY set {INCH}Fader/Level 1 0 -900")
+        console.push(f"NOTIFY set {INCH}Fader/Level 1 0 -600")  # two moves: only the latest goes out
+        console.push(f"NOTIFY set {INCH}ToMix/Level 1 7 -1500")
+        wait_until(lambda: client.changes_since(seq)[1].get("changes", [None]).__len__() == 2)
+        new_seq, msg = client.changes_since(seq)
+        assert new_seq > seq and msg["type"] == "tf5-changes" and msg["connected"]
+        by_path = {(c["i"], c["p"], c["y"]): c for c in msg["changes"]}
+        assert by_path[(1, "Fader/Level", None)]["v"] == -6.0
+        assert by_path[(1, "ToMix/Level", 7)]["v"] == -15.0 and by_path[(1, "ToMix/Level", 7)]["u"] == "dB"
+
+        for k in range(5000):  # far more changes than the log keeps
+            console.push(f"NOTIFY set {INCH}Fader/Level 1 0 {-1000 - k % 2}")
+        wait_until(lambda: client.changes_since(new_seq)[1] is None)  # too far behind: snapshot instead
+    finally:
+        client.stop()
+
+
+def test_desk_changes_reach_the_page_over_the_websocket(console):
+    import json
+    import threading
+
+    from simple_websocket import Client
+    from werkzeug.serving import make_server
+
+    cfg = load_config(None)
+    cfg["tf5"]["host"], cfg["tf5"]["port"] = "127.0.0.1", console.port
+    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="off")
+    app = create_app(cfg, modules)
+    srv = make_server("127.0.0.1", 0, app, threaded=True)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        wait_until(lambda: modules[1].client.names().get(1) == "Lead Vox")
+        ws = Client.connect(f"ws://127.0.0.1:{srv.server_port}/ws/audio")
+        msgs = []
+
+        def text_messages(until, timeout=3.0):
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                m = ws.receive(timeout=0.2)
+                if isinstance(m, str):
+                    msgs.append(json.loads(m))
+                    if until(msgs[-1]):
+                        return msgs[-1]
+            raise AssertionError(f"not received; got {[m.get('type') for m in msgs]}")
+
+        snap = text_messages(lambda m: m.get("type") == "tf5")
+        assert snap["channels"][1]["params"]["Fader/Level"]["value"] == -12.5
+
+        t0 = time.time()
+        console.push(f"NOTIFY set {INCH}Fader/Level 1 0 -300")
+        change = text_messages(lambda m: m.get("type") == "tf5-changes" and m["changes"])
+        latency = time.time() - t0
+        assert change["changes"][0] == {"i": 1, "p": "Fader/Level", "y": None, "v": -3.0, "u": "dB"}
+        assert latency < 0.5, f"took {latency:.3f} s"
+        ws.close()
+    finally:
+        srv.shutdown()
+        app.extensions["tf_stop"]()
+
+
+def test_eq_is_pushed_only_when_it_changes():
+    import json
+
+    from tf_daemon.audio.module import _send_console
+
+    class Console:
+        eq_available = True
+        eq_version = 0
+        gains = {1: 3.0, 2: -2.0}
+
+        def changes_since(self, seq):
+            return seq, {}
+
+        def snapshot(self):
+            return 0, {"type": "tf5"}
+
+        def eq(self, usb):
+            return {"index": usb, "eq": {"gain": self.gains[usb]}}
+
+    class WS:
+        def __init__(self):
+            self.sent = []
+
+        def send(self, m):
+            self.sent.append(json.loads(m))
+
+    c, ws, view = Console(), WS(), [1]
+    seq, eq_sent = _send_console(ws, c, 0, view, None)
+    assert [m["index"] for m in ws.sent] == [1]           # first look at input 1
+    seq, eq_sent = _send_console(ws, c, seq, view, eq_sent)
+    assert len(ws.sent) == 1                              # nothing changed: nothing sent
+    c.eq_version += 1                                     # mixing data changed (say a fader), EQ didn't
+    seq, eq_sent = _send_console(ws, c, seq, view, eq_sent)
+    assert len(ws.sent) == 1
+    c.gains[1] = 6.0
+    c.eq_version += 1                                     # the EQ itself changed
+    seq, eq_sent = _send_console(ws, c, seq, view, eq_sent)
+    assert ws.sent[-1] == {"type": "tf5-eq", "index": 1, "eq": {"gain": 6.0}}
+    view[:] = [2]                                         # the page switched input
+    seq, eq_sent = _send_console(ws, c, seq, view, eq_sent)
+    assert ws.sent[-1]["index"] == 2 and len(ws.sent) == 3

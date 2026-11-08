@@ -326,6 +326,12 @@ main.page {
 .cp-sendbar { height: 6px; border-radius: 3px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
 .cp-sendbar span { display: block; height: 100%; background: var(--peak); }
 .cp-sendval { text-align: right; color: var(--text); }
+/* Smooth the steps between desk updates (a moving fader sends many small changes). */
+.cp-cap { transition: bottom 90ms linear; }
+.cp-fill { transition: height 90ms linear; }
+.cp-pan span { transition: left 90ms linear; }
+.cp-sendbar span { transition: width 90ms linear; }
+@media (prefers-reduced-motion: reduce) { .cp-cap, .cp-fill, .cp-pan span, .cp-sendbar span { transition: none; } }
 .cp-extra { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
 .cp-extra dt { color: var(--muted); }
 .cp-extra dd { margin: 0; text-align: right; }

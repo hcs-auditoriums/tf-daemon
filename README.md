@@ -236,8 +236,10 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   ticked. On connect the console's parameter list (`prminfo`) is read, and any
   input-channel gain / EQ / HPF / dynamics parameters it offers are shown too. A
   TF5 lists none of those (checked on the desk at tf5-daemon); its EQ comes from
-  `eq` below instead. Desk
-  changes and scene recalls update live. The protocol has no login, so
+  `eq` below instead. Desk changes and scene recalls update live: the desk pushes
+  each change, and the server forwards it to open pages over their audio
+  websocket within ~50 ms (just the changed values; a fader moving on the desk
+  moves on the page). The protocol has no login, so
   `username` / `password` are accepted but not sent. It also doesn't expose the
   USB output patch, so `usb_patch` says which console channel each USB capture
   channel carries (`"InCh N"`, `"St L"`, `"St R"`, `""`). The default is the TF

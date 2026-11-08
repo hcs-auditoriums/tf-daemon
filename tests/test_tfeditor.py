@@ -886,7 +886,8 @@ def test_page_has_the_eq_toggle():
     html = (static / "index.html").read_text(encoding="utf-8")
     js = (static / "app.js").read_text(encoding="utf-8")
     assert 'id="eq-toggle" hidden' in html and 'id="show-eq"' in html
-    assert "/api/tf5/eq/" in js and "drawEq()" in js
+    # The EQ is pushed over /ws/audio ("tf5-eq" messages) and drawn.
+    assert '"tf5-eq"' in js and "drawEq()" in js
     # The page only ever reads the EQ.
     assert not re.search(r"fetch\(`/api/tf5/eq[^`]*`\s*,", js)
     assert "--eq:" in (static / "style.css").read_text(encoding="utf-8")
