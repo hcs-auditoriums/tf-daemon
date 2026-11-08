@@ -99,13 +99,15 @@ def test_engine_end_to_end_with_synth():
             seq, payload = engine.hub.wait(seq, timeout=0.5)
         assert payload is not None, "no frame within 5 s"
         nb = engine.analyzer.bins.count
-        assert _records(payload, nb) == [0, 1]  # the listed inputs are always analyzed
+        assert _records(payload, nb) == [32, 33]  # the listed inputs (Main L/R) are always analyzed
 
         client = app.test_client()
         meta = client.get("/api/audio/meta").get_json()
-        assert [(c["label"], c["pinned"]) for c in meta["channels"]] == [("Main L", True), ("Main R", True)]
-        assert client.post("/api/audio/reset-peak", json={"channel": 1}).get_json() == {"ok": True}
-        assert client.post("/api/audio/reset-peak", json={"channel": 9}).status_code == 400
+        pinned = [(c["index"], c["label"]) for c in meta["channels"] if c["pinned"]]
+        assert pinned == [(32, "Main L"), (33, "Main R")] and len(meta["channels"]) == 34
+        assert meta["channels"][0]["label"] == "Ch 1"
+        assert client.post("/api/audio/reset-peak", json={"channel": 33}).get_json() == {"ok": True}
+        assert client.post("/api/audio/reset-peak", json={"channel": 5}).status_code == 400  # not analyzed
         assert client.get("/api/status").get_json()["modules"]["audio"]["frames"] >= 1
     finally:
         app.extensions["tf_stop"]()

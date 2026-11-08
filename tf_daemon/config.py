@@ -76,9 +76,11 @@ DEFAULTS: dict[str, Any] = {
         "remote": "https://github.com/hcs-auditoriums/tf-daemon.git",
         "branch": "main",
     },
+    # The TF's default USB patch puts the stereo bus on USB 33/34; every other
+    # input can be named from the console ([tf5]).
     "channels": [
-        {"index": 0, "label": "Main L"},
-        {"index": 1, "label": "Main R"},
+        {"index": 32, "label": "Main L"},
+        {"index": 33, "label": "Main R"},
     ],
 }
 
