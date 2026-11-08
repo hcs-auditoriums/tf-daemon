@@ -455,9 +455,8 @@
 
   // The EQ set on the console for the channel on the shown input (pushed as
   // "tf5-eq" over /ws/audio; only when tf5.eq is on). Read-only: this page
-  // never changes the console. Drawn on its own dB scale, centred: ±18 dB, widened
-  // in 6 dB steps (up to ±48) so the whole curve fits between the shown frequencies.
-  const EQ_RANGE_MIN = 18, EQ_RANGE_MAX = 48;
+  // never changes the console. Drawn at the spectrum's own dB scale (the View
+  // range), with EQ 0 dB at the middle of the plot: a 70 dB range shows ±35 dB.
   state.showEq = loadInt("tf.eq", 0) === 1;
   state.eq = null;         // last "tf5-eq" message for state.input
   let eqAvailable = null;  // null = not known yet, false = tf5.eq off (404)
@@ -501,25 +500,12 @@
     return `EQ ${d.source}${d.eq.on ? "" : " · OFF"}${d.eq.one_knob ? " · 1-knob on" : ""}`;
   }
 
-  // Half-height of the EQ scale in dB: fits the curve between the shown frequencies.
-  function eqRange(d) {
-    let peak = 0;
-    if (d.eq) {
-      d.freqs.forEach((f, i) => {
-        if (f >= state.freqs[0] && f <= state.freqs[state.freqs.length - 1]) peak = Math.max(peak, Math.abs(d.curve[i]));
-      });
-      for (const b of d.eq.bands) peak = Math.max(peak, Math.abs(b.gain));
-    }
-    return Math.min(EQ_RANGE_MAX, Math.max(EQ_RANGE_MIN, Math.ceil((peak + 1) / 6) * 6));
-  }
-
   function drawEq() {
     const d = state.eq;
     if (!state.showEq || !eqAvailable || !d || d.index !== state.input) return;
     const top = PAD.t, bot = H - PAD.b, x0 = PAD.l, x1 = W - PAD.r;
-    const range = eqRange(d);
-    const yEq = (db) => (top + bot) / 2 - db / range * (bot - top) / 2;
-    const yc = (db) => Math.min(bot, Math.max(top, yEq(db)));   // handles stay on the plot
+    const half = (state.dbMax - state.dbMin) / 2;          // EQ dB shown above / below 0
+    const yEq = (db) => (top + bot) / 2 - db / half * (bot - top) / 2;
     ctx.font = "11px system-ui, sans-serif";
     ctx.lineWidth = 1;
     ctx.strokeStyle = C.eq; ctx.fillStyle = C.eq;
@@ -532,8 +518,9 @@
     ctx.setLineDash([]);
     ctx.globalAlpha = 0.85;
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
-    const step = range > 24 ? 12 : 6;
-    for (let db = range - step; db >= -(range - step); db -= step) {
+    const step = half > 40 ? 12 : 6;
+    const edge = Math.floor((half - 2) / step) * step;
+    for (let db = edge; db >= -edge; db -= step) {
       ctx.fillText(`${db > 0 ? "+" : ""}${db}`, x1 - 4, yEq(db));
     }
     ctx.textAlign = "left"; ctx.textBaseline = "top";
@@ -564,20 +551,21 @@
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // A handle per band (filled when it does something) and the HPF.
+    // A handle per band (filled when it does something) and the HPF, on the curve at
+    // its frequency (overlapping bands add up, so that's rarely the band's own gain).
     ctx.lineWidth = 1.5;
     ctx.textAlign = "center"; ctx.textBaseline = "bottom";
-    const handle = (f, db, label, active) => {
-      const x = xOf(f), y = yc(db);
+    const handle = (f, label, active) => {
+      const x = xOf(f), y = yEq(eqAt(f));
       ctx.beginPath(); ctx.arc(x, y, 4, 0, 2 * Math.PI);
       if (active) ctx.fill(); else ctx.stroke();
       ctx.fillText(label, x, y - 6);
     };
-    if (eq.hpf && eq.hpf.on) handle(eq.hpf.freq, 0, "HPF", true);
+    if (eq.hpf && eq.hpf.on) handle(eq.hpf.freq, "HPF", true);
     for (const b of eq.bands) {
       const filter = b.type === "hpf" || b.type === "lpf";
       const on = b.on !== false;
-      handle(b.freq, filter ? 0 : b.gain, filter ? b.type.toUpperCase() : b.label, filter ? on : b.gain !== 0);
+      handle(b.freq, filter ? b.type.toUpperCase() : b.label, filter ? on : b.gain !== 0);
     }
     ctx.globalAlpha = 1; ctx.lineWidth = 1;
   }
