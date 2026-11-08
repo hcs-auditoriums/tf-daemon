@@ -65,12 +65,16 @@ class AudioModule:
 
         @sock.route("/ws/audio")
         def ws_audio(ws):
+            meta_version = engine.meta_version
             ws.send(json.dumps(engine.metadata()))
             seq = 0
             view: list[int] = []  # the input this client views, if any (a list so the handler can swap it)
             try:
                 while True:
                     _handle_client_messages(ws, engine, view)
+                    if engine.meta_version != meta_version:  # e.g. channel names read from the console
+                        meta_version = engine.meta_version
+                        ws.send(json.dumps(engine.metadata()))
                     seq, payload = engine.hub.wait(seq, timeout=1.0)
                     if payload is not None:
                         ws.send(payload)

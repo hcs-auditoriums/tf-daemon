@@ -141,6 +141,20 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   `state_file`, `meter_poll_s`, `full_poll_s`. Interface and hosts are normally
   set on the `/qlxd` page (**Network…**); that choice is saved to `state_file`
   (default `qlxd_state.json` in the working directory) and overrides config.toml.
+- `[tf5]`: `host` (console IP; `""` = off), `port` (49280), `username` /
+  `password`, `poll_s`, `usb_patch`. With a host set, the server reads the TF5's
+  channel names over Yamaha's remote control protocol and uses them as input
+  labels (an explicit `[[channels]]` label still wins). The audio page also shows
+  a strip with the shown input's console settings: name, colour, fader, on, pan.
+  On connect the console's parameter list (`prminfo`) is read, and any
+  input-channel gain / EQ / HPF / dynamics parameters it offers are shown too.
+  The TF's published list has none of those, so expect only the basics. Desk
+  changes and scene recalls update live. The protocol has no login, so
+  `username` / `password` are accepted but not sent. It also doesn't expose the
+  USB output patch, so `usb_patch` says which console channel each USB capture
+  channel carries (`"InCh N"`, `"St L"`, `"St R"`, `""`). The default is the TF
+  recording patch: USB 1–32 = InCh 1–32, USB 33–34 = St L/R. Status:
+  `GET /api/tf5/status`, values: `GET /api/tf5/channels`.
 
 Levels are dBFS with AES17 convention: a full-scale sine reads 0 dBFS.
 

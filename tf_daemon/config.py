@@ -61,6 +61,15 @@ DEFAULTS: dict[str, Any] = {
         "meter_poll_s": 1.0,
         "full_poll_s": 10.0,
     },
+    "tf5": {
+        # Read channel names (and settings) from the mixer over the network.
+        "host": "",          # console IP; "" = don't connect
+        "port": 49280,       # Yamaha remote control protocol
+        "username": "",      # the TF5's protocol has no login; kept for completeness, not sent
+        "password": "",
+        "poll_s": 30.0,      # full re-read period (changes on the desk are pushed in between)
+        "usb_patch": [],     # per USB capture channel: "InCh N", "St L", "St R" or ""; [] = TF default
+    },
     "update": {
         # Where the /config page's Update button pulls from.
         "remote": "https://github.com/hcs-auditoriums/tf-daemon.git",
@@ -156,6 +165,24 @@ def _validate(cfg: dict[str, Any]) -> None:
         SweepSettings.from_dict(rf)
     except ValueError as e:
         raise ConfigError(f"[rf] {e}") from None
+
+    t = cfg["tf5"]
+    if not isinstance(t["host"], str):
+        raise ConfigError("tf5.host must be a string (IP address or hostname)")
+    if not 1 <= int(t["port"]) <= 65535:
+        raise ConfigError(f"tf5.port must be 1..65535, got {t['port']}")
+    if not isinstance(t["username"], str) or not isinstance(t["password"], str):
+        raise ConfigError("tf5.username and tf5.password must be strings")
+    if not 1 <= float(t["poll_s"]) <= 3600:
+        raise ConfigError("tf5.poll_s must be between 1 and 3600")
+    if not isinstance(t["usb_patch"], list):
+        raise ConfigError("tf5.usb_patch must be a list of strings")
+    from .tf5 import parse_patch_entry  # local: tf5 imports flask, config shouldn't at import time
+    for entry in t["usb_patch"]:
+        try:
+            parse_patch_entry(entry)
+        except ValueError as e:
+            raise ConfigError(f"[tf5] {e}") from None
 
     q = cfg["qlxd"]
     if str(q["source"]).lower() not in ("device", "demo"):

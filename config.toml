@@ -60,6 +60,21 @@ state_file = "qlxd_state.json"
 meter_poll_s = 1.0          # RF / antenna / audio level poll period
 full_poll_s = 10.0          # full parameter refresh (receivers also push changes)
 
+[tf5]
+# Read channel names and settings (fader, on, pan, colour) from the TF5 over the
+# network, using Yamaha's remote control protocol on TCP 49280. The server must
+# reach the console's network port. Leave host empty to turn this off.
+host = ""                   # console IP address, e.g. "192.168.0.128"
+port = 49280
+# The protocol has no login; these are accepted but not sent to the console.
+username = ""
+password = ""
+poll_s = 30.0               # full re-read; changes on the desk arrive in between
+# What each USB capture channel carries, i.e. the TF's USB output patch, which
+# the protocol doesn't expose: "InCh N", "St L", "St R", or "" for none.
+# [] = the TF default: USB 1-32 = InCh 1-32, USB 33-34 = St L/R.
+usb_patch = []
+
 # Named inputs. index is the 0-based capture channel on the device. Every input
 # can be viewed in the browser; these get buttons and are always analyzed, the
 # rest only while someone is looking at them.

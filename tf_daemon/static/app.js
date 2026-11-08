@@ -69,7 +69,16 @@
 
   function onMeta(meta) {
     if (meta.type !== "meta") return;
+    // A later meta on the same connection only renames inputs (names read from
+    // the console): relabel without dropping the trace or re-sending "view".
+    const relabel = state.meta && ws && state.metaWs === ws && meta.freqs.length === state.freqs.length;
     state.meta = meta;
+    state.metaWs = ws;
+    if (relabel) {
+      buildChannelPicker();
+      markSelected(state.input);
+      return;
+    }
     state.freqs = Float32Array.from(meta.freqs);
     state.logMin = Math.log10(meta.freqs[0]);
     state.logMax = Math.log10(meta.freqs[meta.freqs.length - 1]);
@@ -140,17 +149,85 @@
     nav.appendChild(sel);
   }
 
+  function markSelected(index) {
+    for (const b of $("channels").querySelectorAll("button")) {
+      b.setAttribute("aria-pressed", String(Number(b.dataset.input) === index));
+    }
+    $("input").value = index;
+  }
+
   function selectInput(index) {
     state.input = index;
     save("tf.input", index);
     state.avg.fill(state.meta.db_floor);
     state.peak.fill(state.meta.db_floor);
-    for (const b of $("channels").querySelectorAll("button")) {
-      b.setAttribute("aria-pressed", String(Number(b.dataset.input) === index));
-    }
-    $("input").value = index;
+    markSelected(index);
     send({ cmd: "view", channel: index });
+    renderStrip();
     state.dirty = true;
+  }
+
+  // ------------------------------------------------------------------ console strip
+
+  // Settings of the TF5 channel feeding the shown input (GET /api/tf5/channels,
+  // only present when tf5.host is configured).
+  let consoleChannels = null;   // null = no TF5 module; [] = none yet
+
+  async function pollConsole() {
+    try {
+      const r = await fetch("/api/tf5/channels");
+      if (r.status === 404) { consoleChannels = null; renderStrip(); return; }  // not configured
+      const data = await r.json();
+      consoleChannels = data.connected ? data.channels : [];
+    } catch {
+      consoleChannels = [];
+    }
+    renderStrip();
+    setTimeout(pollConsole, 2000);
+  }
+
+  const PARAM_LABELS = {
+    "Fader/Level": "Fader", "Fader/On": "On", "ToStereo/Pan": "Pan", "Out/Balance": "Balance",
+  };
+  const SKIP = new Set(["Label/Name", "Label/Color"]);
+
+  function fmtParam(path, p) {
+    const v = p.value;
+    if (path.endsWith("/On")) return v ? "on" : "off";
+    if (path === "ToStereo/Pan" || path === "Out/Balance") {
+      return v === 0 ? "C" : v < 0 ? `L${-v}` : `R${v}`;
+    }
+    if (v === null) return "−∞ dB";
+    if (typeof v === "number") return `${+v.toFixed(2)}${p.unit ? " " + p.unit : ""}`;
+    return String(v);
+  }
+
+  function renderStrip() {
+    const el = $("console-strip");
+    if (consoleChannels === null) { el.hidden = true; return; }
+    el.hidden = false;
+    const ch = consoleChannels.find((c) => c.index === state.input);
+    if (!ch) {
+      el.replaceChildren(Object.assign(document.createElement("span"), {
+        className: "muted", textContent: consoleChannels.length ? "not on the console patch" : "TF5 not connected",
+      }));
+      return;
+    }
+    const items = [];
+    const name = ch.params["Label/Name"];
+    const head = document.createElement("strong");
+    head.textContent = `${ch.source}${name ? " · " + name.value : ""}`;
+    const color = ch.params["Label/Color"];
+    if (color && color.value) head.style.borderLeftColor = String(color.value).toLowerCase();
+    items.push(head);
+    for (const [path, p] of Object.entries(ch.params)) {
+      if (SKIP.has(path)) continue;
+      const item = document.createElement("span");
+      item.className = path === "Fader/On" && !p.value ? "off" : "";
+      item.textContent = `${PARAM_LABELS[path] || path} ${fmtParam(path, p)}`;
+      items.push(item);
+    }
+    el.replaceChildren(...items);
   }
 
   $("show-avg").onchange = (e) => { state.showAvg = e.target.checked; state.dirty = true; };
@@ -299,5 +376,6 @@
 
   resize();
   connect();
+  pollConsole();
   requestAnimationFrame(loop);
 })();
