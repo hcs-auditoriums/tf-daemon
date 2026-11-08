@@ -16,6 +16,9 @@ from .audio.module import AudioModule
 from .audio.sources import DeviceSource, Source, SourceError, SynthSource, WavSource
 from .config import channels_from
 from .modules import Module
+from .rf.devices import DemoDevice, RFDevice, TinySADevice
+from .rf.engine import RFEngine
+from .rf.module import RFModule
 
 log = logging.getLogger(__name__)
 
@@ -43,10 +46,22 @@ def build_source(cfg: dict[str, Any], kind: str, wav_path: str | None = None) ->
     raise SourceError(f"unknown source {kind!r} (expected device, synth or wav)")
 
 
-def build_modules(cfg: dict[str, Any], source_kind: str, wav_path: str | None = None) -> list[Module]:
+def build_rf_device(kind: str) -> RFDevice:
+    if kind == "device":
+        return TinySADevice()
+    if kind == "demo":
+        return DemoDevice()
+    raise SourceError(f"unknown rf source {kind!r} (expected device or demo)")
+
+
+def build_modules(cfg: dict[str, Any], source_kind: str, wav_path: str | None = None,
+                  rf_source: str | None = None) -> list[Module]:
+    """``rf_source`` overrides ``rf.source``; ``"off"`` disables the RF module."""
     source = build_source(cfg, source_kind, wav_path)
     modules: list[Module] = [AudioModule(AudioEngine(cfg, source))]
-    # Future: if cfg.get("rf", {}).get("enabled"): modules.append(RFModule(...))
+    rf_kind = (rf_source or str(cfg["rf"]["source"])).lower()
+    if cfg["rf"]["enabled"] and rf_kind != "off":
+        modules.append(RFModule(RFEngine(cfg, build_rf_device(rf_kind))))
     return modules
 
 

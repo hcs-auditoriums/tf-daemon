@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tf-daemon · RF</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>tf-daemon · RF</h1>
+    <a class="navlink" href="/">‹ Audio</a>
+    <div class="controls">
+      <button id="connect" type="button">Connect</button>
+      <div class="group">
+        <label>Start <input type="number" id="start" step="0.1" min="0" max="15000"> MHz</label>
+        <label>Stop <input type="number" id="stop" step="0.1" min="0" max="15000"> MHz</label>
+        <label>Points <input type="number" id="points" class="narrow" step="1" min="2" max="450"></label>
+        <label>RBW <select id="rbw"></select></label>
+        <label>Interval <input type="number" id="interval" class="narrow" step="0.1" min="0.1" max="60"> s</label>
+        <button id="scan" type="button" disabled>Start sweep</button>
+      </div>
+      <div class="group">
+        <label><input type="checkbox" id="show-peak" checked> Peak hold</label>
+        <label><input type="checkbox" id="show-wf" checked> Waterfall</label>
+        <label>Range
+          <select id="range">
+            <option value="-120,-20">−120…−20 dBm</option>
+            <option value="-100,-10" selected>−100…−10 dBm</option>
+            <option value="-80,0">−80…0 dBm</option>
+          </select>
+        </label>
+        <button id="reset-peak" type="button" disabled>Reset peak</button>
+      </div>
+    </div>
+    <span id="error" class="error"></span>
+    <div id="conn" class="conn" title="Connection">connecting…</div>
+  </header>
+  <main class="split">
+    <div class="pane spectrum">
+      <canvas id="spectrum" aria-label="RF spectrum"></canvas>
+      <div id="readout" class="readout"></div>
+    </div>
+    <div class="pane waterfall" id="wf-pane">
+      <canvas id="waterfall" aria-label="RF waterfall"></canvas>
+    </div>
+  </main>
+  <footer id="info"></footer>
+  <script src="/static/rf.js"></script>
+</body>
+</html>

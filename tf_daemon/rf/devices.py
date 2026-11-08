@@ -1,0 +1,124 @@
+"""RF spectrum devices.
+
+Every device does blocking sweeps: ``sweep(start_hz, stop_hz, points)`` returns
+one float32 array of levels in dBm. Calls come from a single thread at a time
+(the engine serializes them).
+
+* TinySADevice  - a tinySA over USB serial, via the optional ``tsapython`` package.
+* DemoDevice    - synthetic noise floor plus a few carriers; no hardware needed.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import numpy as np
+
+log = logging.getLogger(__name__)
+
+MAX_POINTS = 450  # tinySA Ultra firmware limit
+
+
+class RFDeviceError(RuntimeError):
+    pass
+
+
+class RFDevice:
+    name = "rf"
+
+    def open(self) -> str:
+        """Connect; returns a human-readable device description."""
+        raise NotImplementedError
+
+    def close(self) -> None:
+        raise NotImplementedError
+
+    def set_rbw(self, rbw: str) -> None:
+        """``"auto"`` or a resolution bandwidth in kHz."""
+
+    def sweep(self, start_hz: int, stop_hz: int, points: int) -> np.ndarray:
+        raise NotImplementedError
+
+
+def parse_scan(raw: bytes | bytearray) -> np.ndarray:
+    """Parse ``scan ... 2`` output (one level per line) into dBm values."""
+    # Known firmware bug: some values come back as '-:.0' instead of '-10.0'.
+    text = bytes(raw).replace(b"-:.0", b"-10.0").decode("utf-8", errors="replace")
+    levels = []
+    for line in text.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        try:
+            levels.append(float(parts[0]))
+        except ValueError:
+            pass
+    return np.asarray(levels, dtype=np.float32)
+
+
+class TinySADevice(RFDevice):
+    name = "tinysa"
+
+    def __init__(self) -> None:
+        self._tsa = None
+
+    def open(self) -> str:
+        try:
+            from tsapython import tinySA
+        except ImportError:
+            raise RFDeviceError("tsapython is not installed (pip install -e '.[rf]')") from None
+        tsa = tinySA()
+        tsa.set_error_byte_return(True)
+        found, connected = tsa.autoconnect()
+        if not found:
+            raise RFDeviceError("tinySA not found. Is it plugged in?")
+        if not connected:
+            raise RFDeviceError("tinySA found but its serial port could not be opened")
+        self._tsa = tsa
+        info = bytes(tsa.info()).decode("utf-8", errors="replace").strip()
+        log.info("tinySA connected: %s", info.splitlines()[0] if info else "(no info)")
+        return info
+
+    def close(self) -> None:
+        tsa, self._tsa = self._tsa, None
+        if tsa is not None:
+            try:
+                tsa.disconnect()
+            except Exception:
+                log.exception("Error closing tinySA")
+
+    def set_rbw(self, rbw: str) -> None:
+        self._require().rbw("auto" if rbw == "auto" else int(rbw))
+
+    def sweep(self, start_hz: int, stop_hz: int, points: int) -> np.ndarray:
+        levels = parse_scan(self._require().scan(start_hz, stop_hz, points, 2))
+        if levels.size == 0:
+            raise RFDeviceError("tinySA returned no scan data")
+        return levels
+
+    def _require(self):
+        if self._tsa is None:
+            raise RFDeviceError("tinySA is not connected")
+        return self._tsa
+
+
+class DemoDevice(RFDevice):
+    name = "demo"
+
+    def __init__(self, seed: int | None = None) -> None:
+        self._rng = np.random.default_rng(seed)
+
+    def open(self) -> str:
+        return "Demo device (synthetic spectrum)"
+
+    def close(self) -> None:
+        pass
+
+    def sweep(self, start_hz: int, stop_hz: int, points: int) -> np.ndarray:
+        span = stop_hz - start_hz
+        freqs = np.linspace(start_hz, stop_hz, points)
+        levels = self._rng.normal(-80.0, 2.0, points)
+        # Carriers at fixed fractions of the span: (position, level dBm, width / span).
+        for pos, dbm, bw in ((0.2, -30.0, 0.005), (0.5, -45.0, 0.003), (0.75, -55.0, 0.004)):
+            levels += np.exp(-0.5 * ((freqs - (start_hz + span * pos)) / (span * bw / 2)) ** 2) * (dbm + 80.0)
+        return levels.astype(np.float32)

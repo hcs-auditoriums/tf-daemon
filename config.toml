@@ -36,6 +36,17 @@ tone_hz = 2500.0
 tone_db = -15.0             # relative to speech_db
 seed = 1
 
+[rf]
+# tinySA RF spectrum page (/rf). The device is only opened when someone clicks Connect.
+enabled = true
+source = "device"           # device (tinySA over USB, needs: pip install -e '.[rf]') | demo
+# Default sweep; the page can change it per scan.
+start_hz = 88000000
+stop_hz = 108000000
+points = 290                # max 450
+rbw = "auto"                # auto, or kHz: 3 10 30 100 300 600 850
+interval_s = 0.5            # pause between sweeps
+
 # Channels to analyze. index is the 0-based capture channel on the device.
 [[channels]]
 index = 0

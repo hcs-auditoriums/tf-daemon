@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tf-daemon"
 version = "0.1.0"
-description = "Raspberry Pi appliance: real-time spectrum analyzer and feedback detector for a Yamaha TF5 over USB audio"
+description = "Raspberry Pi appliance: real-time spectrum analyzer and feedback detector for a Yamaha TF5 over USB audio, plus a tinySA RF spectrum view"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,6 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+rf = ["tsapython>=2.0"]
 dev = ["pytest>=8"]
 
 [project.scripts]

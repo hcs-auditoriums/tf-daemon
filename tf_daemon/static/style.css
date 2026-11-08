@@ -83,3 +83,33 @@ footer {
   border-top: 1px solid var(--border); background: var(--panel);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------------------------------------------------------------- page nav */
+
+.navlink {
+  color: var(--muted); text-decoration: none; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px;
+}
+.navlink:hover { color: var(--text); border-color: var(--muted); }
+
+/* ---------------------------------------------------------------- RF page */
+
+:root { --live: var(--avg); --live-fill: var(--avg-fill); }
+
+.controls input[type="number"] {
+  font: inherit; color: var(--text); background: #1e242c;
+  border: 1px solid var(--border); border-radius: 6px; padding: 5px 6px; width: 6.5em;
+}
+.controls input[type="number"].narrow { width: 4.5em; }
+.controls button:disabled { opacity: 0.45; cursor: not-allowed; }
+.controls button.primary { background: #24435c; border-color: var(--avg); }
+.controls .group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+
+.error { color: var(--bad); font-size: 12px; }
+.error:empty { display: none; }
+
+main.split { display: flex; flex-direction: column; }
+.pane { position: relative; min-height: 120px; }
+.pane.spectrum { flex: 3; }
+.pane.waterfall { flex: 2; border-top: 1px solid var(--border); }
+.pane[hidden] { display: none; }
