@@ -114,11 +114,15 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
 `tf_daemon/config.py`. Highlights:
 
 - `audio.device`: case-insensitive substring of the capture device name (default `"TF"`).
-  All channels the device offers are opened; only `[[channels]]` are analyzed.
+  All channels the device offers are opened, and every one can be picked in the
+  browser (the input menu). An input is analyzed only while someone views it,
+  except the `[[channels]]` ones, which are always analyzed.
 - `audio.samplerate`: must be 48000 (the TF5 is fixed at 48 kHz).
 - `dsp.fft_size` (32768, ~1.46 Hz bins), `dsp.hop` (2400, ~20 updates/s),
   `dsp.average_tau` (3 s).
-- `[[channels]]`: `index` (0-based device input) and `label`.
+- `[[channels]]`: `index` (0-based device input) and `label`. These get their own
+  buttons, a name in the input menu, and continuous analysis (their average and
+  peak hold are already warm when you switch to them).
 - `[synth]`: test-signal levels and the ring tone frequency/level.
 - `[rf]`: `enabled`, `source` (`device` = tinySA, `demo`) and the default sweep
   (`start_hz`, `stop_hz`, `points` ≤ 450, `rbw` `"auto"` or kHz, `interval_s`).
@@ -167,9 +171,10 @@ tf_daemon/
 Data flow:
 
 1. **Capture thread** (PortAudio callback, or the paced synth/WAV thread) copies
-   the analyzed columns of each block into the ring buffers. Nothing else.
+   every column of each block into the ring buffers. Nothing else.
 2. **Analysis thread** wakes every hop, pulls the newest `fft_size` samples for
-   all channels, and runs the vectorized analyzer: Blackman-Harris window →
+   the active inputs (the `[[channels]]` ones plus any input a browser is
+   viewing), and runs one analyzer per input: Blackman-Harris window →
    `rfft` → power → exponential average + peak hold (full FFT resolution) →
    max-reduce into 1/48-octave display bins (50 Hz–16 kHz, 400 bins) → dBFS.
    All buffers are preallocated.
@@ -207,12 +212,14 @@ answering is shown offline with the reason.
 | `GET /` | web UI |
 | `GET /api/status` | per-module status counters |
 | `GET /api/audio/meta` | channel labels, display bin frequencies, DSP params |
-| `POST /api/audio/reset-peak` | body `{"channel": <position>}`, or `{}` for all |
+| `POST /api/audio/reset-peak` | body `{"channel": <input index>}`, or `{}` for all |
 | `WS /ws/audio` | one JSON `meta` text message, then binary frames |
 
-Binary frame (little-endian): `"TFS1"`, `uint32 seq`, `uint16 channels`,
-`uint16 bins`, then `int16[channels][2][bins]` in centi-dBFS (`[c][0]` average,
-`[c][1]` peak hold). Clients may send `{"cmd": "reset_peak", "channel": n|null}`.
+Binary frame (little-endian): `"TFS2"`, `uint32 seq`, `uint16 records`,
+`uint16 bins`, then per analyzed input: `uint16 input index`, `uint16 0`,
+`int16[2][bins]` in centi-dBFS (`[0]` average, `[1]` peak hold). Clients send
+`{"cmd": "view", "channel": n}` to have input `n` analyzed while they stay
+connected, and `{"cmd": "reset_peak", "channel": n|null}`.
 
 RF:
 

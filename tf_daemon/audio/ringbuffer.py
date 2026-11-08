@@ -62,17 +62,27 @@ class RingBuffer:
             self._cond.wait_for(lambda: self._closed or self._written >= target_written, timeout)
             return self._written
 
-    def read_latest(self, out: np.ndarray) -> int:
-        """Fill ``out`` (channels, n) with the newest n frames. Returns written count."""
+    def read_latest(self, out: np.ndarray, rows: Sequence[int] | None = None) -> int:
+        """Fill ``out`` with the newest n frames. Returns written count.
+
+        ``out`` is (channels, n), or (len(rows), n) to read only those rows
+        (positions in ``columns``).
+        """
         n = out.shape[1]
         if n > self.capacity:
             raise ValueError("read larger than ring capacity")
         with self._cond:
             start = (self._pos - n) % self.capacity
             first = min(n, self.capacity - start)
-            out[:, :first] = self._data[:, start:start + first]
-            if first < n:
-                out[:, first:] = self._data[:, :n - first]
+            if rows is None:
+                out[:, :first] = self._data[:, start:start + first]
+                if first < n:
+                    out[:, first:] = self._data[:, :n - first]
+            else:
+                for i, r in enumerate(rows):
+                    out[i, :first] = self._data[r, start:start + first]
+                    if first < n:
+                        out[i, first:] = self._data[r, :n - first]
             return self._written
 
     def close(self) -> None:

@@ -3,10 +3,12 @@
 Routes:
   GET  /api/audio/meta         channel labels, display frequencies, DSP params
   GET  /api/audio/status       engine / source counters
-  POST /api/audio/reset-peak   {"channel": <position>} or {} for all
+  POST /api/audio/reset-peak   {"channel": <input index>} or {} for all
   WS   /ws/audio               JSON "meta" text message, then binary frames
                                (see engine.py). Client may send
-                               {"cmd": "reset_peak", "channel": <position|null>}.
+                               {"cmd": "view", "channel": <input index>} to have
+                               that input analyzed while it stays connected, and
+                               {"cmd": "reset_peak", "channel": <input index|null>}.
 """
 
 from __future__ import annotations
@@ -65,14 +67,18 @@ class AudioModule:
         def ws_audio(ws):
             ws.send(json.dumps(engine.metadata()))
             seq = 0
+            view: list[int] = []  # the input this client views, if any (a list so the handler can swap it)
             try:
                 while True:
-                    _handle_client_messages(ws, engine)
+                    _handle_client_messages(ws, engine, view)
                     seq, payload = engine.hub.wait(seq, timeout=1.0)
                     if payload is not None:
                         ws.send(payload)
             except ConnectionClosed:
                 pass
+            finally:
+                for index in view:
+                    engine.release(index)
 
 
 def _channel_arg(value: Any) -> int | None:
@@ -84,14 +90,23 @@ def _channel_arg(value: Any) -> int | None:
         raise ValueError(f"invalid channel {value!r}") from None
 
 
-def _handle_client_messages(ws, engine: AudioEngine) -> None:
+def _handle_client_messages(ws, engine: AudioEngine, view: list[int]) -> None:
     while True:
         msg = ws.receive(timeout=0)
         if msg is None:
             return
         try:
             data = json.loads(msg)
-            if data.get("cmd") == "reset_peak":
+            cmd = data.get("cmd")
+            if cmd == "reset_peak":
                 engine.reset_peak(_channel_arg(data.get("channel")))
+            elif cmd == "view":
+                index = _channel_arg(data.get("channel"))
+                if index is None:
+                    raise ValueError("view needs a channel")
+                engine.acquire(index)
+                for old in view:
+                    engine.release(old)
+                view[:] = [index]
         except (ValueError, AttributeError) as e:
             log.debug("Ignoring bad client message %r: %s", msg, e)
