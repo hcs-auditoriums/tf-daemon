@@ -251,7 +251,8 @@ Data flow:
 2. **Analysis thread** wakes every hop, pulls the newest `fft_size` samples for
    the active inputs (the `[[channels]]` ones plus any input a browser is
    viewing), and runs one analyzer per input: Blackman-Harris window →
-   `rfft` → power → exponential average + peak hold (full FFT resolution) →
+   `rfft` → power → exponential average + peak hold + this hop's power as the
+   real-time trace (full FFT resolution) →
    max-reduce into 1/48-octave display bins (50 Hz–16 kHz, 400 bins) → dBFS.
    All buffers are preallocated.
 3. The frame is encoded as int16 centi-dB and published to a `FrameHub` that
@@ -317,9 +318,10 @@ are gone for good can be dropped with `POST /api/qlxd/known/forget`.
 | `POST /api/audio/reset-peak` | body `{"channel": <input index>}`, or `{}` for all |
 | `WS /ws/audio` | one JSON `meta` text message, then binary frames |
 
-Binary frame (little-endian): `"TFS2"`, `uint32 seq`, `uint16 records`,
+Binary frame (little-endian): `"TFS3"`, `uint32 seq`, `uint16 records`,
 `uint16 bins`, then per analyzed input: `uint16 input index`, `uint16 0`,
-`int16[2][bins]` in centi-dBFS (`[0]` average, `[1]` peak hold). Clients send
+`int16[3][bins]` in centi-dBFS (`[0]` average, `[1]` peak hold, `[2]` real-time:
+this hop's spectrum, unaveraged). Clients send
 `{"cmd": "view", "channel": n}` to have input `n` analyzed while they stay
 connected, and `{"cmd": "reset_peak", "channel": n|null}`.
 

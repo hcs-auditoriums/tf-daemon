@@ -14,14 +14,14 @@ Threads:
                 on the hub for the latest frame. Slow clients skip frames.
 
 Binary frame format (little-endian), sent over /ws/audio:
-    char[4]  magic "TFS2"
+    char[4]  magic "TFS3"
     uint32   sequence number
     uint16   record count C (active inputs)
     uint16   display bin count B
     C records of:
         uint16  input index (0-based device channel)
         uint16  reserved (0)
-        int16   data[2][B]   centi-dBFS; [0] = average, [1] = peak hold
+        int16   data[3][B]   centi-dBFS; [0] = average, [1] = peak hold, [2] = real-time (this hop)
 """
 
 from __future__ import annotations
@@ -44,7 +44,8 @@ from .sources import Source, SourceError
 
 log = logging.getLogger(__name__)
 
-MAGIC = b"TFS2"
+MAGIC = b"TFS3"
+TRACES = 3  # per record: average, peak hold, real-time
 _HEADER = struct.Struct("<4sIHH")
 _RECORD = struct.Struct("<HH")
 
@@ -282,14 +283,15 @@ class AudioEngine:
     def _publish(self, active: list[tuple[int, SpectrumAnalyzer]]) -> None:
         n_bins = self.analyzer.bins.count
         self._seq = (self._seq + 1) & 0xFFFFFFFF
-        rec_size = _RECORD.size + 2 * n_bins * 2
+        rec_size = _RECORD.size + TRACES * n_bins * 2
         payload = bytearray(_HEADER.size + len(active) * rec_size)
         _HEADER.pack_into(payload, 0, MAGIC, self._seq, len(active), n_bins)
         for k, (index, an) in enumerate(active):
             off = _HEADER.size + k * rec_size
             _RECORD.pack_into(payload, off, index, 0)
-            data = np.frombuffer(payload, dtype="<i2", offset=off + _RECORD.size, count=2 * n_bins).reshape(2, n_bins)
-            for slot, src in ((0, an.avg_db[0]), (1, an.peak_db[0])):
+            data = np.frombuffer(payload, dtype="<i2", offset=off + _RECORD.size,
+                                 count=TRACES * n_bins).reshape(TRACES, n_bins)
+            for slot, src in ((0, an.avg_db[0]), (1, an.peak_db[0]), (2, an.live_db[0])):
                 np.multiply(src, np.float32(100.0), out=self._scaled)
                 np.rint(self._scaled, out=self._scaled)
                 np.clip(self._scaled, -32768, 32767, out=self._scaled)

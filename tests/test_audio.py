@@ -117,7 +117,7 @@ def _records(payload, n_bins):
     """Input indices carried by a TFS2 frame (and a check of its layout)."""
     magic, _, count, nb = struct.unpack_from("<4sIHH", payload)
     assert magic == MAGIC and nb == n_bins
-    rec = 4 + 4 * nb
+    rec = 4 + 6 * nb  # index, reserved, int16[3][nb]
     assert len(payload) == 12 + count * rec
     return [struct.unpack_from("<H", payload, 12 + k * rec)[0] for k in range(count)]
 
@@ -151,7 +151,7 @@ def test_unlisted_inputs_are_analyzed_only_while_viewed():
         seq, payload = _next_frame(engine, seq)
         assert _records(payload, nb) == [1, 3]
         k = _records(payload, nb).index(3)
-        avg = np.frombuffer(payload, "<i2", count=nb, offset=12 + k * (4 + 4 * nb) + 4) / 100
+        avg = np.frombuffer(payload, "<i2", count=nb, offset=12 + k * (4 + 6 * nb) + 4) / 100
         assert avg.max() > -60  # real signal, not the floor
 
         engine.release(3)

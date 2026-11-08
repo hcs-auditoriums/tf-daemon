@@ -85,6 +85,7 @@ class SpectrumAnalyzer:
         self._tmp = np.zeros((channels, nf), dtype=np.float32)
         self.avg_db = np.full((channels, nd), db_floor, dtype=np.float32)
         self.peak_db = np.full((channels, nd), db_floor, dtype=np.float32)
+        self.live_db = np.full((channels, nd), db_floor, dtype=np.float32)  # this hop, unaveraged
 
         self._primed = False
         self._reset_lock = threading.Lock()
@@ -103,7 +104,7 @@ class SpectrumAnalyzer:
                 self._reset_mask[channel] = True
 
     def process(self, frame: np.ndarray) -> None:
-        """Analyze one (channels, n_fft) float32 frame; updates avg_db / peak_db."""
+        """Analyze one (channels, n_fft) float32 frame; updates avg_db / peak_db / live_db."""
         np.multiply(frame, self.window, out=self._windowed)
         np.fft.rfft(self._windowed, axis=-1, out=self._spec)
         power = self.power
@@ -130,6 +131,7 @@ class SpectrumAnalyzer:
 
         self._to_display(avg, self.avg_db)
         self._to_display(peak, self.peak_db)
+        self._to_display(power, self.live_db)
 
     def _to_display(self, src: np.ndarray, out: np.ndarray) -> None:
         b = self.bins

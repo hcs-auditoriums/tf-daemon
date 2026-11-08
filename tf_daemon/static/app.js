@@ -1,5 +1,5 @@
 // tf-daemon spectrum view. Plain JS, no build step.
-// Protocol: see tf_daemon/audio/engine.py (binary "TFS2" frames) and module.py.
+// Protocol: see tf_daemon/audio/engine.py (binary "TFS3" frames) and module.py.
 // The server analyzes an input only while some client views it, so we tell it
 // which one we show ({"cmd": "view"}) and pick that input's record out of each frame.
 (() => {
@@ -12,7 +12,7 @@
   const color = (name) => css.getPropertyValue(name).trim();
   const C = {
     grid: color("--grid"), gridStrong: color("--grid-strong"), muted: color("--muted"),
-    avg: color("--avg"), avgFill: color("--avg-fill"), peak: color("--peak"),
+    avg: color("--avg"), avgFill: color("--avg-fill"), peak: color("--peak"), rta: color("--rta"),
   };
 
   const state = {
@@ -20,10 +20,12 @@
     input: loadInt("tf.input", -1),  // device input index being shown
     showAvg: true,
     showPeak: true,
+    showLive: true,
     dbMin: -100,
     dbMax: -20,
     avg: null,   // Float32Array for the shown input
     peak: null,
+    live: null,  // real-time: this hop, unaveraged
     dirty: true,
     frames: 0,
     fps: 0,
@@ -87,6 +89,7 @@
     const b = meta.freqs.length;
     state.avg = new Float32Array(b);
     state.peak = new Float32Array(b);
+    state.live = new Float32Array(b);
     if (!meta.channels.some((c) => c.index === state.input)) {
       state.input = (meta.channels.find((c) => c.pinned) || meta.channels[0]).index;
     }
@@ -103,18 +106,19 @@
     if (!state.meta) return;
     const dv = new DataView(buf);
     const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
-    if (magic !== "TFS2") return;
+    if (magic !== "TFS3") return;
     state.lastSeq = dv.getUint32(4, true);
     const nRec = dv.getUint16(8, true), nBins = dv.getUint16(10, true);
     if (nBins !== state.freqs.length) return;
-    const recSize = 4 + 4 * nBins;
+    const recSize = 4 + 6 * nBins;  // index, reserved, int16[3][bins]
     for (let r = 0; r < nRec; r++) {
       const off = 12 + r * recSize;
       if (dv.getUint16(off, true) !== state.input) continue;
-      const data = new Int16Array(buf, off + 4, 2 * nBins);
+      const data = new Int16Array(buf, off + 4, 3 * nBins);
       for (let i = 0; i < nBins; i++) {
         state.avg[i] = data[i] / 100;
         state.peak[i] = data[nBins + i] / 100;
+        state.live[i] = data[2 * nBins + i] / 100;
       }
       state.frames++;
       state.dirty = true;
@@ -163,6 +167,7 @@
     save("tf.input", index);
     state.avg.fill(state.meta.db_floor);
     state.peak.fill(state.meta.db_floor);
+    state.live.fill(state.meta.db_floor);
     markSelected(index);
     send({ cmd: "view", channel: index });
     renderPanel();
@@ -334,6 +339,7 @@
 
   $("show-avg").onchange = (e) => { state.showAvg = e.target.checked; state.dirty = true; };
   $("show-peak").onchange = (e) => { state.showPeak = e.target.checked; state.dirty = true; };
+  $("show-live").onchange = (e) => { state.showLive = e.target.checked; state.dirty = true; };
   $("range").onchange = (e) => {
     [state.dbMin, state.dbMax] = e.target.value.split(",").map(Number);
     state.dirty = true;
@@ -399,7 +405,7 @@
     ctx.stroke();
   }
 
-  function trace(values, stroke, fill) {
+  function trace(values, stroke, fill, width = 1.5) {
     const freqs = state.freqs, n = freqs.length;
     const yBottom = H - PAD.b;
     ctx.beginPath();
@@ -425,7 +431,7 @@
       }
     }
     ctx.strokeStyle = stroke;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = width;
     ctx.stroke();
   }
 
@@ -446,9 +452,9 @@
       if (d < best) { best = d; i = k; }
     }
     const fBin = state.freqs[i];
-    const a = state.avg[i], p = state.peak[i];
+    const a = state.avg[i], p = state.peak[i], l = state.live[i];
     ro.textContent = `${fBin >= 1000 ? (fBin / 1000).toFixed(2) + " kHz" : fBin.toFixed(1) + " Hz"}` +
-      `  avg ${a.toFixed(1)} dB  peak ${p.toFixed(1)} dB  cursor ${dbOfY(h.y).toFixed(1)} dB`;
+      `  now ${l.toFixed(1)} dB  avg ${a.toFixed(1)} dB  peak ${p.toFixed(1)} dB  cursor ${dbOfY(h.y).toFixed(1)} dB`;
     ro.style.display = "block";
   }
 
@@ -462,6 +468,7 @@
     ctx.clip();
     if (state.showPeak) trace(state.peak, C.peak, null);
     if (state.showAvg) trace(state.avg, C.avg, C.avgFill);
+    if (state.showLive) trace(state.live, C.rta, null, 1);
     drawRingMarkers();
     ctx.restore();
     drawHover();

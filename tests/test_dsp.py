@@ -67,6 +67,20 @@ def test_averaging_time_constant_and_peak_hold():
     assert a.peak_db[0].max() == pytest.approx(a.avg_db.min(), abs=1.0) or a.peak_db[0].max() < -100
 
 
+def test_live_trace_follows_the_signal_immediately():
+    a = make(average_tau=3.0)
+    loud, quiet = sine(1000, 0.5)[None, :], np.zeros((1, N), np.float32)
+    for _ in range(5):
+        a.process(loud)
+    i = int(np.argmax(a.live_db[0]))
+    level = float(a.live_db[0, i])
+    assert level == pytest.approx(a.avg_db[0, i], abs=0.1)  # steady: real-time == average
+    a.process(quiet)
+    assert a.live_db[0, i] < -100           # gone at once in the real-time trace
+    assert a.avg_db[0, i] > level - 1       # still there in the 3 s average
+    assert a.peak_db[0, i] == pytest.approx(level, abs=0.01)  # and held as the peak
+
+
 def test_reset_single_channel():
     a = make(channels=2)
     x = np.stack([sine(1000), sine(1000)])
