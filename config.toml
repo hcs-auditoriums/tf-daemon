@@ -47,6 +47,19 @@ points = 290                # max 450
 rbw = "auto"                # auto, or kHz: 3 10 30 100 300 600 850
 interval_s = 0.5            # pause between sweeps
 
+[qlxd]
+# Read-only monitoring of Shure QLXD4 receivers (/qlxd): battery and RF.
+enabled = true
+source = "device"           # device | demo (simulated receivers)
+# NIC the receivers are on. "" = first interface with a 169.254.x.x address.
+# The interface and host list are editable on the /qlxd page; those edits are
+# saved to state_file and take precedence over the two values here.
+interface = ""
+hosts = []                  # always-monitored receivers, e.g. ["169.254.10.21"]
+state_file = "qlxd_state.json"
+meter_poll_s = 1.0          # RF / antenna / audio level poll period
+full_poll_s = 10.0          # full parameter refresh (receivers also push changes)
+
 # Channels to analyze. index is the 0-based capture channel on the device.
 [[channels]]
 index = 0

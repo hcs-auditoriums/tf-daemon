@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tf-daemon · Wireless</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="scroll">
+  <header>
+    <h1>tf-daemon · Wireless</h1>
+    <a class="navlink" href="/">‹ Audio</a>
+    <a class="navlink" href="/rf">RF</a>
+    <div class="controls">
+      <label>Sort
+        <select id="sort">
+          <option value="name">Name</option>
+          <option value="battery">Battery (lowest first)</option>
+          <option value="freq">Frequency</option>
+        </select>
+      </label>
+      <button id="toggle-net" type="button" aria-expanded="false">Network…</button>
+    </div>
+    <span id="error" class="error"></span>
+    <div id="conn" class="conn" title="Connection">connecting…</div>
+  </header>
+
+  <section id="net" class="netpanel" hidden>
+    <label>Interface
+      <select id="iface"></select>
+    </label>
+    <label class="grow">Always monitor (IP or IP:port, one per line or comma separated)
+      <textarea id="hosts" rows="2" spellcheck="false" placeholder="169.254.10.21"></textarea>
+    </label>
+    <div class="netbuttons">
+      <button id="save-net" type="button" class="primary">Save</button>
+      <button id="rescan" type="button">Rescan</button>
+    </div>
+    <div id="net-status" class="netstatus"></div>
+  </section>
+
+  <main class="cards-main">
+    <div id="cards" class="cards"></div>
+    <div id="empty" class="empty" hidden></div>
+  </main>
+  <footer id="info">Read-only · Shure QLX-D network protocol (TCP 2202)</footer>
+  <script src="/static/qlxd.js"></script>
+</body>
+</html>

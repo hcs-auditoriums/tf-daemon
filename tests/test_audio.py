@@ -89,7 +89,7 @@ def test_wav_source_reads_and_rejects_rate(tmp_path):
 
 def test_engine_end_to_end_with_synth():
     cfg = load_config(None)
-    modules = build_modules(cfg, "synth")
+    modules = build_modules(cfg, "synth", qlxd_source="off")
     app = create_app(cfg, modules)
     try:
         engine = modules[0].engine

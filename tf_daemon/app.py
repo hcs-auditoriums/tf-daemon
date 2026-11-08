@@ -16,6 +16,8 @@ from .audio.module import AudioModule
 from .audio.sources import DeviceSource, Source, SourceError, SynthSource, WavSource
 from .config import channels_from
 from .modules import Module
+from .qlxd.engine import QLXDEngine
+from .qlxd.module import QLXDModule
 from .rf.devices import DemoDevice, RFDevice, TinySADevice
 from .rf.engine import RFEngine
 from .rf.module import RFModule
@@ -55,13 +57,18 @@ def build_rf_device(kind: str) -> RFDevice:
 
 
 def build_modules(cfg: dict[str, Any], source_kind: str, wav_path: str | None = None,
-                  rf_source: str | None = None) -> list[Module]:
-    """``rf_source`` overrides ``rf.source``; ``"off"`` disables the RF module."""
+                  rf_source: str | None = None, qlxd_source: str | None = None) -> list[Module]:
+    """``rf_source`` / ``qlxd_source`` override ``rf.source`` / ``qlxd.source``; ``"off"`` disables."""
     source = build_source(cfg, source_kind, wav_path)
     modules: list[Module] = [AudioModule(AudioEngine(cfg, source))]
     rf_kind = (rf_source or str(cfg["rf"]["source"])).lower()
     if cfg["rf"]["enabled"] and rf_kind != "off":
         modules.append(RFModule(RFEngine(cfg, build_rf_device(rf_kind))))
+    qlxd_kind = (qlxd_source or str(cfg["qlxd"]["source"])).lower()
+    if qlxd_kind not in ("device", "demo", "off"):
+        raise SourceError(f"unknown qlxd source {qlxd_kind!r} (expected device, demo or off)")
+    if cfg["qlxd"]["enabled"] and qlxd_kind != "off":
+        modules.append(QLXDModule(QLXDEngine(cfg, demo=qlxd_kind == "demo")))
     return modules
 
 

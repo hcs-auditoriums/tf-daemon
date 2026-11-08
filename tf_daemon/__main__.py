@@ -4,7 +4,7 @@
     python -m tf_daemon --source wav recording.wav
     python -m tf_daemon --source device          # the TF5
     python -m tf_daemon --list-devices
-    python -m tf_daemon --source synth --rf-source demo   # no hardware at all
+    python -m tf_daemon --source synth --rf-source demo --qlxd-source demo   # no hardware at all
 
 Production on the Pi uses gunicorn instead; see gunicorn.conf.py.
 """
@@ -52,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="device | synth | wav PATH (default: device)")
     p.add_argument("--rf-source", choices=["device", "demo", "off"],
                    help="tinySA RF module: device | demo | off (default: rf.source from config)")
+    p.add_argument("--qlxd-source", choices=["device", "demo", "off"],
+                   help="Shure QLX-D module: device | demo | off (default: qlxd.source from config)")
     p.add_argument("--host", help="override server.host")
     p.add_argument("--port", type=int, help="override server.port")
     p.add_argument("--log-level", default="INFO")
@@ -65,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = load_config(args.config)
         kind, wav = parse_source(args.source)
-        modules = build_modules(cfg, kind, wav, args.rf_source)
+        modules = build_modules(cfg, kind, wav, args.rf_source, args.qlxd_source)
     except (ConfigError, SourceError) as e:
         logging.getLogger("tf_daemon").error("%s", e)
         return 2

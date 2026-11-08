@@ -46,7 +46,7 @@ def _wait_state(engine, pred, timeout=5.0):
 def test_rf_module_end_to_end_with_demo():
     cfg = load_config(None)
     cfg["rf"]["interval_s"] = 0.1
-    modules = build_modules(cfg, "synth", rf_source="demo")
+    modules = build_modules(cfg, "synth", rf_source="demo", qlxd_source="off")
     app = create_app(cfg, modules)
     try:
         engine = next(m for m in modules if m.name == "rf").engine
@@ -77,7 +77,7 @@ def test_rf_module_end_to_end_with_demo():
 
 def test_rf_off_and_sweep_failure():
     cfg = load_config(None)
-    assert [m.name for m in build_modules(cfg, "synth", rf_source="off")] == ["audio"]
+    assert [m.name for m in build_modules(cfg, "synth", rf_source="off", qlxd_source="off")] == ["audio"]
 
     class Flaky(DemoDevice):
         def sweep(self, *a):
