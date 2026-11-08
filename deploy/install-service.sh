@@ -36,14 +36,21 @@ sudo -u "$APP_USER" bash -c "
   .venv/bin/pip install -q -e '.[rf]'
 "
 
-echo "==> installing systemd unit"
-sed -e "s|@USER@|$APP_USER|g" -e "s|@DIR@|$APP_DIR|g" \
-  "$APP_DIR/deploy/tf-daemon.service" > /etc/systemd/system/tf-daemon.service
+echo "==> installing systemd units"
+for unit in tf-daemon tf-daemon-update; do
+  sed -e "s|@USER@|$APP_USER|g" -e "s|@DIR@|$APP_DIR|g" \
+    "$APP_DIR/deploy/$unit.service" > "/etc/systemd/system/$unit.service"
+done
 systemctl daemon-reload
 
-echo "==> allowing $APP_USER to restart the service (for the /config page)"
+echo "==> allowing $APP_USER to restart and update the service (for the /config page)"
 SUDOERS=/etc/sudoers.d/tf-daemon
-echo "$APP_USER ALL=(root) NOPASSWD: $(command -v systemctl) restart --no-block tf-daemon" > "$SUDOERS.tmp"
+SYSTEMCTL=$(command -v systemctl)
+cat > "$SUDOERS.tmp" <<EOF
+$APP_USER ALL=(root) NOPASSWD: $SYSTEMCTL restart --no-block tf-daemon
+$APP_USER ALL=(root) NOPASSWD: $SYSTEMCTL restart tf-daemon
+$APP_USER ALL=(root) NOPASSWD: $SYSTEMCTL start --no-block tf-daemon-update
+EOF
 chmod 0440 "$SUDOERS.tmp"
 visudo -cqf "$SUDOERS.tmp" && mv "$SUDOERS.tmp" "$SUDOERS"
 

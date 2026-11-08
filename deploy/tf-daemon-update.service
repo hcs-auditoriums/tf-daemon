@@ -1,0 +1,23 @@
+# systemd unit template for the /config page's Update button.
+# Don't copy this by hand: deploy/install-service.sh fills in @USER@ and @DIR@
+# and installs it to /etc/systemd/system/tf-daemon-update.service.
+#
+# A separate unit so the update outlives the tf-daemon restart it triggers and
+# can roll back if the new version doesn't come up. tf-daemon starts it with
+# `sudo systemctl start --no-block tf-daemon-update`.
+
+[Unit]
+Description=tf-daemon self-update (pull, reinstall, restart, roll back on failure)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@USER@
+WorkingDirectory=@DIR@
+EnvironmentFile=-@DIR@/.update.env
+Environment=TF_UPDATE_DETACHED=1
+ExecStart=/bin/bash @DIR@/deploy/update.sh
+StandardOutput=append:@DIR@/.update.log
+StandardError=inherit
+TimeoutStartSec=15min

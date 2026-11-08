@@ -18,3 +18,7 @@ qlxd_state.json
 REVISION
 .update.log
 config.toml.keep
+.update.json
+.update.env
+.update.tmp
+.update.json.tmp

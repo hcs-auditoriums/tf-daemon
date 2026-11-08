@@ -4,18 +4,23 @@ Routes:
   GET  /config                  config / update page
   GET  /api/system/info         version, running revision, update source
   POST /api/system/check        compare the running revision with the remote branch
-  POST /api/system/update       run deploy/update.sh in the background (pull, reinstall, restart)
-  GET  /api/system/update       update progress: {running, exit_code, log}
+  POST /api/system/update       start deploy/update.sh (pull, reinstall, restart, roll back on failure)
+  GET  /api/system/update       update progress: {state, message, from, to, running, log}
   GET  /api/system/config       config.toml text
   PUT  /api/system/config       body: {text}; validated before it is written
   POST /api/system/restart      restart the systemd service
 
-The update runs as the service user. Restarting needs root, so install-service.sh
-adds a sudoers rule for exactly the systemctl command below.
+The update runs as the service user, preferably in its own systemd unit
+(tf-daemon-update) so it survives our restart, can check the new version comes
+up and roll back if not. Without that unit it runs as our child and the restart
+ends it; the new process then finishes the bookkeeping (see Updater.status).
+Starting the unit and restarting need root, so install-service.sh adds sudoers
+rules for exactly the systemctl commands below.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -35,7 +40,13 @@ log = logging.getLogger(__name__)
 APP_DIR = Path(__file__).resolve().parent.parent
 UPDATE_SCRIPT = APP_DIR / "deploy" / "update.sh"
 UPDATE_LOG = APP_DIR / ".update.log"
+UPDATE_STATE = APP_DIR / ".update.json"   # written by update.sh
+UPDATE_ENV = APP_DIR / ".update.env"      # read by the tf-daemon-update unit
 RESTART_CMD = ["sudo", "-n", "systemctl", "restart", "--no-block", "tf-daemon"]
+START_UPDATE_CMD = ["sudo", "-n", "systemctl", "start", "--no-block", "tf-daemon-update"]
+FINAL_STATES = {"done", "up_to_date", "failed", "rolled_back"}
+START_GRACE_S = 60     # time for update.sh to write its first state
+RESTART_GRACE_S = 180  # time for the restarted service to pick up the update
 
 
 def _git(*args: str, timeout: float = 15) -> str:
@@ -56,41 +67,106 @@ def current_revision() -> str | None:
     return rev.read_text().strip() or None if rev.exists() else None
 
 
-class Updater:
-    """Runs one deploy/update.sh at a time and reports on it."""
+def _pid_alive(pid: Any) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
-    def __init__(self, remote: str, branch: str) -> None:
+
+def _read_state() -> dict[str, Any] | None:
+    try:
+        return json.loads(UPDATE_STATE.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _write_state(**fields: Any) -> None:
+    fields.setdefault("time", int(time.time()))
+    tmp = UPDATE_STATE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(fields))
+    os.replace(tmp, UPDATE_STATE)
+
+
+def _start_update_unit() -> bool:
+    try:
+        return subprocess.run(START_UPDATE_CMD, capture_output=True, timeout=15).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+class Updater:
+    """Starts deploy/update.sh and reports on it from the state file it writes.
+
+    The state file outlives both the script and this process, so whichever
+    tf-daemon process is running when the page asks can answer.
+    """
+
+    def __init__(self, remote: str, branch: str, running_revision: str | None) -> None:
         self.remote, self.branch = remote, branch
+        self.running_revision = running_revision
         self._lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
-        self._started: float | None = None
 
     def start(self) -> bool:
         with self._lock:
-            if self._proc is not None and self._proc.poll() is None:
+            if self.status()["running"]:
                 return False
-            logf = UPDATE_LOG.open("w")
-            # Own session so the script isn't tied to a request thread; it ends by
-            # asking systemd to restart us, which stops this whole process tree.
-            self._proc = subprocess.Popen(
-                ["bash", str(UPDATE_SCRIPT), self.remote, self.branch],
-                cwd=APP_DIR, stdout=logf, stderr=subprocess.STDOUT, start_new_session=True,
-            )
-            logf.close()
-            self._started = time.time()
-            log.info("Update started (pid %d)", self._proc.pid)
+            UPDATE_ENV.write_text(f"UPDATE_REMOTE={self.remote}\nUPDATE_BRANCH={self.branch}\n")
+            UPDATE_LOG.write_text("")
+            _write_state(state="running", message="starting", pid=None, **{"from": self.running_revision})
+            if _start_update_unit():
+                log.info("Update started in the tf-daemon-update unit")
+                return True
+            # No unit (install-service.sh not rerun yet): run it as our child.
+            env = {**os.environ, "UPDATE_REMOTE": self.remote, "UPDATE_BRANCH": self.branch}
+            env.pop("TF_UPDATE_DETACHED", None)
+            with UPDATE_LOG.open("a") as logf:
+                # Own session so it isn't tied to a request thread.
+                self._proc = subprocess.Popen(
+                    ["bash", str(UPDATE_SCRIPT)], cwd=APP_DIR, env=env,
+                    stdout=logf, stderr=subprocess.STDOUT, start_new_session=True,
+                )
+            log.info("Update started in-process (pid %d); tf-daemon-update unit not available", self._proc.pid)
             return True
 
     def status(self) -> dict[str, Any]:
-        with self._lock:
-            proc = self._proc
+        if self._proc is not None:
+            self._proc.poll()  # reap a finished child
+        st = _read_state() or {"state": "idle", "message": ""}
+        st = self._settle(st)
         text = UPDATE_LOG.read_text(errors="replace") if UPDATE_LOG.exists() else ""
-        return {
-            "running": proc is not None and proc.poll() is None,
-            "exit_code": None if proc is None else proc.poll(),
-            "started": self._started,
-            "log": text[-20000:],
-        }
+        st["running"] = st["state"] not in FINAL_STATES and st["state"] != "idle"
+        st["log"] = text[-20000:]
+        return st
+
+    def _settle(self, st: dict[str, Any]) -> dict[str, Any]:
+        """Turn states whose writer is gone into a final state (and persist it)."""
+        state, age = st.get("state"), time.time() - float(st.get("time", 0))
+        if state == "restarting":
+            # update.sh ran inside the old process and was stopped by the restart.
+            if self.running_revision and self.running_revision == st.get("to"):
+                return self._finish(st, "done", f"updated to {self.running_revision[:7]}")
+            if age > RESTART_GRACE_S:
+                return self._finish(st, "failed", "the service was restarted but is not running the update; "
+                                                  "check journalctl -u tf-daemon")
+        elif state == "running" and not _pid_alive(st.get("pid")):
+            if st.get("pid") is not None or age > START_GRACE_S:
+                return self._finish(st, "failed", "the update stopped unexpectedly; see the log")
+        return st
+
+    def _finish(self, st: dict[str, Any], state: str, message: str) -> dict[str, Any]:
+        st = {**st, "state": state, "message": message, "time": int(time.time())}
+        try:
+            _write_state(**st)
+        except OSError:
+            log.exception("Could not write %s", UPDATE_STATE)
+        return st
 
 
 def _validate_toml(text: str) -> None:
@@ -119,7 +195,10 @@ def _write_atomic(path: Path, text: str) -> None:
 
 def register_system(app: Flask, cfg: dict[str, Any], config_path: str | Path | None) -> None:
     cfg_file = Path(config_path).resolve() if config_path else None
-    updater = Updater(str(cfg["update"]["remote"]), str(cfg["update"]["branch"]))
+    # The revision this process runs, fixed at startup: the checkout on disk
+    # moves ahead of it while an update is in progress.
+    running_revision = current_revision()
+    updater = Updater(str(cfg["update"]["remote"]), str(cfg["update"]["branch"]), running_revision)
     bp = Blueprint("system", __name__, url_prefix="/api/system")
 
     @app.get("/config")
@@ -130,7 +209,7 @@ def register_system(app: Flask, cfg: dict[str, Any], config_path: str | Path | N
     def info():
         return jsonify({
             "version": __version__,
-            "revision": current_revision(),
+            "revision": running_revision,
             "git_checkout": (APP_DIR / ".git").exists(),
             "remote": updater.remote,
             "branch": updater.branch,
@@ -146,7 +225,7 @@ def register_system(app: Flask, cfg: dict[str, Any], config_path: str | Path | N
         if not out:
             return jsonify({"ok": False, "error": f"branch {updater.branch!r} not found on the remote"}), 404
         latest = out.split()[0]
-        current = current_revision()
+        current = running_revision
         return jsonify({"ok": True, "current": current, "latest": latest, "up_to_date": latest == current})
 
     @bp.post("/update")

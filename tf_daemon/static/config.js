@@ -74,33 +74,36 @@
     el.scrollTop = el.scrollHeight;
   }
 
-  // Poll the update log until the script ends. It ends by restarting the
-  // service, so the server going away is the normal path, not an error.
+  // Poll the update state until it is final. The service restarts midway,
+  // so failed requests just mean "try again"; whichever process answers
+  // reads the same state file.
+  const FINAL = { done: false, up_to_date: false, failed: true, rolled_back: true };
+
   async function followUpdate() {
     setMsg("update-msg", "updating…");
-    const before = revision;
-    for (;;) {
+    const deadline = Date.now() + 15 * 60 * 1000;
+    let down = false;
+    while (Date.now() < deadline) {
       let s;
       try {
         s = await api("GET", "/api/system/update");
       } catch {
-        break;  // server went down for the restart
+        if (!down) { down = true; setConn(false, "restarting…"); }
+        await sleep(1500);
+        continue;
       }
+      if (down) { down = false; setConn(true, "connected"); }
       showLog(s.log);
-      if (!s.running) {
-        if (s.exit_code !== 0) {
-          setMsg("update-msg", `update failed (exit ${s.exit_code}); see the log`, true);
-          return;
-        }
-        if (!/restarting service/.test(s.log)) {
-          setMsg("update-msg", "already up to date");
-          return;
-        }
-        break;
+      if (s.state in FINAL) {
+        setMsg("update-msg", s.message || s.state, FINAL[s.state]);
+        await loadInfo().catch(() => {});
+        if (s.state === "done") await loadConfig();
+        return;
       }
+      setMsg("update-msg", s.message ? `${s.message}…` : "updating…");
       await sleep(1000);
     }
-    await waitForRestart(before);
+    setMsg("update-msg", "no result after 15 minutes; check the log and journalctl -u tf-daemon-update", true);
   }
 
   async function waitForRestart(before) {
