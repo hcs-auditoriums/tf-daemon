@@ -5,18 +5,20 @@ The console listens on TCP 49280 and speaks LF-terminated text lines:
     -> get MIXER:Current/InCh/Label/Name 4 0
     <- OK get MIXER:Current/InCh/Label/Name 4 0 "Vox"
     <- NOTIFY set MIXER:Current/InCh/Fader/Level 4 0 -1250     (fader moved on the desk)
+    <- NOTIFY set MIXER:Current/InCh/ToMix/Level 4 7 -600      (send to mix 8 changed)
     <- NOTIFY sscurrent_ex scene_a 12                         (scene recalled)
     -> prminfo 0
     <- OK prminfo 0 "MIXER:Current/InCh/Fader/Level" 40 0 -32768 1000 -32768 "dB" integer any rw 100
 
-Channel indices are 0-based. The protocol has no login, so ``tf5.username`` and
+Addresses take two 0-based indices: x (the channel) and y (e.g. which mix a
+send goes to). The protocol has no login, so ``tf5.username`` and
 ``tf5.password`` are accepted in the config but not sent.
 
-What gets read for each patched source: name, colour, fader level, on, and pan
-(balance for ST). On connect the console is also asked for its parameter list
-(``prminfo``); any input-channel gain / EQ / HPF / dynamics parameters it lists
-are read as well. The TF's published list has none of those, but this picks
-them up if a firmware adds them.
+What gets read for each patched source: name, colour, fader level, on, pan
+(balance for ST) and, for input channels, the sends to the mixes, FX and mono;
+plus the mix names. On connect the console is also asked for its parameter
+list (``prminfo``); any input-channel gain / EQ / HPF / dynamics parameters it
+lists are read as well. The TF5 this was built against lists none of those.
 
 USB capture channels carry whatever the TF's USB output patch routes to them;
 RCP doesn't expose that patch, so ``tf5.usb_patch`` describes it (default: the
@@ -42,11 +44,14 @@ log = logging.getLogger(__name__)
 
 DEFAULT_PORT = 49280
 TF_INPUT_CHANNELS = 40
+TF_MIXES = 20
+TF_FX = 2
 PRMINFO_PROBE = 512   # prminfo indices asked for on connect
 NEG_INF = -32768      # fader/send level value meaning -inf dB
+SEND_CHUNK = 200      # request lines per write, so a full poll doesn't flood the console
 
 _PATCH_RE = re.compile(r"^\s*(?:(?:InCh|Ch)\s*(\d+)|St\s*([LR]))\s*$", re.IGNORECASE)
-_PREFIX = {"InCh": "MIXER:Current/InCh/", "St": "MIXER:Current/St/"}
+_PREFIX = {"InCh": "MIXER:Current/InCh/", "St": "MIXER:Current/St/", "Mix": "MIXER:Current/Mix/"}
 
 
 @dataclass(frozen=True)
@@ -55,15 +60,20 @@ class Param:
     scale: int = 1       # raw / scale = value in unit
     unit: str = ""
     kind: str = "integer"  # integer | string
+    count: int = 1       # y indices (e.g. 20 for per-mix sends)
 
 
 NAME = Param("Label/Name", kind="string")
-# Read for every patched source. Matches the TF's published parameter list.
+COLOR = Param("Label/Color", kind="string")
+LEVEL = Param("Fader/Level", 100, "dB")
+# Read for every patched source (and every mix). All are in the TF's parameter list.
 BASE_PARAMS: dict[str, list[Param]] = {
-    "InCh": [NAME, Param("Label/Color", kind="string"), Param("Fader/Level", 100, "dB"),
-             Param("Fader/On"), Param("ToStereo/Pan")],
-    "St": [NAME, Param("Label/Color", kind="string"), Param("Fader/Level", 100, "dB"),
-           Param("Fader/On"), Param("Out/Balance")],
+    "InCh": [NAME, COLOR, LEVEL, Param("Fader/On"), Param("ToStereo/Pan"),
+             Param("ToMix/Level", 100, "dB", count=TF_MIXES), Param("ToMix/On", count=TF_MIXES),
+             Param("ToFx/Level", 100, "dB", count=TF_FX), Param("ToFx/On", count=TF_FX),
+             Param("ToMono/Level", 100, "dB"), Param("ToMono/On")],
+    "St": [NAME, COLOR, LEVEL, Param("Fader/On"), Param("Out/Balance")],
+    "Mix": [NAME],
 }
 # Extra input-channel parameters taken from the console's prminfo list if present.
 EXTRA_RE = re.compile(r"^(Port/HA/|HA/|PEQ|Eq|EQ|HPF|Hpf|LPF|Dyna|Gate|Comp|Att|Delay)")
@@ -117,7 +127,9 @@ def _split_addr(addr: str) -> tuple[str, str] | None:
     return None
 
 
-def format_value(p: Param, raw: str) -> Any:
+def format_value(p: Param, raw: str | None) -> Any:
+    if raw is None:
+        return None
     if p.kind == "string":
         return raw
     try:
@@ -141,8 +153,8 @@ class TF5Client:
         self.on_names = on_names
         self._lock = threading.Lock()
         self._params: dict[str, dict[str, Param]] = {k: {p.path: p for p in ps} for k, ps in BASE_PARAMS.items()}
-        self._values: dict[tuple[str, int, str], str] = {}  # (kind, x, path) -> raw value
-        self._discovered: list[str] = []                     # addresses from prminfo
+        self._values: dict[tuple[str, int, str, int], str] = {}  # (kind, x, path, y) -> raw value
+        self._discovered: list[str] = []                          # addresses from prminfo
         self._probe_left = 0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -174,7 +186,8 @@ class TF5Client:
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            extras = sorted(p for p in self._params["InCh"] if p not in {q.path for q in BASE_PARAMS["InCh"]})
+            base = {q.path for q in BASE_PARAMS["InCh"]}
+            extras = sorted(p for p in self._params["InCh"] if p not in base)
             discovered = len(self._discovered)
         return {
             "host": self.host,
@@ -187,26 +200,38 @@ class TF5Client:
             "extra_params": extras,
         }
 
+    def _value(self, p: Param, kind: str, x: int) -> Any:
+        if p.count == 1:
+            return format_value(p, self._values.get((kind, x, p.path, 0)))
+        return [format_value(p, self._values.get((kind, x, p.path, y))) for y in range(p.count)]
+
     def channels(self) -> list[dict[str, Any]]:
-        """Per USB input: the console source it carries and that source's settings."""
+        """Per USB input: the console source it carries and that source's settings.
+
+        Parameters with a y dimension (sends) give a list, one value per y.
+        """
         out = []
         with self._lock:
+            present = {key[:3] for key in self._values}  # (kind, x, path) with at least one value
             for i, src in enumerate(self.patch):
                 entry: dict[str, Any] = {"index": i, "source": None, "params": {}}
                 if src is not None:
                     kind, x = src
                     entry["source"] = source_label(src)
                     for path, p in self._params[kind].items():
-                        raw = self._values.get((kind, x, path))
-                        if raw is not None:
-                            entry["params"][path] = {"value": format_value(p, raw), "unit": p.unit}
+                        if (kind, x, path) in present:
+                            entry["params"][path] = {"value": self._value(p, kind, x), "unit": p.unit}
                 out.append(entry)
         return out
 
+    def mixes(self) -> list[str | None]:
+        with self._lock:
+            return [self._values.get(("Mix", m, NAME.path, 0)) for m in range(TF_MIXES)]
+
     def names(self) -> dict[int, str]:
         with self._lock:
-            return {i: self._values[(src[0], src[1], NAME.path)] for i, src in enumerate(self.patch)
-                    if src is not None and (src[0], src[1], NAME.path) in self._values}
+            return {i: self._values[(src[0], src[1], NAME.path, 0)] for i, src in enumerate(self.patch)
+                    if src is not None and (src[0], src[1], NAME.path, 0) in self._values}
 
     # ------------------------------------------------------------------ connection thread
 
@@ -237,7 +262,7 @@ class TF5Client:
             self.last_error = None
             log.info("Connected to TF5 at %s:%d", self.host, self.port)
             self._probe_left = PRMINFO_PROBE
-            sock.sendall("".join(f"prminfo {i}\n" for i in range(PRMINFO_PROBE)).encode())
+            self._send(sock, [f"prminfo {i}\n" for i in range(PRMINFO_PROBE)])
             buf = b""
             next_poll = 0.0
             last_rx = time.monotonic()
@@ -265,12 +290,20 @@ class TF5Client:
                 if names_changed:
                     self._report()
 
+    def _send(self, sock: socket.socket, lines: list[str]) -> None:
+        for i in range(0, len(lines), SEND_CHUNK):
+            sock.sendall("".join(lines[i:i + SEND_CHUNK]).encode())
+            if i + SEND_CHUNK < len(lines):
+                time.sleep(0.02)
+
     def _request_all(self, sock: socket.socket) -> None:
+        sources = sorted({s for s in self.patch if s is not None}) + [("Mix", m) for m in range(TF_MIXES)]
         with self._lock:
-            reqs = [f"get {_PREFIX[kind]}{path} {x} 0\n"
-                    for kind, x in sorted({s for s in self.patch if s is not None})
-                    for path in self._params[kind]]
-        sock.sendall("".join(reqs).encode())
+            reqs = [f"get {_PREFIX[kind]}{p.path} {x} {y}\n"
+                    for kind, x in sources
+                    for p in self._params[kind].values()
+                    for y in range(p.count)]
+        self._send(sock, reqs)
 
     def _handle(self, sock: socket.socket, line: str) -> bool:
         """Apply one reply line; True if a channel name changed."""
@@ -291,16 +324,16 @@ class TF5Client:
             return False
         kind, path = split
         try:
-            x = int(args[1])
+            x, y = int(args[1]), int(args[2])
         except ValueError:
             return False
-        key = (kind, x, path)
+        key = (kind, x, path, y)
         with self._lock:
             if path not in self._params[kind] or self._values.get(key) == args[3]:
                 return False
             self._values[key] = args[3]
         self.updated = time.time()
-        return path == NAME.path
+        return path == NAME.path and kind != "Mix"
 
     def _on_prminfo(self, sock: socket.socket, status: str, args: list[str]) -> None:
         # OK prminfo <i> "<addr>" <x> <y> <min> <max> <default> "<unit>" <type> <ui> <rw> <scale>
@@ -337,7 +370,7 @@ class TF5Module:
 
     Routes:
       GET /api/tf5/status     connection state, discovered parameters
-      GET /api/tf5/channels   per USB input: console source and its settings
+      GET /api/tf5/channels   per USB input: console source and its settings; mix names
     """
 
     name = "tf5"
@@ -359,7 +392,8 @@ class TF5Module:
 
         @bp.get("/channels")
         def channels():
-            return jsonify({"connected": client.connected, "channels": client.channels()})
+            return jsonify({"connected": client.connected, "channels": client.channels(),
+                            "mixes": client.mixes()})
 
         app.register_blueprint(bp)
 

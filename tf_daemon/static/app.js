@@ -163,72 +163,172 @@
     state.peak.fill(state.meta.db_floor);
     markSelected(index);
     send({ cmd: "view", channel: index });
-    renderStrip();
+    renderPanel();
     state.dirty = true;
   }
 
-  // ------------------------------------------------------------------ console strip
+  // ------------------------------------------------------------------ console panel
 
-  // Settings of the TF5 channel feeding the shown input (GET /api/tf5/channels,
-  // only present when tf5.host is configured).
-  let consoleChannels = null;   // null = no TF5 module; [] = none yet
+  // Sidebar with the TF5 channel feeding the shown input: name, on, fader,
+  // pan and its sends (GET /api/tf5/channels; only when tf5.host is set).
+  let tf5 = null;   // null = no TF5 module; {connected, channels, mixes} otherwise
+  state.showConsole = loadInt("tf.console", 1) === 1;
+  state.allSends = loadInt("tf.allSends", 0) === 1;
 
   async function pollConsole() {
     try {
       const r = await fetch("/api/tf5/channels");
-      if (r.status === 404) { consoleChannels = null; renderStrip(); return; }  // not configured
-      const data = await r.json();
-      consoleChannels = data.connected ? data.channels : [];
+      if (r.status === 404) { tf5 = null; renderPanel(); return; }  // TF5 not configured: stop polling
+      tf5 = await r.json();
     } catch {
-      consoleChannels = [];
+      if (tf5) tf5.connected = false;
     }
-    renderStrip();
-    setTimeout(pollConsole, 2000);
+    renderPanel();
+    setTimeout(pollConsole, 1000);
   }
 
-  const PARAM_LABELS = {
-    "Fader/Level": "Fader", "Fader/On": "On", "ToStereo/Pan": "Pan", "Out/Balance": "Balance",
+  const TF_COLORS = {
+    blue: "#3f7fff", skyblue: "#4fc3f7", green: "#4cd07d", yellow: "#f2d14e", orange: "#ff9f43",
+    red: "#ff5d5d", pink: "#ff7ac6", purple: "#a77bff", white: "#e6e6e6",
   };
-  const SKIP = new Set(["Label/Name", "Label/Color"]);
 
-  function fmtParam(path, p) {
-    const v = p.value;
-    if (path.endsWith("/On")) return v ? "on" : "off";
-    if (path === "ToStereo/Pan" || path === "Out/Balance") {
-      return v === 0 ? "C" : v < 0 ? `L${-v}` : `R${v}`;
+  // Fader position 0..1 for a level in dB (null = -inf), roughly following a
+  // console fader's scale so the cap sits where it does on the desk.
+  const LAW = [[10, 1], [5, 0.92], [0, 0.8], [-5, 0.69], [-10, 0.58], [-20, 0.43], [-30, 0.31],
+               [-40, 0.21], [-50, 0.13], [-60, 0.07], [-138, 0]];
+  function faderPos(db) {
+    if (db === null || db === undefined) return 0;
+    if (db >= LAW[0][0]) return 1;
+    for (let i = 1; i < LAW.length; i++) {
+      const [d1, p1] = LAW[i - 1], [d0, p0] = LAW[i];
+      if (db >= d0) return p0 + (db - d0) / (d1 - d0) * (p1 - p0);
     }
-    if (v === null) return "−∞ dB";
-    if (typeof v === "number") return `${+v.toFixed(2)}${p.unit ? " " + p.unit : ""}`;
-    return String(v);
+    return 0;
+  }
+  const fmtDb = (db) => (db === null || db === undefined ? "−∞" : `${db > 0 ? "+" : ""}${db.toFixed(1)}`);
+  const fmtPan = (v) => (v === 0 ? "C" : v < 0 ? `L${-v}` : `R${v}`);
+
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
   }
 
-  function renderStrip() {
-    const el = $("console-strip");
-    if (consoleChannels === null) { el.hidden = true; return; }
-    el.hidden = false;
-    const ch = consoleChannels.find((c) => c.index === state.input);
-    if (!ch) {
-      el.replaceChildren(Object.assign(document.createElement("span"), {
-        className: "muted", textContent: consoleChannels.length ? "not on the console patch" : "TF5 not connected",
-      }));
-      return;
+  // Sends to the mixes (consecutive mixes with the same name are a stereo pair
+  // and shown once), the two FX and mono.
+  function sendRows(p, mixes) {
+    const rows = [];
+    const lv = p["ToMix/Level"]?.value || [], on = p["ToMix/On"]?.value || [];
+    for (let m = 0; m < lv.length; m++) {
+      const name = mixes[m] || `Mix ${m + 1}`;
+      const pair = m + 1 < lv.length && mixes[m] && mixes[m + 1] === mixes[m];
+      rows.push({ name, db: lv[m], on: on[m] !== 0 });
+      if (pair) m++;
     }
+    const fl = p["ToFx/Level"]?.value || [], fo = p["ToFx/On"]?.value || [];
+    fl.forEach((db, i) => rows.push({ name: `FX ${i + 1}`, db, on: fo[i] !== 0 }));
+    if (p["ToMono/Level"]) rows.push({ name: "Mono", db: p["ToMono/Level"].value, on: p["ToMono/On"]?.value !== 0 });
+    return rows;
+  }
+
+  function renderPanel() {
+    const panel = $("console-panel"), toggle = $("console-toggle");
+    toggle.hidden = tf5 === null;
+    panel.hidden = tf5 === null || !state.showConsole;
+    if (panel.hidden) return;
+
+    const ch = tf5.channels && tf5.channels.find((c) => c.index === state.input);
     const items = [];
-    const name = ch.params["Label/Name"];
-    const head = document.createElement("strong");
-    head.textContent = `${ch.source}${name ? " · " + name.value : ""}`;
-    const color = ch.params["Label/Color"];
-    if (color && color.value) head.style.borderLeftColor = String(color.value).toLowerCase();
-    items.push(head);
-    for (const [path, p] of Object.entries(ch.params)) {
-      if (SKIP.has(path)) continue;
-      const item = document.createElement("span");
-      item.className = path === "Fader/On" && !p.value ? "off" : "";
-      item.textContent = `${PARAM_LABELS[path] || path} ${fmtParam(path, p)}`;
-      items.push(item);
+    if (!tf5.connected) {
+      items.push(el("p", "cp-note", "TF5 not connected"));
+    } else if (!ch || !ch.source) {
+      items.push(el("p", "cp-note", `USB ${state.input + 1} is not on the console patch (tf5.usb_patch)`));
+    } else {
+      const p = ch.params, v = (k) => p[k]?.value;
+      const head = el("div", "cp-head");
+      const sw = el("span", "cp-swatch");
+      sw.style.background = TF_COLORS[String(v("Label/Color") || "").toLowerCase()] || "var(--border)";
+      const title = el("div");
+      title.append(el("div", "cp-name", v("Label/Name") || ch.source), el("div", "cp-src", `${ch.source} · USB ${ch.index + 1}`));
+      head.append(sw, title);
+      items.push(head);
+
+      const isOn = v("Fader/On") !== 0;
+      items.push(el("div", `cp-on ${isOn ? "on" : "off"}`, isOn ? "ON" : "OFF"));
+
+      // Fader: scale, track and cap, with the value underneath.
+      const fader = el("div", "cp-fader");
+      const scale = el("div", "cp-scale");
+      for (const d of [10, 0, -10, -20, -30, -40, null]) {
+        const t = el("span", d === 0 ? "zero" : "", d === null ? "−∞" : d > 0 ? `+${d}` : String(d));
+        t.style.bottom = `${faderPos(d) * 100}%`;
+        scale.append(t);
+      }
+      const track = el("div", "cp-track");
+      const fill = el("div", "cp-fill"); fill.style.height = `${faderPos(v("Fader/Level")) * 100}%`;
+      const cap = el("div", "cp-cap"); cap.style.bottom = `${faderPos(v("Fader/Level")) * 100}%`;
+      track.append(fill, cap);
+      fader.append(scale, track);
+      const faderBox = el("div", "cp-faderbox");
+      faderBox.append(fader, el("div", "cp-value", `${fmtDb(v("Fader/Level"))} dB`));
+
+      // Pan (balance for ST) as a centre-detented bar.
+      const panKey = p["ToStereo/Pan"] ? "ToStereo/Pan" : "Out/Balance";
+      const side = el("div", "cp-side");
+      if (p[panKey]) {
+        const pan = v(panKey);
+        const bar = el("div", "cp-pan");
+        const dot = el("span"); dot.style.left = `${(pan + 63) / 126 * 100}%`;
+        bar.append(dot);
+        side.append(el("div", "cp-label", panKey === "Out/Balance" ? "Balance" : "Pan"), bar, el("div", "cp-panval", fmtPan(pan)));
+      }
+      const top = el("div", "cp-top");
+      top.append(faderBox, side);
+      items.push(top);
+
+      // Sends: by default only those that are on and above -inf.
+      if (p["ToMix/Level"]) {
+        const rows = sendRows(p, tf5.mixes || []);
+        const shown = state.allSends ? rows : rows.filter((r) => r.on && r.db !== null);
+        const sends = el("div", "cp-sends");
+        const hdr = el("div", "cp-sendhdr");
+        const lbl = el("label");
+        const cb = el("input"); cb.type = "checkbox"; cb.checked = state.allSends;
+        cb.onchange = () => { state.allSends = cb.checked; save("tf.allSends", cb.checked ? 1 : 0); renderPanel(); };
+        lbl.append(cb, " all");
+        hdr.append(el("h3", "", "Sends"), lbl);
+        sends.append(hdr);
+        if (!shown.length) sends.append(el("p", "cp-note", "No active sends"));
+        for (const r of shown) {
+          const row = el("div", `cp-send${r.on && r.db !== null ? "" : " off"}`);
+          const bar = el("div", "cp-sendbar");
+          const f = el("span"); f.style.width = `${faderPos(r.db) * 100}%`;
+          bar.append(f);
+          row.append(el("span", "cp-sendname", r.name), bar, el("span", "cp-sendval", r.on ? fmtDb(r.db) : "off"));
+          sends.append(row);
+        }
+        items.push(sends);
+      }
+      // Anything else the console offers (gain, EQ, ... if its firmware lists them).
+      const known = new Set(["Label/Name", "Label/Color", "Fader/Level", "Fader/On", "ToStereo/Pan", "Out/Balance",
+                             "ToMix/Level", "ToMix/On", "ToFx/Level", "ToFx/On", "ToMono/Level", "ToMono/On"]);
+      const extra = Object.entries(p).filter(([k]) => !known.has(k));
+      if (extra.length) {
+        const dl = el("dl", "cp-extra");
+        for (const [k, x] of extra) dl.append(el("dt", "", k), el("dd", "", `${x.value ?? "−∞"}${x.unit ? " " + x.unit : ""}`));
+        items.push(dl);
+      }
     }
-    el.replaceChildren(...items);
+    panel.replaceChildren(...items);
   }
+
+  $("show-console").checked = state.showConsole;
+  $("show-console").onchange = (e) => {
+    state.showConsole = e.target.checked;
+    save("tf.console", state.showConsole ? 1 : 0);
+    renderPanel();
+  };
 
   $("show-avg").onchange = (e) => { state.showAvg = e.target.checked; state.dirty = true; };
   $("show-peak").onchange = (e) => { state.showPeak = e.target.checked; state.dirty = true; };

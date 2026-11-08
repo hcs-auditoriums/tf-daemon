@@ -148,10 +148,13 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   `password`, `poll_s`, `usb_patch`. With a host set, the server reads the TF5's
   channel names over Yamaha's remote control protocol and uses them as input
   labels (an explicit `[[channels]]` label still wins). The audio page also shows
-  a strip with the shown input's console settings: name, colour, fader, on, pan.
-  On connect the console's parameter list (`prminfo`) is read, and any
-  input-channel gain / EQ / HPF / dynamics parameters it offers are shown too.
-  The TF's published list has none of those, so expect only the basics. Desk
+  a **Console** sidebar (toggle in the header; stacks under the spectrum on
+  narrow screens) for the shown input: name and colour, on/off, a fader with its
+  level, pan, and the channel's sends to the mixes (by mix name; stereo pairs
+  shown once), FX 1/2 and mono. Only active sends are listed unless **all** is
+  ticked. On connect the console's parameter list (`prminfo`) is read, and any
+  input-channel gain / EQ / HPF / dynamics parameters it offers are shown too. A
+  TF5 lists none of those (checked on the desk at tf5-daemon), so EQ can't be shown. Desk
   changes and scene recalls update live. The protocol has no login, so
   `username` / `password` are accepted but not sent. It also doesn't expose the
   USB output patch, so `usb_patch` says which console channel each USB capture

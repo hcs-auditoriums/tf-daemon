@@ -21,11 +21,12 @@ class FakeTF5:
         f'"{INCH}Fader/Level" 40 0 -32768 1000 -32768 "dB" integer any rw 100',
         f'"{INCH}Label/Name" 40 0 0 64 "ch 1" "" string any rw 1',
         f'"{INCH}Port/HA/Gain" 40 1 -600 6600 -600 "dB" integer any rw 100',
-        f'"{INCH}ToMix/Level" 40 20 -32768 1000 -32768 "dB" integer any rw 100',  # per-mix send: skipped
+        f'"{INCH}ToMix/Level" 40 20 -32768 1000 -32768 "dB" integer any rw 100',
+        f'"{INCH}PEQ/Band/Gain" 40 4 -1800 1800 0 "dB" integer any rw 100',  # has a y dimension: not an extra
     ]
 
     def __init__(self, values):
-        self.values = values  # (addr, x) -> raw reply token
+        self.values = values  # (addr, x) or (addr, x, y) -> raw reply token
         self.srv = socket.create_server(("127.0.0.1", 0))
         self.port = self.srv.getsockname()[1]
         self.conns: list[socket.socket] = []
@@ -57,9 +58,10 @@ class FakeTF5:
                         out.append(f"OK prminfo {i} {self.PRMINFO[i]}" if i < len(self.PRMINFO)
                                    else f"ERROR prminfo {i} UnknownIndex")
                     elif parts[0] == "get":
-                        addr, x = parts[1], int(parts[2])
-                        if (addr, x) in self.values:
-                            out.append(f"OK get {addr} {x} 0 {self.values[(addr, x)]}")
+                        addr, x, y = parts[1], int(parts[2]), int(parts[3])
+                        value = self.values.get((addr, x, y), self.values.get((addr, x)) if y == 0 else None)
+                        if value is not None:
+                            out.append(f"OK get {addr} {x} {y} {value}")
                         else:
                             out.append(f"ERROR get {addr} InvalidArgument")
                 conn.sendall("".join(o + "\n" for o in out).encode())
@@ -132,6 +134,12 @@ def console():
         (INCH + "Port/HA/Gain", 1): "3150",
         (ST + "Label/Name", 0): '"ST L"',
         (ST + "Fader/Level", 0): "-32768",
+        (INCH + "ToMix/Level", 1, 0): "-32768",
+        (INCH + "ToMix/Level", 1, 7): "-600",
+        (INCH + "ToMix/On", 1, 7): "1",
+        (INCH + "ToFx/Level", 1, 1): "-1000",
+        ("MIXER:Current/Mix/Label/Name", 0): '"STAGE"',
+        ("MIXER:Current/Mix/Label/Name", 7): '"DRUM"',
     })
     yield tf
     tf.close()
@@ -161,7 +169,17 @@ def test_names_and_settings_flow_into_the_engine(console):
         assert client.channels()[2]["params"]["Fader/Level"]["value"] is None  # -inf
         assert client.channels()[3] == {"index": 3, "source": None, "params": {}}
         assert client.status()["extra_params"] == ["Port/HA/Gain"]
-        assert not any("ToMix" in r for r in console.requests if r.startswith("get"))
+        assert not any("PEQ" in r for r in console.requests if r.startswith("get"))
+
+        # Sends come back as one value per mix / FX; mix names are read too.
+        sends = ch["params"]["ToMix/Level"]["value"]
+        assert len(sends) == 20 and sends[0] is None and sends[7] == -6.0
+        assert ch["params"]["ToMix/On"]["value"][7] == 1
+        assert ch["params"]["ToFx/Level"]["value"] == [None, -10.0]
+        wait_until(lambda: client.mixes()[7] == "DRUM")
+        assert client.mixes()[0] == "STAGE" and client.mixes()[1] is None
+        console.push(f"NOTIFY set {INCH}ToMix/Level 1 7 -300")
+        wait_until(lambda: client.channels()[1]["params"]["ToMix/Level"]["value"][7] == -3.0)
 
         # Changes made on the desk arrive as NOTIFY lines.
         console.push(f'NOTIFY set {INCH}Label/Name 1 0 "Pastor"')
@@ -215,8 +233,10 @@ def test_tf5_routes(console):
         # Input 1 takes the console's name; Main L/R (33/34) keep their config labels.
         wait_until(lambda: client.get("/api/audio/meta").get_json()["channels"][0]["label"] == "Kick")
         assert client.get("/api/audio/meta").get_json()["channels"][32]["label"] == "Main L"
+        wait_until(lambda: "Label/Name" in client.get("/api/tf5/channels").get_json()["channels"][0]["params"])
         chans = client.get("/api/tf5/channels").get_json()
         assert chans["connected"] and chans["channels"][0]["params"]["Label/Name"]["value"] == "Kick"
+        assert len(chans["mixes"]) == 20
         assert client.get("/api/status").get_json()["modules"]["tf5"]["connected"]
     finally:
         app.extensions["tf_stop"]()

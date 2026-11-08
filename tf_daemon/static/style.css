@@ -224,14 +224,68 @@ main.page {
 .cfg-card textarea { flex: 1; min-height: 280px; resize: vertical; tab-size: 4; }
 .cfg-card textarea:disabled { opacity: 0.5; }
 
-/* ---------------------------------------------------------------- console strip (audio page) */
+/* ---------------------------------------------------------------- console panel (audio page) */
 
-.strip {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px;
-  padding: 6px 16px; font-size: 12px; color: var(--muted);
-  background: var(--panel); border-bottom: 1px solid var(--border);
-  font-variant-numeric: tabular-nums;
+.workspace { flex: 1; display: flex; min-height: 0; min-width: 0; }
+.workspace > main { flex: 1; min-width: 0; }
+.console-panel {
+  width: 250px; flex: none; overflow-y: auto;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 12px;
+  background: var(--panel); border-left: 1px solid var(--border);
+  font-size: 12px; font-variant-numeric: tabular-nums;
 }
-.strip[hidden] { display: none; }
-.strip strong { color: var(--text); font-weight: 600; padding-left: 8px; border-left: 4px solid var(--border); }
-.strip .off { color: var(--bad); }
+.console-panel[hidden] { display: none; }
+.cp-note { color: var(--muted); margin: 0; }
+.cp-head { display: flex; gap: 10px; align-items: center; }
+.cp-swatch { width: 6px; align-self: stretch; border-radius: 3px; }
+.cp-name { font-size: 17px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.cp-src { color: var(--muted); }
+.cp-on {
+  text-align: center; font-weight: 700; letter-spacing: 0.08em; padding: 6px 0; border-radius: 6px;
+  border: 1px solid var(--border); color: var(--muted);
+}
+.cp-on.on { color: #06131d; background: var(--ok); border-color: var(--ok); }
+.cp-on.off { color: var(--bad); border-color: var(--bad); }
+
+.cp-top { display: flex; gap: 14px; }
+.cp-faderbox { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.cp-fader { display: flex; gap: 6px; height: 190px; }
+.cp-scale { position: relative; width: 26px; color: var(--muted); font-size: 10px; }
+.cp-scale span { position: absolute; right: 0; transform: translateY(50%); line-height: 1; }
+.cp-scale span.zero { color: var(--text); font-weight: 600; }
+.cp-track { position: relative; width: 10px; border-radius: 5px; background: var(--bg); border: 1px solid var(--border); }
+.cp-fill { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 5px; background: var(--avg-fill); }
+.cp-cap {
+  position: absolute; left: 50%; width: 30px; height: 12px; transform: translate(-50%, 50%);
+  border-radius: 3px; background: #d8dde4; box-shadow: inset 0 -2px 0 #9aa3ae;
+}
+.cp-value { font-size: 15px; font-weight: 600; color: var(--text); }
+.cp-side { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cp-label { color: var(--muted); }
+.cp-pan { position: relative; height: 8px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); }
+.cp-pan::before { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--grid-strong); }
+.cp-pan span {
+  position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
+  transform: translate(-50%, -50%); background: var(--avg);
+}
+.cp-panval { color: var(--text); font-weight: 600; }
+
+.cp-sends { display: flex; flex-direction: column; gap: 5px; }
+.cp-sendhdr { display: flex; justify-content: space-between; align-items: center; }
+.cp-sendhdr h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text); }
+.cp-sendhdr label { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+.cp-send { display: grid; grid-template-columns: 74px 1fr 44px; align-items: center; gap: 8px; }
+.cp-send.off { opacity: 0.45; }
+.cp-sendname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-sendbar { height: 6px; border-radius: 3px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
+.cp-sendbar span { display: block; height: 100%; background: var(--peak); }
+.cp-sendval { text-align: right; color: var(--text); }
+.cp-extra { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
+.cp-extra dt { color: var(--muted); }
+.cp-extra dd { margin: 0; text-align: right; }
+
+@media (max-width: 720px) {
+  .workspace { flex-direction: column; }
+  .console-panel { width: 100%; min-width: 0; max-height: 45vh; border-left: 0; border-top: 1px solid var(--border); }
+  .workspace > main { min-height: 260px; }
+}
