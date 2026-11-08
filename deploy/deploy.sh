@@ -20,7 +20,7 @@ echo "==> copying $(git rev-parse --short HEAD) to $HOST:~/$DIR"
 git archive --format=tar HEAD | ssh "$HOST" "
   set -e
   mkdir -p '$DIR'
-  if [ -f '$DIR/config.toml' ]; then tar -x -C '$DIR' --exclude=config.toml; else tar -x -C '$DIR'; fi
+  if [ -f '$DIR/config.toml' ]; then tar -xm -C '$DIR' --exclude=config.toml; else tar -xm -C '$DIR'; fi
   echo $(git rev-parse HEAD) > '$DIR/REVISION'
 "
 
