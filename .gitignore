@@ -13,3 +13,8 @@ dist/
 config.local.toml
 qlxd_state.json
 *.json.tmp
+.claude/settings.local.json
+# written on the server by deploy.sh / update.sh
+REVISION
+.update.log
+config.toml.keep

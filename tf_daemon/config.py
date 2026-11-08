@@ -61,6 +61,11 @@ DEFAULTS: dict[str, Any] = {
         "meter_poll_s": 1.0,
         "full_poll_s": 10.0,
     },
+    "update": {
+        # Where the /config page's Update button pulls from.
+        "remote": "https://github.com/hcs-auditoriums/tf-daemon.git",
+        "branch": "main",
+    },
     "channels": [
         {"index": 0, "label": "Main L"},
         {"index": 1, "label": "Main R"},

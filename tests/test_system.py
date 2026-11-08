@@ -1,0 +1,79 @@
+import time
+
+import pytest
+
+from tf_daemon import system
+from tf_daemon.app import build_modules, create_app
+from tf_daemon.config import load_config
+
+
+@pytest.fixture
+def client_for(tmp_path):
+    apps = []
+
+    def make(config_path):
+        cfg = load_config(None)
+        app = create_app(cfg, build_modules(cfg, "synth", rf_source="off", qlxd_source="off"), config_path=config_path)
+        apps.append(app)
+        return app.test_client()
+
+    yield make
+    for app in apps:
+        app.extensions["tf_stop"]()
+
+
+def test_config_page_and_info(client_for, tmp_path):
+    client = client_for(tmp_path / "config.toml")
+    assert client.get("/config").status_code == 200
+    info = client.get("/api/system/info").get_json()
+    assert info["branch"] == "main" and info["remote"].endswith("tf-daemon.git")
+    assert info["config_path"] == str((tmp_path / "config.toml").resolve())
+
+
+def test_config_edit_validates_before_writing(client_for, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[server]\nport = 8080\n")
+    client = client_for(path)
+    assert client.get("/api/system/config").get_json()["text"] == "[server]\nport = 8080\n"
+
+    for bad in ("[server\n", "[audio]\nsamplerate = 44100\n"):
+        r = client.put("/api/system/config", json={"text": bad})
+        assert r.status_code == 400 and r.get_json()["error"]
+    assert client.put("/api/system/config", json={}).status_code == 400
+    assert path.read_text() == "[server]\nport = 8080\n"  # untouched
+
+    good = "[server]\nport = 9090\n"
+    assert client.put("/api/system/config", json={"text": good}).get_json()["ok"]
+    assert path.read_text() == good
+    assert list(tmp_path.iterdir()) == [path]  # no temp files left behind
+
+
+def test_config_editing_disabled_without_path(client_for):
+    client = client_for(None)
+    assert client.get("/api/system/config").status_code == 404
+    assert client.put("/api/system/config", json={"text": ""}).status_code == 404
+
+
+def test_check_reports_update(client_for, tmp_path, monkeypatch):
+    monkeypatch.setattr(system, "_git", lambda *a, **k: "b" * 40 + "\trefs/heads/main")
+    monkeypatch.setattr(system, "current_revision", lambda: "a" * 40)
+    r = client_for(None).post("/api/system/check").get_json()
+    assert r == {"ok": True, "current": "a" * 40, "latest": "b" * 40, "up_to_date": False}
+
+
+def test_update_runs_one_at_a_time(client_for, tmp_path, monkeypatch):
+    script = tmp_path / "update.sh"
+    script.write_text('echo "args: $*"; sleep 1\n')
+    monkeypatch.setattr(system, "UPDATE_SCRIPT", script)
+    monkeypatch.setattr(system, "UPDATE_LOG", tmp_path / "update.log")
+    client = client_for(None)
+
+    assert client.post("/api/system/update").status_code == 202
+    assert client.post("/api/system/update").status_code == 409
+    assert client.get("/api/system/update").get_json()["running"]
+
+    deadline = time.time() + 5
+    while (s := client.get("/api/system/update").get_json())["running"] and time.time() < deadline:
+        time.sleep(0.1)
+    assert s["exit_code"] == 0
+    assert "args: https://github.com/hcs-auditoriums/tf-daemon.git main" in s["log"]

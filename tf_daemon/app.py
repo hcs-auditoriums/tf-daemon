@@ -21,6 +21,7 @@ from .qlxd.module import QLXDModule
 from .rf.devices import DemoDevice, RFDevice, TinySADevice
 from .rf.engine import RFEngine
 from .rf.module import RFModule
+from .system import register_system
 
 log = logging.getLogger(__name__)
 
@@ -72,13 +73,16 @@ def build_modules(cfg: dict[str, Any], source_kind: str, wav_path: str | None = 
     return modules
 
 
-def create_app(cfg: dict[str, Any], modules: list[Module], start: bool = True) -> Flask:
+def create_app(cfg: dict[str, Any], modules: list[Module], start: bool = True,
+               config_path: str | Path | None = None) -> Flask:
+    """``config_path`` is the file the /config page edits (None: editing disabled)."""
     app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
     app.config["TF_CONFIG"] = cfg
     sock = Sock(app)
 
     for m in modules:
         m.register(app, sock)
+    register_system(app, cfg, config_path)
 
     @app.get("/")
     def index():

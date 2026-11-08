@@ -71,6 +71,15 @@ a deploy that changes `deploy/tf-daemon.service`. After that, `deploy/deploy.sh 
 pushes new commits and restarts the service. The server's `config.toml` is
 never overwritten by a deploy, so edit it there.
 
+Or update from the server itself: the **Config** page (`/config`) has an
+**Update now** button that runs `deploy/update.sh`, which pulls `update.branch`
+from `update.remote` (default: this repo's `main`), reinstalls the package and
+restarts the service. The first run turns a `deploy.sh` copy into a git
+checkout. The same page edits `config.toml` (validated before it is saved) and
+restarts the service to apply it. The restart relies on the sudoers rule that
+`install-service.sh` adds. There is no login on these pages, so keep the server
+on a trusted network.
+
 Useful on the server: `journalctl -u tf-daemon -f`,
 `~/tf-daemon/.venv/bin/python -m tf_daemon --list-devices`.
 
