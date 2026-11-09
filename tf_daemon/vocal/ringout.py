@@ -9,16 +9,21 @@ person unmutes them.
 
 What a sound engineer does by hand, in that order:
 
-1. Each mic alone (the other session mics muted), EQ as it is (its existing
-   bands stay; ring-out only adds notches):
+1. Each mic alone (the other session mics muted). The high-pass goes on at the mic
+   type's floor (or stays higher if it was), and the voice is measured all the way
+   through (the USB taps are before the fader, so the ramp doesn't skew it):
    * the fader starts low (RAMP_START_DB under its level, at most the ceiling) and
      rises RAMP_DB every RAMP_EVERY_S, never above ``vocal.ringout_ceiling_db``;
    * a ring (see below) pulls the fader down DROP_DB at once. If the ring then falls
      clearly further than the fader did, it was feedback: a narrow notch goes on a
      free PEQ band (the mic type's Q, NOTCH_START_DB, deeper each time the same
      frequency comes back, down to NOTCH_MAX_DB) and the ramp carries on from just
-     under where it rang. If it fell only as far as the fader, it's a steady tone in
-     the room (hum, a sustained note): ignored from then on.
+     under where it rang. A ring low enough (under HPF_RING_MAX_HZ) is taken out with
+     the high-pass instead, as far as the voice allows. If it fell only as far as the
+     fader, it's a steady tone in the room (hum, a sustained note): ignored from then on.
+   * every band stays in frequency order (L <= LM <= HM <= H, bands.py): placing a
+     notch can move the channel's other bands along (same settings, another band), and
+     when there's no room the desk band doing least gives way.
    * done at the ceiling, when MAX_NOTCHES are used, when a notched ring comes back
      at full depth, or when rings start at several frequencies within WIDE_DB of
      each other (the system's limit: more notches buy nothing).
@@ -28,7 +33,11 @@ What a sound engineer does by hand, in that order:
 3. Faders end at most ``vocal.ringout_margin_db`` under where they rang (alone and
    together), never above where the operator had them; a fader that was down stays
    down. On / off goes back to how it was.
-4. Optionally, live tone EQ (auto.py) on each mic with its mic type and EQ style,
+4. The vocal curve: from the voice heard during the ring-out, the suggestion for its
+   mic type and EQ style (tone.py: the high-pass under the voice but never below what
+   a ring needed, cuts where it builds up, the style's character) goes on the bands
+   the notches left, in one step, in frequency order.
+5. Optionally, live tone EQ (auto.py) on each mic with its mic type and EQ style,
    the notches reserved, while the person talks or sings, until a person finishes.
 
 Rings are found two ways: the ring detector's events (dsp/ring.py) on the mic or the
@@ -60,7 +69,9 @@ from typing import Any
 
 import numpy as np
 
-from .auto import BANDS, PATHS, SLOT_RANGES, AutoEQ
+from . import bands
+from .auto import PATHS, AutoEQ
+from .plan import eq_plan
 from .ports import AudioInputs, DeskFaders
 from .session import MicChecks
 from .targets import MIC_TYPES
@@ -87,6 +98,9 @@ SAME_OCT = 1 / 24  # a ring this close to a notch is the same ring
 NEAR_OCT = 1 / 6  # ... this close: the same resonance ringing beside the notch (the loop's delay
 #                    makes it ring at one of several frequencies ~1/delay apart): widen that notch
 MIN_NOTCH_Q = 3.0
+HPF_RING_MAX_HZ = 170.0  # a ring under this is taken out with the high-pass when the voice allows
+HPF_MAX_HZ = 200.0  # the highest ring-out puts the high-pass
+HPF_RING_RATIO = 1.3  # the high-pass goes this far above the ring
 HANDLED_S = 3.0  # a ring dealt with: the detector's event for it is ignored this long (it lingers)
 HEARTBEAT_S = 10.0
 MAINS_LISTEN_S = 2.0  # before touching a fader: listen to the mains this long...
@@ -235,6 +249,8 @@ class _Mic:
     first_ring_db: float | None = None
     limit_db: float | None = None  # alone: where it last rang
     final: int | None = None  # raw level it ends at
+    hpf_floor: float = 0.0  # Hz: the high-pass may not go below this (the mic type, a low ring)
+    shaped: list[str] = field(default_factory=list)  # the vocal curve it set, a line per band
 
     def summary(self) -> dict[str, Any]:
         db = lambda raw: None if raw is None or raw <= NEG_INF else round(raw / 100, 1)  # noqa: E731
@@ -255,6 +271,10 @@ class _Mic:
             if self.first_ring_db is None or self.limit_db is None
             else round(self.limit_db - self.first_ring_db, 1),
             "rings": list(self.rings),
+            "hpf_hz": (self.known_eq.get("PEQ/Bank/HPF/Frequency", 0) / 10)
+            if self.known_eq.get("PEQ/Bank/HPF/On")
+            else None,
+            "shaped": list(self.shaped),
             "notches": [
                 {"band": _band_label(b), "freq": n["freq"], "gain": n["gain"], "q": n["q"]}
                 for b, n in self.notches.items()
@@ -400,6 +420,8 @@ class RingOut:
         self._held = [*(m.index for m in built), *self.mains]
         for i in self._held:
             self.engine.acquire(i)
+        for m in built:  # the voice, measured while it rings out (the taps are before the fader)
+            self.checks.start(m.index, live=True, mic=m.mic, style=m.style)
         self.watch.reset()
         self._log("start", f"ring-out of {', '.join(m.label for m in built)} started by a person")
         self._thread = threading.Thread(target=self._run, name="vocal-ringout", daemon=True)
@@ -503,6 +525,7 @@ class RingOut:
                 self._ring_out_alone(m)
             self._together()
             self._settle()
+            self._shape()
             if self.tone:
                 self._tone()
         except Stop as s:
@@ -549,6 +572,7 @@ class RingOut:
         for other in self.mics:  # the others muted while this one is rung out
             if other is not m and other.on:
                 self._fader(other, on=0)
+        self._hpf_on(m)
         start = min(self.ceiling, max(m.base_level, round(RAMP_FLOOR_DB * 100))) - round(RAMP_START_DB * 100)
         self._fader(m, level=start, on=1)
         self.message = f"ringing out {m.label}: raising the fader"
@@ -683,11 +707,9 @@ class RingOut:
         self.phase = "tone"
         self.message = "live tone EQ: have each person talk or sing; press Done when it sounds right"
         for m in self.mics:
-            reserved = [
-                {"band": _band_label(b), "freq": n["freq"], "gain": n["gain"], "q": n["q"]}
-                for b, n in m.notches.items()
-            ]
-            self.checks.start(m.index, live=True, mic=m.mic, style=m.style, reserved=reserved)
+            if not any(i == m.index and s.live and s.running for i, s in self.checks.sessions()):
+                self.checks.start(m.index, live=True, mic=m.mic, style=m.style)
+            self.checks.set_reserved(m.index, self._reserved(m), hpf_floor=m.hpf_floor)
             self.auto.arm(m.index, reserved=set(m.notches))
         self._log("tone", "live tone EQ on")
         while True:  # the fader watch keeps running: a ring now pulls everything down
@@ -748,71 +770,123 @@ class RingOut:
         return max(mics, key=lambda m: m.level)
 
     def _notch(self, m: _Mic, freq: float, ring_db: float) -> bool:
-        """Notch ``freq`` on ``m`` (deeper if it's notched already). False when it can't."""
-        cur = dict(m.known_eq)
-        near = [(abs(math.log2(n["freq"] / freq)), b) for b, n in m.notches.items()]
+        """Take ``freq`` out of ``m``: with the high-pass if it's low enough, else a notch (deeper,
+        or wider, if one is on it or beside it already). False when it can't."""
+        if self._hpf_ring(m, freq, ring_db):
+            return True
+        notches = {id(n): dict(n) for n in m.notches.values()}
+        near = sorted((abs(math.log2(n["freq"] / freq)), k) for k, n in notches.items())
         near = [t for t in near if t[0] < NEAR_OCT]
-        q = MIC_TYPES[m.mic].notch_q
         if near:
-            dist, band = min(near)
-            old = m.notches[band]
-            gain = old["gain"] - NOTCH_STEP_DB
-            if gain < NOTCH_MAX_DB:
+            dist, k = near[0]
+            n = notches[k]
+            if n["gain"] - NOTCH_STEP_DB < NOTCH_MAX_DB:
                 m.note = f"the ring at {freq:.0f} Hz came back through a {NOTCH_MAX_DB:.0f} dB notch: its limit"
                 return False
-            changes = [(f"{band}/Gain", round(gain * 100))]
+            n["gain"] -= NOTCH_STEP_DB
             if dist >= SAME_OCT:  # beside the notch: centre it between, wide enough for both
-                lo, hi = min(freq, old["lo"]), max(freq, old["hi"])
-                centre = math.sqrt(lo * hi)
-                q = max(MIN_NOTCH_Q, min(old["q"], centre / (1.5 * (hi - lo))))
-                freq = centre
-                changes += [(f"{band}/Frequency", round(centre * 10)), (f"{band}/Q", round(q * 1000))]
-                lo_hi = (lo, hi)
-            else:
-                freq, q = old["freq"], old["q"]
-                lo_hi = (old["lo"], old["hi"])
+                n["lo"], n["hi"] = min(freq, n["lo"]), max(freq, n["hi"])
+                n["freq"] = round(math.sqrt(n["lo"] * n["hi"]), 1)
+                n["q"] = round(max(MIN_NOTCH_Q, min(n["q"], n["freq"] / (1.5 * (n["hi"] - n["lo"])))), 2)
+            new = n
         else:
-            if len(m.notches) >= MAX_NOTCHES:
+            if len(notches) >= MAX_NOTCHES:
                 m.note = f"{MAX_NOTCHES} notches used: its limit"
                 return False
-            free = self._free_band(m, cur, freq)
-            if free is None:
-                m.note = f"no PEQ band free for {freq:.0f} Hz: its limit"
-                return False
-            band = free
-            gain = NOTCH_START_DB
-            changes = []
-            if band in ("PEQ/Bank/BandL", "PEQ/Bank/BandH") and cur[f"{band}/Type"] != 0:
-                changes.append((f"{band}/Type", 0))
-            changes += [
-                (f"{band}/Frequency", max(200, min(200000, round(freq * 10)))),
-                (f"{band}/Q", round(q * 1000)),
-                (f"{band}/Gain", round(gain * 100)),
-            ]
-            lo_hi = (freq, freq)
-        self._eq(m, changes)
-        q = round(q, 2)
-        m.notches[band] = {"freq": round(freq, 1), "gain": gain, "q": q, "lo": lo_hi[0], "hi": lo_hi[1]}
-        m.rings.append({"freq": round(freq, 1), "at_db": ring_db, "band": _band_label(band), "gain": gain})
-        self._log("notch", f"{m.label}: {_band_label(band)} notch {gain:+.0f} dB at {freq:.0f} Hz, Q {q:g}")
+            new = {
+                "freq": round(freq, 1),
+                "gain": NOTCH_START_DB,
+                "q": MIC_TYPES[m.mic].notch_q,
+                "lo": freq,
+                "hi": freq,
+            }
+            notches[id(new)] = new
+        # Every band in frequency order: the notches stay, the desk's other bands move along (or,
+        # without room, the one doing least gives way).
+        cur = dict(m.known_eq)
+        keep = [
+            {"type": "bell", "freq": n["freq"], "gain": n["gain"], "q": n["q"], "notch": n} for n in notches.values()
+        ]
+        desk = bands.from_desk(cur, skip=list(m.notches))
+        keep += [d for d in desk if d["type"] in ("hpf", "lpf")]
+        try:
+            placed, dropped = bands.fit([d for d in desk if d["type"] not in ("hpf", "lpf")], keep=keep)
+        except ValueError:
+            m.note = f"no PEQ band free for {freq:.0f} Hz in frequency order: its limit"
+            return False
+        self._eq(m, bands.to_desk(placed, cur))
+        m.notches = {bands.PATH[label]: s["notch"] for label, s in placed.items() if "notch" in s}
+        band = next(label for label, s in placed.items() if s.get("notch") is new)
+        for d in dropped:
+            self._log(
+                "replaced", f"{m.label}: the desk's {d['gain']:+.1f} dB at {d['freq']:.0f} Hz gave way to a notch"
+            )
+        m.rings.append({"freq": round(freq, 1), "at_db": ring_db, "band": band, "gain": new["gain"]})
+        self._log("notch", f"{m.label}: {band} notch {new['gain']:+.0f} dB at {new['freq']:.0f} Hz, Q {new['q']:g}")
         return True
 
+    # ------------------------------------------------------------------ the high-pass and the vocal curve
+
+    def _hpf_on(self, m: _Mic) -> None:
+        """The high-pass on, at least at the mic type's floor (a higher one stays)."""
+        floor = MIC_TYPES[m.mic].hpf_min_hz
+        m.hpf_floor = max(m.hpf_floor, floor)
+        cur = m.known_eq
+        on, f = cur["PEQ/Bank/HPF/On"], cur["PEQ/Bank/HPF/Frequency"] / 10
+        if on and f >= floor:
+            m.hpf_floor = max(m.hpf_floor, f)
+            return
+        self._eq(m, [("PEQ/Bank/HPF/Frequency", round(max(f if on else 0, floor) * 10)), ("PEQ/Bank/HPF/On", 1)])
+        self._log("hpf", f"{m.label}: high-pass on at {max(f if on else 0, floor):.0f} Hz ({MIC_TYPES[m.mic].label})")
+
+    def _hpf_ring(self, m: _Mic, freq: float, ring_db: float) -> bool:
+        """A low ring: raise the high-pass over it, if the voice leaves room. True if it did."""
+        if freq >= HPF_RING_MAX_HZ:
+            return False
+        cap = HPF_MAX_HZ
+        f0_low = self._lowest_pitch(m.index)
+        if f0_low is not None:  # not into the voice's own fundamental
+            cap = min(cap, f0_low)
+        cur = m.known_eq["PEQ/Bank/HPF/Frequency"] / 10
+        want = min(cap, 5 * round(freq * HPF_RING_RATIO / 5))
+        if want < freq * 1.15 or want <= cur:
+            return False  # not enough room above the ring: a notch instead
+        self._eq(m, [("PEQ/Bank/HPF/Frequency", round(want * 10)), ("PEQ/Bank/HPF/On", 1)])
+        m.hpf_floor = max(m.hpf_floor, want)
+        m.rings.append({"freq": round(freq, 1), "at_db": ring_db, "band": "HPF", "gain": None})
+        self._log("hpf", f"{m.label}: high-pass up to {want:.0f} Hz for the ring at {freq:.0f} Hz")
+        return True
+
+    def _lowest_pitch(self, index: int) -> float | None:
+        s = next((s for i, s in self.checks.sessions() if i == index), None)
+        f0s = s.collector.f0s if s is not None else []
+        return float(np.percentile(f0s, 10)) if len(f0s) >= 20 else None
+
     @staticmethod
-    def _free_band(m: _Mic, cur: dict[str, int], freq: float) -> str | None:
-        """A band for a new notch: not one of ours, not a filter; among those, a flat one whose
-        home range holds the ring, else any flat one, else the one in range doing least."""
-        options = [
-            b
-            for b in BANDS
-            if b not in m.notches and not (b in ("PEQ/Bank/BandL", "PEQ/Bank/BandH") and cur[f"{b}/Type"] == 2)
+    def _reserved(m: _Mic) -> list[dict[str, Any]]:
+        return [
+            {"band": bands.LABEL[b], "type": "bell", "freq": n["freq"], "gain": n["gain"], "q": n["q"]}
+            for b, n in m.notches.items()
         ]
-        in_range = [b for b in options if SLOT_RANGES[b][0] <= freq < SLOT_RANGES[b][1]]
-        flat = [b for b in options if cur[f"{b}/Gain"] == 0]
-        for pool in ([b for b in in_range if b in flat], flat):
-            if pool:
-                return min(pool, key=lambda b: abs(math.log2(max(cur[f"{b}/Frequency"], 200) / 10 / freq)))
-        # No flat band: the one in range doing least (its setting goes; Mute & cancel puts it back).
-        return min(in_range, key=lambda b: abs(cur[f"{b}/Gain"])) if in_range else None
+
+    def _shape(self) -> None:
+        """The vocal curve on the bands the notches left, from the voice heard so far."""
+        self.message = "setting each mic's vocal curve"
+        for m in self.mics:
+            self.checks.set_reserved(m.index, self._reserved(m), hpf_floor=m.hpf_floor)
+            result = self.checks.analyze_now(m.index)
+            if result is None or not result.get("ok"):
+                why = (result or {}).get("error") or "no voice heard"
+                self._log("shape", f"{m.label}: no vocal curve yet ({why}); have them talk or sing")
+                continue
+            eq = self.desk.eq(m.index).get("eq")
+            if not eq:
+                continue
+            changes, lines = eq_plan(result, eq)
+            if changes:
+                self._eq(m, changes)
+            m.shaped = lines
+            self._log("shape", f"{m.label}: vocal curve set ({m.mic}, {m.style}): " + "; ".join(lines))
 
     def _safe(self, m: _Mic) -> int:
         """The level a mic ends at: under its limit by the margin, never above where it was."""

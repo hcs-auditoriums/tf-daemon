@@ -158,8 +158,19 @@ def test_fader_writes_need_their_own_flag(console, client_for):
     assert sent_sets(console) == []
     assert not TFEditorClient("127.0.0.1", 9, fader_writes=True).fader_writes  # and never without writes
     f = client_for(console, writes=True, fader_writes=True)
-    res = f.write([("InputChannel:3/Fader/On", 0), (FADER_1, -32768)])
-    assert all(r["confirmed"] for r in res) and console.writes == [("InputChannel:3/Fader/On", 0), (FADER_1, -32768)]
+    res = f.write([("InputChannel:3/Fader/On", 1 - f.get("InputChannel:3/Fader/On")), (FADER_1, -32768)])
+    assert all(r["confirmed"] for r in res) and [p for p, _ in console.writes] == ["InputChannel:3/Fader/On", FADER_1]
+
+
+def test_a_change_to_the_value_already_there_isnt_sent(console, client_for):
+    # The TF5 doesn't echo a set that changes nothing, so it could never be confirmed.
+    c = client_for(console, writes=True)
+    now = c.get(GAIN_L)
+    res = c.write([(GAIN_L, now), (FREQ_2, 31500)])
+    assert [(r["path"], r["confirmed"]) for r in res] == [(GAIN_L, True), (FREQ_2, True)]
+    assert console.writes == [(FREQ_2, 31500)]
+    assert c.write([(GAIN_L, now)]) == [{"path": GAIN_L, "value": now, "confirmed": True, "actual": now}]
+    assert console.writes == [(FREQ_2, 31500)]
 
 
 def test_sim_console_moves_the_fader_rcp_and_the_stage_hear():
@@ -339,7 +350,7 @@ def test_apply_and_undo_only_on_confirmed_requests(console):
 
         n = len(console.writes)
         d = c.post("/api/vocal/undo", json={"channel": 3, "confirm": True}).get_json()
-        assert d["ok"] and d["sent"] == d["confirmed"] == n
+        assert d["ok"] and d["sent"] == d["confirmed"] >= n  # (a value already there counts as done)
         assert tf5.eq_raw(3, list(before)) == before  # back as it was
         assert c.post("/api/vocal/undo", json={"channel": 3, "confirm": True}).get_json()["error"] == "nothing to undo"
     finally:

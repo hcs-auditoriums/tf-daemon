@@ -243,16 +243,29 @@ class AutoEQ:
     @staticmethod
     def _notch_band(cur: dict[str, int], f: float, reserved: set[str] | frozenset[str] = frozenset()) -> str | None:
         """The band to notch ``f`` with: one already on it, else the least-used band whose
-        home range holds it (never a band used as a filter, nor one reserved for another ring)."""
+        home range holds it (never a band used as a filter, nor one reserved for another ring),
+        and only where the bands in use stay in frequency order (L <= LM <= HM <= H)."""
         for b in BANDS:
             if abs(math.log2(cur[f"{b}/Frequency"] / 10 / f)) < 1 / 24 and cur[f"{b}/Q"] >= 5000:
                 return b
+
+        def in_use(b: str) -> bool:
+            return cur[f"{b}/Gain"] != 0 or (b in ("PEQ/Bank/BandL", "PEQ/Bank/BandH") and cur[f"{b}/Type"] == 2)
+
+        def in_order(i: int) -> bool:
+            return all(
+                (cur[f"{o}/Frequency"] / 10 <= f) if j < i else (cur[f"{o}/Frequency"] / 10 >= f)
+                for j, o in enumerate(BANDS)
+                if j != i and in_use(o)
+            )
+
         fits = [
             b
-            for b in BANDS
+            for i, b in enumerate(BANDS)
             if SLOT_RANGES[b][0] <= f < SLOT_RANGES[b][1]
             and not (b in ("PEQ/Bank/BandL", "PEQ/Bank/BandH") and cur[f"{b}/Type"] == 2)
             and b not in reserved
+            and in_order(i)
         ]
         return min(fits, key=lambda b: abs(cur[f"{b}/Gain"])) if fits else None
 

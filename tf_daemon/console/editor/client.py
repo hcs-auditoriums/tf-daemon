@@ -156,12 +156,15 @@ class TFEditorClient:
         Only for an explicit request by a person; nothing calls this on its own. Only
         WRITABLE paths, values within WRITE_LIMITS, and only with ``writes`` enabled;
         anything else raises before a byte is sent. Returns per change whether the
-        console echoed it back within ``timeout`` and the value it reported.
+        console echoed it back within ``timeout`` and the value it reported. A change to the
+        value the console already has isn't sent (the TF5 doesn't echo a set that changes
+        nothing, so it could never be confirmed); it's reported as confirmed.
         """
         if not self.writes:
             raise PermissionError("writing to the console is off (tf5.eq_write = false)")
         sock = self._sock
-        plan = []
+        plan: list[tuple[str, tuple[tuple[int, ...], tuple[int, ...]], Any, int]] = []
+        already: dict[str, int] = {}  # path -> value the console has already
         with self._lock:
             dump = self._mixing
             if not self.synced or sock is None or dump is None:
@@ -178,9 +181,14 @@ class TFEditorClient:
                     raise ValueError(f"{path}: not on this console") from None
                 if prm.type not in (1, 2) or (prm.type == 2 and value < 0):
                     raise ValueError(f"{path}: not a numeric parameter of that sign")
+                if path in already or any(p == path for p, _, _, _ in plan):
+                    raise ValueError("the same parameter twice in one write")
+                if dump.get(path) == value:
+                    already[path] = value
+                    continue
                 plan.append((path, (tuple(wp), tuple(idx)), prm, value))
-        if len({key for _, key, _, _ in plan}) != len(plan):
-            raise ValueError("the same parameter twice in one write")
+        if not plan:
+            return [{"path": p, "value": v, "confirmed": True, "actual": v} for p, v in changes]
         with self._write_lock:
             with self._echo:
                 self._awaiting = {key: None for _, key, _, _ in plan}
@@ -208,10 +216,11 @@ class TFEditorClient:
             finally:
                 with self._echo:
                     self._awaiting = {}
-        return [
-            {"path": path, "value": value, "confirmed": echoed.get(key) is not None, "actual": echoed.get(key)}
+        sent = {
+            path: {"path": path, "value": value, "confirmed": echoed.get(key) is not None, "actual": echoed.get(key)}
             for path, key, _, value in plan
-        ]
+        }
+        return [sent.get(p) or {"path": p, "value": v, "confirmed": True, "actual": v} for p, v in changes]
 
     def _allow_set(self, msg: Message) -> bool:
         """check_outbound's test while write() runs: exactly one of the requested changes."""

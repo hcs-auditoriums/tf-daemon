@@ -76,12 +76,15 @@ export function openRingoutSetup(vocal) {
   const chans = vocal.inputs && vocal.inputs.length ? vocal.inputs : [state.input];
   const label = (i) => state.meta?.channels[i]?.label ?? `In ${i + 1}`;
   box.append(el("h3", "ro-title", "Ring out"));
-  box.append(el("p", "", "The software takes over the chosen mics' faders and EQ. One mic at a time, it raises "
-    + "the fader until the mic starts to ring, notches the ring and goes on, until it reaches "
+  box.append(el("p", "", "The software takes over the chosen mics' faders and EQ. One mic at a time, it puts the "
+    + "high-pass on and raises the fader until the mic starts to ring, notches the ring (or raises the high-pass for "
+    + "a low one) and goes on, until it reaches "
     + `${db(ro?.ceiling_db ?? 6)} or runs out of notches; then all of them together. `
     + `Each fader ends at least ${db(ro?.margin_db ?? 6).replace("+", "")} under where it rang, and never above where you had it.`));
-  box.append(el("p", "ro-note", "Put each mic where it is used (on the actor, downstage too) and mute other open "
-    + "mics. Keep this page open: Mute & cancel (or Esc) mutes them all at once and puts everything back."));
+  box.append(el("p", "ro-note", "Have each person talk and sing while their mic is rung out: their voice gives the "
+    + "vocal curve (high-pass, tone and the EQ type's character) that goes on the bands the notches leave. Put each mic "
+    + "where it is used (on the actor, downstage too) and mute other open mics. Keep this page open: Mute & cancel "
+    + "(or Esc) mutes them all at once and puts everything back."));
   const table = el("table", "vp-table ro-table");
   const head = el("tr");
   ["", "Mic", "Type", "EQ for"].forEach((h) => head.append(el("th", "", h)));
@@ -168,15 +171,18 @@ function renderPopup(error) {
   if (error) box.append(el("p", "vp-error", error));
   const table = el("table", "vp-table ro-table");
   const hr = el("tr");
-  ["Mic", "", "Fader", "First rang", "Rings at", "Notches"].forEach((h) => hr.append(el("th", "", h)));
+  ["Mic", "", "Fader", "First rang", "Rings at", "HPF", "Notches"].forEach((h) => hr.append(el("th", "", h)));
   table.append(hr);
   for (const m of ro.mics) {
     const tr = el("tr", ro.current === m.index ? "ro-now" : "");
     const notches = m.notches.map((n) => `${n.band} ${hz(n.freq)} ${n.gain} dB`).join(", ") || "–";
     [m.label, m.state === "ringing out" ? "●" : m.state === "done" ? "✓" : "", `${db(m.level_db)}${m.on ? "" : " (off)"}`,
-      db(m.first_ring_db), db(m.limit_db), notches].forEach((c) => tr.append(el("td", "", c)));
+      db(m.first_ring_db), db(m.limit_db), m.hpf_hz ? hz(m.hpf_hz) : "off", notches]
+      .forEach((c) => tr.append(el("td", "", c)));
     table.append(tr);
-    if (m.note) { const nr = el("tr"); const td = el("td", "ro-mnote", m.note); td.colSpan = 6; nr.append(td); table.append(nr); }
+    const sub = (text) => { const nr = el("tr"); const td = el("td", "ro-mnote", text); td.colSpan = 7; nr.append(td); table.append(nr); };
+    if (m.note) sub(m.note);
+    if (m.shaped && m.shaped.length) sub(`Vocal curve: ${m.shaped.join("; ")}`);
   }
   box.append(table);
   if (ro.together_db !== null && ro.together_db !== undefined) {
