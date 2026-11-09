@@ -219,3 +219,59 @@ def test_eq_profiles_save_and_delete_from_the_sidebar(page):
     page.once("dialog", lambda d: d.accept())       # "Delete profile …?"
     bar.get_by_role("button", name="Delete").click()
     page.wait_for_function(f"!{listed}", timeout=5000)
+
+
+def test_eq_bands_can_be_dragged_and_typed_on_the_spectrum(page):
+    import json
+    import urllib.request
+
+    def desk_band(label):
+        with urllib.request.urlopen(URL + "/api/tf5/eq/0", timeout=5) as r:
+            return next(b for b in json.loads(r.read())["eq"]["bands"] if b["label"] == label)
+
+    def put(changes):
+        req = urllib.request.Request(URL + "/api/tf5/eq/0", method="PUT", headers={"Content-Type": "application/json"},
+                                     data=json.dumps({"changes": changes, "confirm": True}).encode())
+        urllib.request.urlopen(req, timeout=10).read()
+
+    _open(page, "/")
+    page.wait_for_function("document.querySelectorAll('#channels button').length >= 1", timeout=8000)
+    page.locator("#channels button", has_text="Pastor").click()
+    page.wait_for_function("!document.getElementById('eq-toggle').hidden", timeout=8000)
+    page.click("#view-menu summary")
+    page.check("#show-eq")
+    page.click("#view-menu summary")
+    page.wait_for_function("window.tfEqHandles && window.tfEqHandles().some(h => h.key === 'HM')", timeout=8000)
+    assert page.evaluate("window.tfEqPreviewError()") < 0.05      # this page's maths = the desk's
+    before = desk_band("HM")
+    try:
+        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
+        box = page.locator("#spectrum").bounding_box()
+        x, y = box["x"] + h["x"], box["y"] + h["y"]
+        page.mouse.move(x, y)
+        page.mouse.down()
+        for i in range(1, 6):                                       # drag up and a little right
+            page.mouse.move(x + 4 * i, y - 6 * i)
+        page.mouse.up()
+        page.wait_for_function("1", timeout=1000)
+        wait = 0
+        while desk_band("HM")["gain"] <= before["gain"] and wait < 50:
+            page.wait_for_timeout(100)
+            wait += 1
+        assert desk_band("HM")["gain"] > before["gain"]             # dragged up: more gain on the desk
+        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
+        page.mouse.click(box["x"] + h["x"], box["y"] + h["y"])     # a click: its settings
+        pop = page.get_by_role("dialog", name="EQ HM")
+        pop.wait_for(timeout=3000)
+        pop.get_by_label("Gain").fill("-2.5")
+        pop.get_by_label("Gain").press("Enter")
+        page.wait_for_timeout(200)
+        for _ in range(50):
+            if desk_band("HM")["gain"] == -2.5:
+                break
+            page.wait_for_timeout(100)
+        assert desk_band("HM")["gain"] == -2.5
+    finally:   # leave the shared demo desk as it was
+        band = "PEQ/Bank/Band:1"
+        put([[f"{band}/Gain", round(before["gain"] * 100)], [f"{band}/Frequency", round(before["freq"] * 10)],
+             [f"{band}/Q", round(before["q"] * 1000)]])

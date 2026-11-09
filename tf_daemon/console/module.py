@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from flask import Blueprint, Flask, jsonify
+from flask import Blueprint, Flask, jsonify, request
 from flask_sock import Sock
 
 from ..config import TF5Config
@@ -38,6 +38,9 @@ class TF5Module:
       GET /api/tf5/channels   per USB input: console source and its settings; mix names
       GET /api/tf5/eq/<usb>   EQ of the console channel on that USB input + its curve
                               (404 when tf5.eq is off)
+      PUT /api/tf5/eq/<usb>   {"changes": [[path, raw value], ...], "confirm": true}: SET that channel's EQ
+                              (the page's EQ editing: a person dragging a band or typing a value; needs
+                              tf5.eq_write; paths relative to the channel, e.g. "PEQ/Bank/Band:0/Gain")
     """
 
     name = "tf5"
@@ -114,6 +117,7 @@ class TF5Module:
             "source": source_label(src) if src is not None else None,
             "connected": ec.connected,
             "synced": ec.synced,
+            "writable": ec.writes and src is not None and src[0] == "InCh",   # the page may offer editing
             "eq": settings,
             "freqs": [round(float(f), 2) for f in CURVE_FREQS] if settings else [],
             "curve": [round(float(v), 2) for v in eq_curve(settings)] if settings else [],
@@ -137,6 +141,26 @@ class TF5Module:
             if self.eq_client is None:
                 return jsonify({"error": "tf5.eq is off"}), 404
             return jsonify(self.eq(usb))
+
+        @bp.put("/eq/<int:usb>")
+        def eq_set(usb: int):
+            # Changes the desk: only a person's edit (the page sends confirm with each drag / entry).
+            body = request.get_json(silent=True) or {}
+            if body.get("confirm") is not True:
+                return jsonify({"ok": False, "error": "changing the desk needs \"confirm\": true"}), 400
+            changes = body.get("changes")
+            if not isinstance(changes, list) or not changes or not all(
+                    isinstance(c, list) and len(c) == 2 and isinstance(c[0], str) and isinstance(c[1], int)
+                    and not isinstance(c[1], bool) for c in changes):
+                return jsonify({"ok": False, "error": "body needs \"changes\": [[path, raw value], ...]"}), 400
+            try:
+                results = self.write_eq(usb, [(c[0], c[1]) for c in changes])
+            except (ValueError, PermissionError) as e:
+                return jsonify({"ok": False, "error": str(e)}), 400
+            except (ConnectionError, OSError) as e:
+                return jsonify({"ok": False, "error": f"desk not reachable: {e}"}), 503
+            log.info("EQ edited from the page on USB %d: %s", usb + 1, ", ".join(f"{p}={v}" for p, v in changes))
+            return jsonify({"ok": True, "results": results})
 
         app.register_blueprint(bp)
 

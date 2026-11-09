@@ -75,11 +75,18 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   curve section). The client is **read-only** by default: it joins as a
   StageMix client with `SYNCDIR:2` (console → client), and a guard refuses to
   send anything but the subscribe / hash / sync / keepalive handshake.
-  `tf5.eq_write` (default `false`) allows one exception, the vocal assist's
-  **Apply to desk** / **Undo**: on that click the guard lets through exactly the
-  confirmed set-param messages, only for input-channel PEQ parameters (switch,
-  HPF, bands) with values in range. `GET /api/tf5/eq/<usb>` returns the settings and
-  curve. One-off read-only probe from a shell:
+  `tf5.eq_write` (default `false`) allows changes a person makes: the vocal
+  assist's **Apply to desk** / **Undo**, EQ profile recall / copy, auto EQ once a
+  person turns it on, and **editing the EQ on the spectrum**: with the EQ overlay
+  shown, drag a band's handle (frequency sideways, gain up / down; the HPF moves
+  sideways), scroll on it for Q, or click it to type exact frequency, gain, Q and
+  (L / H) type. The curve follows the drag at once (the page uses the desk's own
+  filter maths) and the desk's value arrives a moment later. For each of these
+  the guard lets through exactly the requested set-param messages, only for
+  input-channel PEQ parameters (switch, HPF, bands) with values in range.
+  `GET /api/tf5/eq/<usb>` returns the settings and curve (`writable`: editing is
+  allowed for it), `PUT /api/tf5/eq/<usb>` `{"changes": [[path, raw], ...],
+  "confirm": true}` sets them. One-off read-only probe from a shell:
   `python -m tf_daemon.console.editor <console-ip> --channels 1-8 [--watch]`.
 
 Levels are dBFS with AES17 convention: a full-scale sine reads 0 dBFS.

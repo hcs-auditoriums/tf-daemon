@@ -179,6 +179,7 @@ def test_editor_has_a_single_send_path_and_one_guarded_write_builder():
 def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
     """write() <- TF5Module.write_eq <- either
       * vocal DeskWriter.apply_suggestion / undo <- POST /api/vocal/apply|undo ("confirm": true), or
+      * TF5Module's eq_set <- PUT /api/tf5/eq/<usb> ("confirm": true): the page's EQ editing, or
       * vocal DeskWriter.write_values <- profile recall / copy <- POST /api/vocal/profiles/recall|copy
         ("confirm": true), or
       * vocal AutoEQ: its tick (only channels a person turned on: POST /api/vocal/auto with
@@ -193,8 +194,13 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
             for _ in re.finditer(pattern, code):
                 calls.setdefault(name, []).append(p.relative_to(PKG).as_posix())
     assert calls.get("write") == ["console/module.py"]        # ec.write(...) in TF5Module.write_eq only
-    assert "ec = self.eq_client" in (PKG / "console" / "module.py").read_text(encoding="utf-8")
-    assert sorted(calls.get("write_eq", [])) == ["vocal/auto.py", "vocal/auto.py", "vocal/desk.py", "vocal/desk.py"]
+    console_src = (PKG / "console" / "module.py").read_text(encoding="utf-8")
+    assert "ec = self.eq_client" in console_src
+    assert sorted(calls.get("write_eq", [])) == ["console/module.py", "vocal/auto.py", "vocal/auto.py",
+                                                  "vocal/desk.py", "vocal/desk.py"]
+    # The page's EQ editing: PUT /api/tf5/eq/<usb>, refused without "confirm": true before any write.
+    eq_set = console_src[console_src.index("def eq_set(usb: int):"):]
+    assert eq_set.index('.get("confirm") is not True') < eq_set.index("self.write_eq(")
     vocal_src = (PKG / "vocal" / "module.py").read_text(encoding="utf-8")
     assert re.search(r"desk_write\(self\.desk\.apply_suggestion\)", vocal_src)
     assert re.search(r"desk_write\(self\.desk\.undo\)", vocal_src)

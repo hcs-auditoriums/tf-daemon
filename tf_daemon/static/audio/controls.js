@@ -1,6 +1,7 @@
 // The input picker, trace toggles, View menu and Reset peak.
 
 import { renderPanel } from "./console.js";
+import { eqEditReset } from "./eqedit.js";
 import { autoReset } from "./range.js";
 import { $, save, state } from "./shared.js";
 import { send } from "./socket.js";
@@ -42,6 +43,10 @@ export function markSelected(index) {
 }
 
 export function selectInput(index) {
+  eqEditReset();
+  // The server sends an input's EQ when it changes, not again for the same input, so keep
+  // what we have when the input stays the same (e.g. its button clicked again).
+  if (index !== state.input || !state.eq || state.eq.index !== index) state.eq = null;
   state.input = index;
   save("tf.input", index);
   state.avg.fill(state.meta.db_floor);
@@ -53,7 +58,6 @@ export function selectInput(index) {
   markSelected(index);
   send({ cmd: "view", channel: index });
   renderPanel();
-  state.eq = null;
   state.dirty = true;
 }
 

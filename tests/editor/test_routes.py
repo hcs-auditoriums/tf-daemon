@@ -72,7 +72,7 @@ def test_eq_route(console):
         off = c.get("/api/tf5/eq/1").get_json()
         assert off["eq"]["on"] is False and set(off["curve"]) == {0.0}
         assert c.get("/api/tf5/eq/2").get_json() == {"index": 2, "source": None, "connected": True, "synced": True,
-                                                     "eq": None, "freqs": [], "curve": []}
+                                                     "writable": False, "eq": None, "freqs": [], "curve": []}
         st = c.get("/api/tf5/eq/3").get_json()
         assert st["source"] == "St R" and st["eq"]["bands"][0]["type"] == "hpf"
         assert c.get("/api/tf5/eq/4").get_json()["eq"]["bands"][1]["freq"] == 1000.0
@@ -96,15 +96,22 @@ def test_page_has_the_eq_toggle():
     assert 'id="eq-toggle" hidden' in html and 'id="show-eq"' in html
     # The EQ is pushed over /ws/audio ("tf5-eq" messages) and drawn.
     assert '"tf5-eq"' in js and "drawEq()" in js
-    # The page only ever reads the EQ.
-    assert not re.search(r"fetch\(`/api/tf5/eq[^`]*`\s*,", js)
+    # The page writes the EQ in one place only (eqedit.js: a person's drag / entry), with PUT
+    # and "confirm"; everything else only reads it.
+    writes = re.findall(r"fetch\(`/api/tf5/eq[^`]*`\s*,", js)
+    assert len(writes) == 1
+    edit_js = (static / "audio" / "eqedit.js").read_text(encoding="utf-8")
+    assert re.search(r'fetch\(`/api/tf5/eq/\$\{usb\}`, \{\s*method: "PUT".*?confirm: true', edit_js, re.S)
     assert "--eq:" in (static / "style.css").read_text(encoding="utf-8")
     draw = re.search(r"function drawEq\(\) \{(.*?)\n\}\n", js, re.S).group(1)
     # Same dB scale as the spectrum (the View range; shared with the vocal assist
     # through eqHalf / eqY), and the handles sit on the curve.
     assert re.search(r"const eqHalf = \(\) => \(state\.dbMax - state\.dbMin\) / 2", js)
     assert "eqHalf()" in draw and "eqY" in draw
-    assert "yEq(eqAt(f))" in draw
+    assert "eqHandles()" in draw
+    # Handles: bells / shelves at their own gain (what you grab), the HPF and filters on the curve.
+    handles = re.search(r"export function eqHandles\(\) \{(.*?)\n\}\n", js, re.S).group(1)
+    assert "yEq(b.gain)" in handles and "yEq(eqAt(b.freq) ?? 0)" in handles and "yEq(eqAt(eq.hpf.freq) ?? 0)" in handles
     # The console sidebar has its own EQ graph, redrawn on every pushed change.
     side = re.search(r"function drawPanelEq\(\) \{(.*?)\n\}\n", js, re.S).group(1)
     assert "eqAt(f)" in side and "eqHalf()" in side and "peqRange" not in js   # the spectrum's scale
