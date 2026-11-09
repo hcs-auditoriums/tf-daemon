@@ -5,7 +5,7 @@
 // the faders back by itself). "Mute & cancel" (or Esc) mutes the ring-out's channels at
 // once and puts their faders and EQ back. API: /api/vocal/ringout*.
 
-import { $, el, loadStr, save, state } from "./shared.js";
+import { $, el, loadStr, quietRender, quietReset, save, state } from "./shared.js";
 
 let ro = null;            // GET /api/vocal/ringout
 let closedFor = null;     // the session (its start time) whose finished popup was closed
@@ -61,7 +61,13 @@ function post(path, body = {}) {
     });
 }
 
-export function abortRingout() { return post("abort"); }
+// Mute & cancel: at most one in flight (it fires on the press, and a click may follow).
+let aborting = false;
+export function abortRingout() {
+  if (aborting) return Promise.resolve();
+  aborting = true;
+  return post("abort").finally(() => { aborting = false; });
+}
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && ro && ro.running) { e.preventDefault(); abortRingout(); }
@@ -72,6 +78,7 @@ document.addEventListener("keydown", (e) => {
 export function openRingoutSetup(vocal) {
   const o = overlay();
   o.dataset.kind = "setup";
+  quietReset(o);  // the popup's last render is gone
   const box = el("div", "ro-box");
   const chans = vocal.inputs && vocal.inputs.length ? vocal.inputs : [state.input];
   const label = (i) => state.meta?.channels[i]?.label ?? `In ${i + 1}`;
@@ -127,7 +134,7 @@ export function openRingoutSetup(vocal) {
   o.hidden = false;
 }
 
-function renderSetupAgain(o, box) { o.dataset.kind = "setup"; o.replaceChildren(box); o.hidden = false; }
+function renderSetupAgain(o, box) { o.dataset.kind = "setup"; quietReset(o); o.replaceChildren(box); o.hidden = false; }
 
 function picker(options, value) {
   const s = el("select", "ro-pick");
@@ -158,13 +165,20 @@ function renderPopup(error) {
   }
   if (!ro.running && o.dataset.kind !== "popup" && !o.hidden) return;  // the setup dialog is up
   o.dataset.kind = "popup";
+  quietRender(o, JSON.stringify([ro, error || null, busy]), () => [popupBox(o, error)]);
+  o.hidden = false;
+}
+
+function popupBox(o, error) {
   const box = el("div", `ro-box ro-popup${ro.running ? " running" : ""}`);
   const head = el("div", "ro-head");
   head.append(el("strong", ro.running ? "vp-live" : "", `${ro.running ? "● " : ""}${PHASE[ro.phase] || ro.phase}`));
   box.append(head);
   if (ro.running) {
     const stop = el("button", "ro-abort", "Mute & cancel (Esc)"); stop.type = "button";
-    stop.onclick = () => abortRingout();
+    // On the press, not the release: nothing (a re-render, a slow release) can swallow it.
+    stop.addEventListener("pointerdown", (e) => { if (e.button === 0) abortRingout(); });
+    stop.onclick = (e) => { if (e.detail === 0) abortRingout(); };  // Enter / Space
     box.append(stop);
   }
   box.append(el("p", ro.phase === "error" || ro.phase === "stopped" ? "vp-error" : "", ro.message));
@@ -215,6 +229,5 @@ function renderPopup(error) {
     row.append(close);
   }
   box.append(row);
-  o.replaceChildren(box);
-  o.hidden = false;
+  return box;
 }

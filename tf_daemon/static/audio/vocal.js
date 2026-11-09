@@ -3,7 +3,7 @@
 import { eqAvailable, eqHalf, eqY } from "./eq.js";
 import { H, PAD, W, xOf } from "./plot.js";
 import { micKey, openRingoutSetup, styleKey } from "./ringout.js";
-import { $, C, color, ctx, el, loadInt, loadStr, save, state } from "./shared.js";
+import { $, C, color, ctx, el, loadInt, loadStr, quietRender, save, state } from "./shared.js";
 
 // Optional module (vocal.enabled): during a mic check, listen to the shown
 // input while the person talks and suggest HPF / PEQ settings. Suggestions
@@ -12,19 +12,32 @@ let vocal = null;                 // GET /api/vocal/status; null = module off
 let vocalOpen = false;
 state.vocalOverlay = loadInt("tf.vocalOverlay", 1) === 1;
 
-export async function pollVocal() {
+// One poll loop. pollVocal(ms) moves the next poll to ``ms`` from now (a button's request
+// asks for a quick one); it never starts a second loop.
+let pollTimer = null, polling = false, stopped = false;
+export function pollVocal(delay = 0) {
+  if (stopped) return;
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(pollOnce, delay);
+}
+
+async function pollOnce() {
+  if (polling) { pollVocal(100); return; }
+  polling = true;
   let next = 3000;
   try {
     const r = await fetch("/api/vocal/status");
-    if (r.status === 404) { vocal = null; $("mic-check").hidden = true; return; }  // module off: stop
+    if (r.status === 404) { vocal = null; $("mic-check").hidden = true; stopped = true; return; }  // module off
     vocal = await r.json();
     $("mic-check").hidden = false;
     const listening = Object.values(vocal.sessions).some((s) => s.state === "listening");
     if (vocalOpen || listening) next = 500;
     renderVocal();
     state.dirty = true;
-  } catch { /* server restarting: try again */ }
-  setTimeout(pollVocal, next);
+  } catch { /* server restarting: try again */ } finally {
+    polling = false;
+  }
+  if (!stopped) pollVocal(next);
 }
 
 // Mic type and EQ style for the shown input (remembered per input in this browser).
@@ -41,7 +54,7 @@ function choiceItems(row) {
     const s = el("select", "ro-pick"); s.title = title;
     for (const m of list) { const o = el("option", "", m.label); o.value = m.id; o.title = m.note; s.append(o); }
     s.value = value;
-    s.onchange = () => { save(key(state.input), s.value); renderVocal(); };
+    s.onchange = () => { save(key(state.input), s.value); s.blur(); renderVocal(); };
     return s;
   };
   const c = micChoice();
@@ -52,12 +65,16 @@ function choiceItems(row) {
   return [row(lbl("Mic ", mic), lbl("EQ for ", style)), el("p", "vp-note", note || "")];
 }
 
+// One request at a time from the panel: a double click doesn't send it twice.
+let posting = false;
 function vocalPost(path, extra = {}) {
+  if (posting) return Promise.resolve();
+  posting = true;
   return fetch(`/api/vocal/${path}`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ channel: state.input, ...extra }),
   }).then((r) => r.json()).catch(() => ({ ok: false, error: "server unreachable" }))
-    .then((d) => { if (!d.ok && d.error) alert(d.error); setTimeout(pollVocal, 50); });
+    .then((d) => { posting = false; if (!d.ok && d.error) alert(d.error); pollVocal(50); });
 }
 
 $("mic-check").onclick = () => {
@@ -84,6 +101,12 @@ export function renderVocal() {
   const panel = $("vocal-panel");
   panel.hidden = !vocal || !vocalOpen;
   if (panel.hidden || !state.meta) return;
+  const key = JSON.stringify([state.input, vocal, micChoice(), state.vocalOverlay, state.showEq, eqAvailable,
+                              state.meta.channels[state.input]?.label]);
+  quietRender(panel, key, vocalItems);
+}
+
+function vocalItems() {
   const label = state.meta.channels[state.input]?.label ?? `In ${state.input + 1}`;
   const s = vocal.sessions[String(state.input)];
   const items = [];
@@ -170,7 +193,7 @@ export function renderVocal() {
   items.push(el("p", "vp-foot", vocal.can_write
     ? "The desk is changed only when you press Apply and confirm; Undo puts back what it replaced."
     : "Suggestions only: nothing is changed on the desk."));
-  panel.replaceChildren(...items);
+  return items;
 }
 
 // The suggestion (table, notes, overlay toggle, compare, apply), for a finished check or live.
@@ -221,7 +244,7 @@ function vocalDesk(action, label, lines) {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ channel: state.input, confirm: true }),
   }).then((r) => r.json()).catch(() => ({ ok: false, error: "server unreachable" }))
-    .then((d) => { if (!d.ok) alert(d.error || "Not applied."); setTimeout(pollVocal, 50); });
+    .then((d) => { if (!d.ok) alert(d.error || "Not applied."); pollVocal(50); });
 }
 
 // Auto EQ: on / off, undo, and what it did. Turning it on needs a confirmation; off never does.
@@ -261,7 +284,7 @@ function autoPost(extra, path = "auto") {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ channel: state.input, ...extra }),
   }).then((r) => r.json()).catch(() => ({ ok: false, error: "server unreachable" }))
-    .then((d) => { if (!d.ok) alert(d.error || "Not done."); setTimeout(pollVocal, 50); });
+    .then((d) => { if (!d.ok) alert(d.error || "Not done."); pollVocal(50); });
 }
 
 // The suggested EQ (violet, dashed) and, faintly, why: the voice vs reference speech.

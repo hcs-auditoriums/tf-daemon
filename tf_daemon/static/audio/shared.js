@@ -40,6 +40,51 @@ export function loadStr(key, def, allowed) {
 }
 export function save(key, value) { try { localStorage.setItem(key, String(value)); } catch { /* ignore */ } }
 
+// Panels that poll (the vocal assist, the ring-out popup) re-render with quietRender: only when
+// what they show changed, and never while someone is using them. Replacing the elements under
+// a press loses the click (mousedown and mouseup land on different buttons) and closes an open
+// dropdown; a render that comes then waits until the press ends or the field loses focus.
+const quiet = new WeakMap();
+
+function quietBusy(node, q) {
+  const a = document.activeElement;
+  return q.down || (a !== null && node.contains(a) && (a.tagName === "SELECT" || a.tagName === "TEXTAREA"
+    || (a.tagName === "INPUT" && a.type !== "checkbox")));
+}
+
+function quietFlush(node, q) {
+  if (!q.pending || quietBusy(node, q)) return;
+  const { key, build } = q.pending;
+  q.pending = null;
+  if (key === q.key) return;
+  q.key = key;
+  node.replaceChildren(...build());
+}
+
+export function quietRender(node, key, build) {
+  let q = quiet.get(node);
+  if (!q) {
+    q = { key: null, pending: null, down: false };
+    quiet.set(node, q);
+    const qq = q;
+    node.addEventListener("pointerdown", () => { qq.down = true; });
+    // After the click that ends the press has been handled (it fires right after pointerup).
+    const up = () => { if (qq.down) { qq.down = false; setTimeout(() => quietFlush(node, qq), 0); } };
+    document.addEventListener("pointerup", up, true);
+    document.addEventListener("pointercancel", up, true);
+    node.addEventListener("focusout", () => setTimeout(() => quietFlush(node, qq), 0));
+  }
+  if (key === q.key && !q.pending) return;
+  q.pending = { key, build };
+  quietFlush(node, q);
+}
+
+// Forget what a quietRender'd node shows (something else replaced its content).
+export function quietReset(node) {
+  const q = quiet.get(node);
+  if (q) { q.key = null; q.pending = null; }
+}
+
 export function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
