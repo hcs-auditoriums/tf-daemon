@@ -19,11 +19,7 @@ What gets read for each patched source: name, colour, fader level, on, pan
 plus the mix names. On connect the console is also asked for its parameter
 list (``prminfo``); any input-channel gain / EQ / HPF / dynamics parameters it
 lists are read as well. The TF5 this was built against lists none of those;
-its EQ is read over the TF Editor protocol instead (``tf5.eq``, tfeditor.py).
-
-USB capture channels carry whatever the TF's USB output patch routes to them;
-RCP doesn't expose that patch, so ``tf5.usb_patch`` describes it (default: the
-TF's recording patch, USB 1-32 = input channels 1-32, USB 33-34 = ST L/R).
+its EQ is read over the TF Editor protocol instead (``tf5.eq``, console/editor).
 """
 
 from __future__ import annotations
@@ -39,23 +35,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from flask import Blueprint, Flask, jsonify
-from flask_sock import Sock
-
-from .config import TF5Config
-from .tfeditor import CURVE_FREQS, TFEditorClient, eq_curve
+from .patch import source_label
 
 log = logging.getLogger(__name__)
 
 DEFAULT_PORT = 49280
-TF_INPUT_CHANNELS = 40
 TF_MIXES = 20
 TF_FX = 2
 PRMINFO_PROBE = 512   # prminfo indices asked for on connect
 NEG_INF = -32768      # fader/send level value meaning -inf dB
 SEND_CHUNK = 200      # request lines per write, so a full poll doesn't flood the console
 
-_PATCH_RE = re.compile(r"^\s*(?:(?:InCh|Ch)\s*(\d+)|St\s*([LR]))\s*$", re.IGNORECASE)
 _PREFIX = {"InCh": "MIXER:Current/InCh/", "St": "MIXER:Current/St/", "Mix": "MIXER:Current/Mix/"}
 
 
@@ -82,36 +72,6 @@ BASE_PARAMS: dict[str, list[Param]] = {
 }
 # Extra input-channel parameters taken from the console's prminfo list if present.
 EXTRA_RE = re.compile(r"^(Port/HA/|HA/|PEQ|Eq|EQ|HPF|Hpf|LPF|Dyna|Gate|Comp|Att|Delay)")
-
-
-def default_usb_patch() -> list[str]:
-    return [f"InCh {n}" for n in range(1, 33)] + ["St L", "St R"]
-
-
-def parse_patch_entry(entry: str) -> tuple[str, int] | None:
-    """``"InCh 5"`` -> ("InCh", 4); ``"St R"`` -> ("St", 1); ``""`` -> None."""
-    if not str(entry).strip():
-        return None
-    m = _PATCH_RE.match(str(entry))
-    if not m:
-        raise ValueError(f"unknown usb_patch entry {entry!r} (expected \"InCh N\", \"St L\", \"St R\" or \"\")")
-    if m.group(1):
-        n = int(m.group(1))
-        if not 1 <= n <= TF_INPUT_CHANNELS:
-            raise ValueError(f"usb_patch entry {entry!r}: input channel must be 1..{TF_INPUT_CHANNELS}")
-        return "InCh", n - 1
-    return "St", "LR".index(m.group(2).upper())
-
-
-def patch_from(cfg: TF5Config) -> list[tuple[str, int] | None]:
-    """USB capture channel i -> the console source it carries."""
-    entries = cfg.usb_patch or default_usb_patch()
-    return [parse_patch_entry(e) for e in entries]
-
-
-def source_label(src: tuple[str, int]) -> str:
-    kind, x = src
-    return f"InCh {x + 1}" if kind == "InCh" else f"St {'LR'[x]}"
 
 
 def parse_line(line: str) -> tuple[str, str, list[str]] | None:
@@ -460,138 +420,3 @@ class TF5Client:
             self.on_names(self.names())
         except Exception:
             log.exception("Applying TF5 channel names failed")
-
-
-class TF5Module:
-    """Reads the TF5's channel names and settings; feeds names to the audio engine.
-
-    With ``tf5.eq`` it also reads every channel's EQ over the TF Editor protocol
-    (tfeditor.py) for the spectrum overlay. With ``tf5.eq_write`` as well, an input
-    channel's EQ can be set (``write_eq``), only on a person's request.
-
-    ``simulator``: a simulated console (tf5sim.SimConsole, demo mode) that this
-    module owns: closed when it stops, its counters reported in its status.
-
-    Routes:
-      GET /api/tf5/status     connection state, discovered parameters
-      GET /api/tf5/channels   per USB input: console source and its settings; mix names
-      GET /api/tf5/eq/<usb>   EQ of the console channel on that USB input + its curve
-                              (404 when tf5.eq is off)
-    """
-
-    name = "tf5"
-
-    def __init__(self, cfg: TF5Config, audio_engine: Any, simulator: Any = None) -> None:
-        t = cfg
-        self.simulator = simulator
-        if t.username or t.password:
-            log.info("tf5.username/password are set, but the TF5's remote protocol has no login; not sent")
-        self.patch = patch = patch_from(cfg)
-        self.client = TF5Client(t.host, t.port, patch, t.poll_s,
-                                audio_engine.set_console_names, audio_engine.set_console_gains)
-        # USB channels carrying the stereo bus are mixes, not sources (for ring attribution).
-        audio_engine.set_bus_inputs([i for i, src in enumerate(patch) if src is not None and src[0] == "St"])
-        self.eq_client: TFEditorClient | None = None
-        self.eq_version = 0  # bumped whenever the console's mixing data (EQ included) changes
-        if t.eq:
-            self.eq_client = TFEditorClient(t.host, t.eq_port, on_change=self._eq_changed, writes=t.eq_write)
-        # Open audio pages get desk changes pushed over their /ws/audio connection.
-        audio_engine.console = self
-
-    def _eq_changed(self) -> None:
-        self.eq_version += 1
-
-    @property
-    def eq_available(self) -> bool:
-        return self.eq_client is not None
-
-    def snapshot(self) -> tuple[int, dict[str, Any]]:
-        return self.client.snapshot()
-
-    def changes_since(self, seq: int) -> tuple[int, dict[str, Any] | None]:
-        return self.client.changes_since(seq)
-
-    @property
-    def eq_writable(self) -> bool:
-        return self.eq_client is not None and self.eq_client.writes
-
-    def eq_target(self, usb: int) -> str | None:
-        """Mixing path of the input channel on USB input ``usb`` ("InputChannel:4"); None if
-        it isn't an input channel (only input channels' EQ can be written)."""
-        src = self.patch[usb] if 0 <= usb < len(self.patch) else None
-        return f"InputChannel:{src[1]}" if src is not None and src[0] == "InCh" else None
-
-    def eq_raw(self, usb: int, paths: list[str]) -> dict[str, int | str | None]:
-        """Raw values of PEQ parameters (paths relative to the channel) on USB input ``usb``."""
-        target, ec = self.eq_target(usb), self.eq_client
-        if target is None or ec is None:
-            return {p: None for p in paths}
-        return {p: ec.get(f"{target}/{p}") for p in paths}
-
-    def write_eq(self, usb: int, changes: list[tuple[str, int]]) -> list[dict[str, Any]]:
-        """SET the EQ of the input channel on USB input ``usb``: ``[(path relative to the
-        channel, raw value)]``. Only on a person's request (see TFEditorClient.write)."""
-        target, ec = self.eq_target(usb), self.eq_client
-        if ec is None or not ec.writes:
-            raise PermissionError("writing to the console is off (tf5.eq_write = false)")
-        if target is None:
-            raise ValueError(f"USB {usb + 1} doesn't carry an input channel; only input channel EQ can be set")
-        results = ec.write([(f"{target}/{p}", v) for p, v in changes])
-        for r in results:
-            r["path"] = r["path"].split("/", 1)[1]
-        return results
-
-    def eq(self, usb: int) -> dict[str, Any]:
-        """EQ of the console channel feeding USB input ``usb`` and its response curve (dB)."""
-        ec = self.eq_client
-        assert ec is not None
-        src = self.patch[usb] if 0 <= usb < len(self.patch) else None
-        settings = ec.eq(*src) if src is not None else None
-        return {
-            "index": usb,
-            "source": source_label(src) if src is not None else None,
-            "connected": ec.connected,
-            "synced": ec.synced,
-            "eq": settings,
-            "freqs": [round(float(f), 2) for f in CURVE_FREQS] if settings else [],
-            "curve": [round(float(v), 2) for v in eq_curve(settings)] if settings else [],
-        }
-
-    def register(self, app: Flask, sock: Sock) -> None:
-        client = self.client
-        bp = Blueprint("tf5", __name__, url_prefix="/api/tf5")
-
-        @bp.get("/status")
-        def status():
-            return jsonify(self.status())
-
-        @bp.get("/channels")
-        def channels():
-            return jsonify({"connected": client.connected, "channels": client.channels(),
-                            "mixes": client.mixes()})
-
-        @bp.get("/eq/<int:usb>")
-        def eq(usb: int):
-            if self.eq_client is None:
-                return jsonify({"error": "tf5.eq is off"}), 404
-            return jsonify(self.eq(usb))
-
-        app.register_blueprint(bp)
-
-    def start(self) -> None:
-        self.client.start()
-        if self.eq_client is not None:
-            self.eq_client.start()
-
-    def stop(self) -> None:
-        self.client.stop()
-        if self.eq_client is not None:
-            self.eq_client.stop()
-        if self.simulator is not None:
-            self.simulator.close()
-
-    def status(self) -> dict[str, Any]:
-        st = self.client.status()
-        st["eq"] = self.eq_client.status() if self.eq_client is not None else None
-        st["simulator"] = self.simulator.status() if self.simulator is not None else None
-        return st

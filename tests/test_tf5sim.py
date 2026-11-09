@@ -1,13 +1,14 @@
-"""The simulated TF5 (tf_daemon.tf5sim) and demo mode (--tf5-source demo / --demo)."""
+"""The simulated TF5 (tf_daemon.console.sim) and demo mode (--tf5-source demo / --demo)."""
 
 import pytest
+from editor_fakes import wait_until
 from helpers import make_config
-from tfeditor_fakes import wait_until
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError
-from tf_daemon.tf5 import TF5Client, default_usb_patch, parse_patch_entry
-from tf_daemon.tf5sim import DEMO_INPUTS, RCP_PREFIX, SimConsole, SimRCP
+from tf_daemon.console.patch import default_usb_patch, parse_patch_entry
+from tf_daemon.console.rcp import TF5Client
+from tf_daemon.console.sim import DEMO_INPUTS, RCP_PREFIX, SimConsole, SimRCP
 
 PATCH = [parse_patch_entry(e) for e in default_usb_patch()]
 

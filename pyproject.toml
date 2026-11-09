@@ -32,6 +32,8 @@ tf_daemon = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Shared test modules (helpers, editor_fakes, tf_editor_reference) are imported from tests/ subdirectories too.
+pythonpath = ["tests"]
 
 [tool.ruff]
 line-length = 120

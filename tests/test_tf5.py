@@ -9,82 +9,22 @@ from tf_daemon.app import build_modules, create_app
 from tf_daemon.audio.engine import AudioEngine
 from tf_daemon.audio.sources import SynthSource
 from tf_daemon.config import ConfigError, load_config
-from tf_daemon.tf5 import TF5Client, default_usb_patch, parse_line, parse_patch_entry
+from tf_daemon.console.patch import default_usb_patch, parse_patch_entry
+from tf_daemon.console.rcp import TF5Client, parse_line
+from tf_daemon.console.sim import SimRCP
 
 INCH = "MIXER:Current/InCh/"
 ST = "MIXER:Current/St/"
 
 
-class FakeTF5:
-    """Answers RCP get/prminfo like the console; can push NOTIFY lines."""
-
-    PRMINFO = [  # the shape of the TF's published list, plus one extra the client should pick up
-        f'"{INCH}Fader/Level" 40 0 -32768 1000 -32768 "dB" integer any rw 100',
-        f'"{INCH}Label/Name" 40 0 0 64 "ch 1" "" string any rw 1',
-        f'"{INCH}Port/HA/Gain" 40 1 -600 6600 -600 "dB" integer any rw 100',
-        f'"{INCH}ToMix/Level" 40 20 -32768 1000 -32768 "dB" integer any rw 100',
-        f'"{INCH}PEQ/Band/Gain" 40 4 -1800 1800 0 "dB" integer any rw 100',  # has a y dimension: not an extra
-    ]
-
-    def __init__(self, values):
-        self.values = values  # (addr, x) or (addr, x, y) -> raw reply token
-        self.srv = socket.create_server(("127.0.0.1", 0))
-        self.port = self.srv.getsockname()[1]
-        self.conns: list[socket.socket] = []
-        self.requests: list[str] = []
-        threading.Thread(target=self._accept, daemon=True).start()
-
-    def _accept(self):
-        while True:
-            try:
-                conn, _ = self.srv.accept()
-            except OSError:
-                return
-            self.conns.append(conn)
-            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
-
-    def _serve(self, conn):
-        buf = b""
-        try:
-            while chunk := conn.recv(65536):
-                buf += chunk
-                *lines, buf = buf.split(b"\n")
-                out = []
-                for raw in lines:
-                    line = raw.decode()
-                    self.requests.append(line)
-                    parts = line.split()
-                    if parts[0] == "prminfo":
-                        i = int(parts[1])
-                        out.append(f"OK prminfo {i} {self.PRMINFO[i]}" if i < len(self.PRMINFO)
-                                   else f"ERROR prminfo {i} UnknownIndex")
-                    elif parts[0] == "get":
-                        addr, x, y = parts[1], int(parts[2]), int(parts[3])
-                        value = self.values.get((addr, x, y), self.values.get((addr, x)) if y == 0 else None)
-                        if value is not None:
-                            out.append(f"OK get {addr} {x} {y} {value}")
-                        else:
-                            out.append(f"ERROR get {addr} InvalidArgument")
-                conn.sendall("".join(o + "\n" for o in out).encode())
-        except OSError:
-            pass
-
-    def push(self, line):
-        for c in self.conns:
-            c.sendall((line + "\n").encode())
-
-    def drop_connections(self):
-        for c in self.conns:
-            try:
-                c.shutdown(socket.SHUT_RDWR)   # close() alone may not send a FIN on Linux while _serve is in recv
-            except OSError:
-                pass
-            c.close()
-        self.conns.clear()
-
-    def close(self):
-        self.drop_connections()
-        self.srv.close()
+# The shape of the TF's published parameter list, plus one extra the client should pick up.
+PRMINFO = [
+    f'"{INCH}Fader/Level" 40 0 -32768 1000 -32768 "dB" integer any rw 100',
+    f'"{INCH}Label/Name" 40 0 0 64 "ch 1" "" string any rw 1',
+    f'"{INCH}Port/HA/Gain" 40 1 -600 6600 -600 "dB" integer any rw 100',
+    f'"{INCH}ToMix/Level" 40 20 -32768 1000 -32768 "dB" integer any rw 100',
+    f'"{INCH}PEQ/Band/Gain" 40 4 -1800 1800 0 "dB" integer any rw 100',  # has a y dimension: not an extra
+]
 
 
 def wait_until(pred, timeout=5.0):
@@ -144,23 +84,23 @@ def test_config_validation(tmp_path):
 
 @pytest.fixture
 def console():
-    tf = FakeTF5({
-        (INCH + "Label/Name", 0): '"Kick"',
-        (INCH + "Label/Name", 1): '"Lead Vox"',
-        (INCH + "Fader/Level", 1): "-1250",
-        (INCH + "Fader/On", 1): "1",
-        (INCH + "ToStereo/Pan", 1): "-20",
-        (INCH + "Label/Color", 1): '"Blue"',
-        (INCH + "Port/HA/Gain", 1): "3150",
-        (ST + "Label/Name", 0): '"ST L"',
-        (ST + "Fader/Level", 0): "-32768",
+    tf = SimRCP({
+        (INCH + "Label/Name", 0, 0): '"Kick"',
+        (INCH + "Label/Name", 1, 0): '"Lead Vox"',
+        (INCH + "Fader/Level", 1, 0): "-1250",
+        (INCH + "Fader/On", 1, 0): "1",
+        (INCH + "ToStereo/Pan", 1, 0): "-20",
+        (INCH + "Label/Color", 1, 0): '"Blue"',
+        (INCH + "Port/HA/Gain", 1, 0): "3150",
+        (ST + "Label/Name", 0, 0): '"ST L"',
+        (ST + "Fader/Level", 0, 0): "-32768",
         (INCH + "ToMix/Level", 1, 0): "-32768",
         (INCH + "ToMix/Level", 1, 7): "-600",
         (INCH + "ToMix/On", 1, 7): "1",
         (INCH + "ToFx/Level", 1, 1): "-1000",
-        ("MIXER:Current/Mix/Label/Name", 0): '"STAGE"',
-        ("MIXER:Current/Mix/Label/Name", 7): '"DRUM"',
-    })
+        ("MIXER:Current/Mix/Label/Name", 0, 0): '"STAGE"',
+        ("MIXER:Current/Mix/Label/Name", 7, 0): '"DRUM"',
+    }, prminfo=PRMINFO)
     yield tf
     tf.close()
 
@@ -190,7 +130,7 @@ def test_names_and_settings_flow_into_the_engine(console):
         assert client.channels()[2]["params"]["Fader/Level"]["value"] is None  # -inf
         assert client.channels()[3] == {"index": 3, "source": None, "params": {}}
         assert client.status()["extra_params"] == ["Port/HA/Gain"]
-        assert not any("PEQ" in r for r in console.requests if r.startswith("get"))
+        assert not any("PEQ" in r for r in console.received if r.startswith("get"))
 
         # Sends come back as one value per mix / FX; mix names are read too.
         sends = ch["params"]["ToMix/Level"]["value"]
@@ -211,9 +151,9 @@ def test_names_and_settings_flow_into_the_engine(console):
         wait_until(lambda: 1 in engine._console_gains and engine._console_gains[1] is None)  # off: out of the loop
 
         # A scene recall makes the client read everything again.
-        n_gets = sum(r.startswith("get") for r in console.requests)
+        n_gets = sum(r.startswith("get") for r in console.received)
         console.push("NOTIFY sscurrent_ex scene_a 3")
-        wait_until(lambda: sum(r.startswith("get") for r in console.requests) > n_gets)
+        wait_until(lambda: sum(r.startswith("get") for r in console.received) > n_gets)
     finally:
         client.stop()
 
@@ -294,7 +234,6 @@ def test_change_feed(console):
 
 def test_desk_changes_reach_the_page_over_the_websocket(console):
     import json
-    import threading
 
     from simple_websocket import Client
     from werkzeug.serving import make_server
