@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, Protocol
 
 from flask import Blueprint, Flask, jsonify, request
 from flask_sock import ConnectionClosed, Sock
@@ -35,11 +35,28 @@ from .engine import AudioEngine
 log = logging.getLogger(__name__)
 
 
+class ConsoleFeed(Protocol):
+    """The mixing console's state, pushed to open audio pages (console.module.TF5Module)."""
+
+    @property
+    def eq_available(self) -> bool: ...
+
+    @property
+    def eq_version(self) -> int: ...   # changes whenever any channel's EQ may have
+
+    def snapshot(self) -> tuple[int, dict[str, Any]]: ...
+
+    def changes_since(self, seq: int) -> tuple[int, dict[str, Any] | None]: ...
+
+    def eq(self, usb: int) -> dict[str, Any]: ...
+
+
 class AudioModule:
     name = "audio"
 
-    def __init__(self, engine: AudioEngine) -> None:
+    def __init__(self, engine: AudioEngine, console: ConsoleFeed | None = None) -> None:
         self.engine = engine
+        self.console = console  # None: no TF5; pages get no desk state
 
     def start(self) -> None:
         self.engine.start()
@@ -51,7 +68,7 @@ class AudioModule:
         return self.engine.status()
 
     def register(self, app: Flask, sock: Sock) -> None:
-        engine = self.engine
+        engine, console = self.engine, self.console
         bp = Blueprint("audio", __name__, url_prefix="/api/audio")
 
         @bp.get("/meta")
@@ -101,7 +118,6 @@ class AudioModule:
             meta_version = engine.meta_version
             ws.send(json.dumps(engine.metadata()))
             rings_version, rings_sent = None, 0.0
-            console = engine.console
             tf5_seq, eq_sent = 0, None
             if console is not None:
                 tf5_seq, snap = console.snapshot()
@@ -132,7 +148,7 @@ class AudioModule:
                     engine.release(index)
 
 
-def _send_console(ws, console: Any, tf5_seq: int, view: list[int], eq_sent: Any) -> tuple[int, Any]:
+def _send_console(ws, console: ConsoleFeed, tf5_seq: int, view: list[int], eq_sent: Any) -> tuple[int, Any]:
     """Push what changed on the desk since ``tf5_seq``, and the viewed input's EQ when it changes."""
     tf5_seq, msg = console.changes_since(tf5_seq)
     if msg is None:  # fell too far behind: start over from a snapshot

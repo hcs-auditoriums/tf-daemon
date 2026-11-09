@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -24,7 +25,7 @@ from .rf.devices import DemoDevice, RFDevice, TinySADevice
 from .rf.engine import RangeHint, RFEngine, fit_span
 from .rf.module import RFModule
 from .system import register_system
-from .vocal import VocalModule
+from .vocal.module import VocalModule
 
 log = logging.getLogger(__name__)
 
@@ -51,12 +52,17 @@ def build_modules(cfg: Config) -> list[Module]:
     picks the real hardware, a simulation, or off."""
     audio = AudioEngine(cfg, build_source(cfg))
     qlxd = QLXDEngine(cfg.qlxd) if cfg.qlxd.source != "off" else None
+    # The console names the inputs, its faders weight ring attribution, and its
+    # stereo bus inputs are mixes rather than sources.
+    tf5 = _tf5_module(cfg, on_names=audio.set_console_names, on_gains=audio.set_console_gains)
+    if tf5 is not None:
+        audio.set_bus_inputs(tf5.bus_inputs())
     modules: list[Module | None] = [
-        AudioModule(audio),
+        AudioModule(audio, console=tf5),
         _rf_module(cfg, qlxd),
         QLXDModule(qlxd) if qlxd is not None else None,
-        _tf5_module(cfg, audio),
-        VocalModule(cfg.vocal, audio, cfg.audio.samplerate) if cfg.vocal.enabled else None,
+        tf5,
+        VocalModule(cfg.vocal, audio, cfg.audio.samplerate, desk=tf5) if cfg.vocal.enabled else None,
     ]
     return [m for m in modules if m is not None]
 
@@ -68,16 +74,17 @@ def _rf_module(cfg: Config, qlxd: QLXDEngine | None) -> RFModule | None:
     return RFModule(RFEngine(cfg.rf, device, range_hint=receiver_range(qlxd)))
 
 
-def _tf5_module(cfg: Config, audio: AudioEngine) -> TF5Module | None:
+def _tf5_module(cfg: Config, on_names: Callable[[dict[int, str]], None],
+                on_gains: Callable[[dict[int, float | None]], None]) -> TF5Module | None:
     source = cfg.tf5.active_source
     if source == "off":
         return None
     if source == "device":
-        return TF5Module(cfg.tf5, audio)
+        return TF5Module(cfg.tf5, on_names, on_gains)
     # Demo: a simulated console on free local ports, with EQ read and write on.
     sim = SimConsole()
     demo = replace(cfg.tf5, host=sim.host, port=sim.rcp_port, eq_port=sim.eq_port, eq=True, eq_write=True)
-    return TF5Module(demo, audio, simulator=sim)
+    return TF5Module(demo, on_names, on_gains, simulator=sim)
 
 
 def receiver_range(qlxd: QLXDEngine | None) -> RangeHint | None:
