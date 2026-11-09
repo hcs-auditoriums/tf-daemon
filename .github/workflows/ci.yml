@@ -1,36 +1,118 @@
-# Lint, type-check and test in the dev container (compose.yaml), the same
+# Lint, type-check and test inside the dev container image, the same
 # environment as `./dev test` locally, with the demo server running for
-# tests/test_live.py.
+# tests/test_live.py and tests/test_browser.py.
+#
+# The image is built only when the Dockerfile or the dependency lists change,
+# and kept in GHCR under a tag derived from them; every other run just pulls it
+# and runs the job inside it (no Docker Compose, no build).
 name: CI
 
 on:
   push:
     branches: [main]
+    paths-ignore: ["**.md", "guides/**"]
   pull_request:
+    paths-ignore: ["**.md", "guides/**"]
+  workflow_dispatch:
+
+# A new push to a PR cancels its run in progress.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/tf-daemon-dev
 
 jobs:
+  image:
+    name: Dev image
+    runs-on: ubuntu-26.04   # pinned: the runner image changes only when we change it
+    timeout-minutes: 20
+    outputs:
+      ref: ${{ steps.tag.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            .devcontainer
+            pyproject.toml
+            .dockerignore
+          sparse-checkout-cone-mode: false
+
+      - name: Tag from the Dockerfile and the dependencies
+        id: tag
+        # Only what goes into the image: editing ruff / pytest settings in
+        # pyproject.toml doesn't rebuild it.
+        run: |
+          deps=$(python3 -c 'import tomllib; p = tomllib.load(open("pyproject.toml", "rb"))["project"]; print(sorted(p["dependencies"]), sorted(p["optional-dependencies"].items()))')
+          hash=$({ cat .devcontainer/Dockerfile .dockerignore; echo "$deps"; } | sha256sum | cut -c1-16)
+          echo "ref=${IMAGE,,}:deps-$hash" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Already built?
+        id: exists
+        run: |
+          if docker manifest inspect "${{ steps.tag.outputs.ref }}" > /dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.exists.outputs.found != 'true'
+        uses: docker/setup-buildx-action@v4
+
+      - if: steps.exists.outputs.found != 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: .devcontainer/Dockerfile
+          push: true
+          tags: ${{ steps.tag.outputs.ref }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   check:
-    # Pinned, so the runner image changes only when we change it. The tests run
-    # in the dev container, so the host only needs Docker.
+    needs: image
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
+    timeout-minutes: 10
+    container:
+      image: ${{ needs.image.outputs.ref }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user root   # the checkout belongs to the runner, not the image's dev user
     env:
-      DEV_UID: "1001"   # the runner's user, so the container can write to the checkout
+      TF_DAEMON_URL: http://127.0.0.1:8080
+      PYTEST_ADDOPTS: -n auto --dist worksteal
     steps:
       - uses: actions/checkout@v7
 
-      - name: Start the dev container
-        run: docker compose up -d --build --wait
+      - name: Start the demo server
+        run: |
+          echo "PYTHONPATH=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          export PYTHONPATH="$GITHUB_WORKSPACE"
+          nohup python -m tf_daemon --demo --config config.dev.toml > server.log 2>&1 &
+          for _ in $(seq 60); do curl -fs -o /dev/null "$TF_DAEMON_URL/api/status" && exit 0; sleep 0.5; done
+          cat server.log; exit 1
 
       - name: Lint (ruff)
-        run: docker compose exec -T app ruff check --output-format github .
+        run: ruff check --output-format github .
 
       - name: Type-check (mypy)
-        run: docker compose exec -T app mypy
+        run: mypy
 
       - name: Tests
-        run: docker compose exec -T app pytest -q
+        run: pytest -q
 
       - name: Server log
         if: always()
-        run: docker compose logs app
+        run: cat server.log

@@ -118,7 +118,10 @@ these tests skip, unless you point `TF_DAEMON_URL` at a server started with
 chromium`). If you've just saved a file, they wait for the server to come back.
 
 CI (`.github/workflows/ci.yml`) runs `ruff`, `mypy` and the tests in this same
-container on every pull request and push to `main`. `./dev lint` and `./dev test`
+container image on every pull request and push to `main` (changes to Markdown
+files or `guides/` alone skip it). The image is built only when
+`.devcontainer/Dockerfile` or the dependency lists in `pyproject.toml` change, and
+kept in GHCR as `tf-daemon-dev:deps-<hash>`; other runs pull it and run inside it. `./dev lint` and `./dev test`
 run the same checks locally. `ruff check --fix .` fixes the simple cases (import order,
 unused imports). The settings for both tools are in `pyproject.toml`.
 
