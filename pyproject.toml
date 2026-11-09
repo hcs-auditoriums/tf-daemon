@@ -32,6 +32,7 @@ tf_daemon = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--tb=short"   # short failure output
 # Shared test modules (helpers, editor_fakes, tf_editor_reference) are imported from tests/ subdirectories too.
 pythonpath = ["tests"]
 

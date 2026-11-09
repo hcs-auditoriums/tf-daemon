@@ -89,14 +89,20 @@ The full `docker compose` commands they run:
 | Rebuild after a dependency change | `docker compose up -d --build` |
 
 Inside the container, `pytest` runs on every core (`PYTEST_ADDOPTS` in
-`compose.yaml`) and includes `tests/test_live.py`, which checks the running
+`compose.yaml`) and includes `tests/test_live.py`, which checks a running
 server end to end: every simulated device up, the pages, the console's names
 and EQ, and the WebSockets. `tests/test_browser.py` loads the pages in headless
 Chromium (Playwright, in the dev image) and fails on any script error, a plot
-that stops drawing, or a control that no longer works. Outside the container
-these tests skip, unless you point `TF_DAEMON_URL` at a server started with
-`--demo` (and, for the browser ones, `pip install playwright && playwright install
-chromium`). If you've just saved a file, they wait for the server to come back.
+that stops drawing, or a control that no longer works. Both run against a
+private demo server that `tests/conftest.py` starts for the run (a free port,
+throwaway state files), not the dev server on :8080: saving a file doesn't
+restart it mid-test, and the tests can't change your demo. It only starts when
+the run includes those tests, so `pytest tests/test_dsp.py` stays instant. Set
+`TF_DAEMON_URL` to use a server of your own instead (outside the container the
+browser tests also need `pip install playwright && playwright install chromium`).
+
+Run the tests for what you changed first (`pytest tests/test_x.py` or `-k name`)
+and the whole suite once at the end; failures print short tracebacks.
 
 CI (`.github/workflows/ci.yml`) runs `ruff`, `mypy` and the tests in this same
 container image on every pull request and push to `main` (changes to Markdown

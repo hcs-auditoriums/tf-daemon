@@ -1,7 +1,7 @@
 """The pages in a real (headless) browser, against the running demo server.
 
-Like tests/test_live.py these need TF_DAEMON_URL (set in the dev container) and
-skip without it; they also need Playwright's Chromium, which the dev image has.
+Like tests/test_live.py these run against tests/conftest.py's private demo server
+(or TF_DAEMON_URL); they also need Playwright's Chromium, which the dev image has.
 They catch what the Python tests can't: a script error, a page that stops
 drawing, a control that no longer does anything. Read-only, like the live tests:
 nothing here changes the server's state (no mic check is started, no peak reset).

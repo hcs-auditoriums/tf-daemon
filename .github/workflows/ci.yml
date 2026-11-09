@@ -1,6 +1,6 @@
 # Lint, type-check and test inside the dev container image, the same
-# environment as `./dev test` locally, with the demo server running for
-# tests/test_live.py and tests/test_browser.py.
+# environment as `./dev test` locally (the tests start their own demo server for
+# tests/test_live.py and tests/test_browser.py: tests/conftest.py).
 #
 # The image is built only when the Dockerfile or the dependency lists change,
 # and kept in GHCR under a tag derived from them; every other run just pulls it
@@ -91,18 +91,12 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
       options: --user root   # the checkout belongs to the runner, not the image's dev user
     env:
-      TF_DAEMON_URL: http://127.0.0.1:8080
       PYTEST_ADDOPTS: -n auto --dist worksteal
     steps:
       - uses: actions/checkout@v7
 
-      - name: Start the demo server
-        run: |
-          echo "PYTHONPATH=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-          export PYTHONPATH="$GITHUB_WORKSPACE"
-          nohup python -m tf_daemon --demo --config config.dev.toml > server.log 2>&1 &
-          for _ in $(seq 60); do curl -fs -o /dev/null "$TF_DAEMON_URL/api/status" && exit 0; sleep 0.5; done
-          cat server.log; exit 1
+      - name: Put the checkout on the import path
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
 
       - name: Lint (ruff)
         run: ruff check --output-format github .
@@ -116,6 +110,3 @@ jobs:
       - name: Tests
         run: pytest -q
 
-      - name: Server log
-        if: always()
-        run: cat server.log
