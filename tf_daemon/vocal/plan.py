@@ -9,7 +9,8 @@ def _band_path(label: str) -> str:
     """Suggestion / console band label -> PEQ path relative to the channel."""
     if label in ("L", "H"):
         return f"PEQ/Bank/Band{label}"
-    return f"PEQ/Bank/Band:{int(label) - 1}"
+    mid = {"LM": 0, "HM": 1}.get(label)
+    return f"PEQ/Bank/Band:{mid if mid is not None else int(label) - 1}"
 
 
 def eq_plan(result: dict[str, Any], current: dict[str, Any]) -> tuple[list[tuple[str, int]], list[str]]:

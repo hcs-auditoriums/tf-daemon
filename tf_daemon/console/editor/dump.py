@@ -215,6 +215,9 @@ def dump_blob(msg: Message) -> bytes | None:
 
 # ---------------------------------------------------------------------- EQ
 
+# The mid bands as the TF5 labels them (low-mid, high-mid); numbered if a console has another count.
+MID_LABELS = ["LM", "HM"]
+
 # Console source (console/patch.py kinds) -> Mixing collection.
 COLLECTIONS = {"InCh": "InputChannel", "St": "Stereo"}
 
@@ -242,7 +245,7 @@ def channel_eq(dump: Dump, kind: str, x: int) -> dict[str, Any] | None:
         n_mid = dump.root.child(col).child("PEQ").child("Bank").child("Band").arraysize \
             if _has_col(dump, col, "Band") else 0
         for i in range(n_mid):
-            eq["bands"].append(_band(g, f"{bank}Band:{i}", str(i + 1)))
+            eq["bands"].append(_band(g, f"{bank}Band:{i}", MID_LABELS[i] if n_mid == len(MID_LABELS) else str(i + 1)))
         eq["bands"].append(_band(g, bank + "BandH", "H", high=True))
     except (KeyError, ProtocolError):
         return None

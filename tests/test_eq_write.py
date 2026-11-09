@@ -176,14 +176,14 @@ def test_config(tmp_path):
 def _current(on=True, one_knob=False, h_type="high_shelf"):
     return {"on": on, "bank": "BOLD", "one_knob": one_knob, "hpf": {"on": False, "freq": 100.0, "slope": 12},
             "bands": [{"label": "L", "type": "low_shelf", "on": True, "freq": 125.0, "gain": 2.0, "q": 0.7},
-                      {"label": "1", "type": "bell", "on": True, "freq": 1000.0, "gain": 0.0, "q": 0.7},
-                      {"label": "2", "type": "bell", "on": True, "freq": 4000.0, "gain": -3.0, "q": 0.7},
+                      {"label": "LM", "type": "bell", "on": True, "freq": 1000.0, "gain": 0.0, "q": 0.7},
+                      {"label": "HM", "type": "bell", "on": True, "freq": 4000.0, "gain": -3.0, "q": 0.7},
                       {"label": "H", "type": h_type, "on": True, "freq": 10000.0, "gain": 4.6, "q": 0.7}]}
 
 
 RESULT = {"ok": True, "hpf": {"band": "HPF", "freq": 80.0},
           "bands": [{"band": "L", "type": "bell", "freq": 340.0, "gain": -4.0, "q": 1.4},
-                    {"band": "2", "type": "bell", "freq": 3400.0, "gain": -3.0, "q": 12.0}]}
+                    {"band": "HM", "type": "bell", "freq": 3400.0, "gain": -3.0, "q": 12.0}]}
 
 
 def test_plan_makes_the_desk_match_the_suggestion():

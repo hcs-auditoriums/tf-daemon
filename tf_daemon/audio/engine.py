@@ -110,6 +110,7 @@ class AudioEngine:
         # are the pinned inputs until the TF5 patch says otherwise.
         self._bus_inputs: frozenset[int] = self._pinned
         self._taps: list[Any] = []  # add_tap(): optional modules that see each analyzed input's samples
+        self._frame_taps: list[Any] = []  # add_frame_tap(): the same, all inputs of a hop at once
         self._console_gains: dict[int, float | None] = {}  # input -> fader dB, None = off / -inf
         self._usb_post_fader = cfg.tf5.usb_post_fader
         self._attr_n = self._ring_settings.n_fft if self._ring_settings else 0
@@ -178,6 +179,12 @@ class AudioEngine:
         keep). Runs on the analysis thread, so it must be quick.
         """
         self._taps.append(fn)
+
+    def add_frame_tap(self, fn: Any) -> None:
+        """Call ``fn(frames, stream_t)`` once per hop with ``{input: samples}`` for every
+        analyzed input, all from the same moment (for comparing inputs, e.g. a mic with
+        the mains). Same rules as add_tap."""
+        self._frame_taps.append(fn)
 
     def set_console_gains(self, gains: dict[int, float | None]) -> None:
         """Fader level (dB) per input from the mixer; None = channel off or fader at -inf (thread-safe)."""
@@ -335,6 +342,10 @@ class AudioEngine:
                         self.rings.update(index, self.inputs[index].name, rings, wall_t)
                     for tap in self._taps:
                         tap(index, frame[row], stream_t)
+                if self._frame_taps:
+                    frames = {index: frame[row] for row, (index, _) in enumerate(active)}
+                    for ftap in self._frame_taps:
+                        ftap(frames, stream_t)
                 self._publish(active)
                 if detectors and self._frames % self.ATTRIBUTE_EVERY == 0:
                     self._attribute()

@@ -64,7 +64,7 @@ def test_eq_route(console):
         wait_until(lambda: c.get("/api/tf5/eq/0").get_json()["synced"])
         d = c.get("/api/tf5/eq/0").get_json()
         assert d["index"] == 0 and d["source"] == "InCh 1" and d["connected"]
-        assert d["eq"]["bands"][1] == {"label": "1", "type": "bell", "on": True, "freq": 800.0, "gain": -14.1,
+        assert d["eq"]["bands"][1] == {"label": "LM", "type": "bell", "on": True, "freq": 800.0, "gain": -14.1,
                                          "q": 0.25}
         assert len(d["freqs"]) == len(d["curve"]) == 241
         assert d["freqs"][0] == 20.0 and d["freqs"][-1] == 20000.0

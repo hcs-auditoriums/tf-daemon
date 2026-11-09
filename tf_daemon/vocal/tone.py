@@ -28,7 +28,7 @@ analyze() then:
   4. suggests a high-pass just under the voice's lowest pitch;
   5. names each move after the usual vocal descriptors (boomy, boxy, woody,
      nasal, tinny, harsh, sibilant; presence, air) and assigns it to a TF5
-     PEQ band (L, 1, 2, H) by frequency.
+     PEQ band (L, LM, HM, H) by frequency.
 
 The descriptors are a vocabulary for where an issue sits, not a diagnosis:
 "nasal" and "honky" overlap, and part of nasality is how a person talks. For
@@ -65,7 +65,7 @@ CUT_NAMES = [(0, 250, "boomy / muddy"), (250, 500, "boxy"), (500, 800, "woody / 
 BOOST_NAMES = [(0, 5000, "presence (clarity)"), (5000, 20000, "air")]
 
 # TF5 input PEQ bands and the range each is most at home in.
-SLOTS = [("L", 0, 400), ("1", 250, 1600), ("2", 1000, 5000), ("H", 3500, 20000)]
+SLOTS = [("L", 0, 400), ("LM", 250, 1600), ("HM", 1000, 5000), ("H", 3500, 20000)]
 
 
 def _name(table: Sequence[tuple[float, float, str]], f: float) -> str:
@@ -93,7 +93,7 @@ def q_for_octaves(n: float) -> float:
 
 def _band_levels(collector: VoiceCollector, centres: np.ndarray, width_oct: float) -> np.ndarray:
     """Mean LTAS power density (dB) in bands of ``width_oct`` around each centre."""
-    p = collector.ltas / max(collector.active_frames, 1)
+    p = collector.mean_ltas
     f = collector.freqs
     out = np.empty(len(centres))
     for i, fc in enumerate(centres):
@@ -167,7 +167,7 @@ def _resonances(collector: VoiceCollector, f0: float | None, limit: int = 2) -> 
     """Narrow peaks in the LTAS: 6 dB above the median of the +-1/8 octave around
     them, at most 1/8 octave wide at half power, 500 Hz-8 kHz (lower down the
     voice's first harmonics stay peaky), and not a harmonic of the voice."""
-    p = collector.ltas / max(collector.active_frames, 1)
+    p = collector.mean_ltas
     db = 10 * np.log10(p + 1e-30)
     f = collector.freqs
     df = f[1]

@@ -25,8 +25,8 @@ class Desk(FlatDesk):
 def bell(f, g, q):
     flat = {"type": "bell", "on": True, "gain": 0.0, "q": 1.0}
     return {"on": True, "bank": "PRECISE", "one_knob": False, "hpf": None, "bands": [
-        {**flat, "label": "L", "freq": 100.0}, {**flat, "label": "1", "freq": f, "gain": g, "q": q},
-        {**flat, "label": "2", "freq": 3000.0}, {**flat, "label": "H", "freq": 8000.0}]}
+        {**flat, "label": "L", "freq": 100.0}, {**flat, "label": "LM", "freq": f, "gain": g, "q": q},
+        {**flat, "label": "HM", "freq": 3000.0}, {**flat, "label": "H", "freq": 8000.0}]}
 
 
 def run(desk, seconds, leak=-40.0, talkers=(0,), house=31):

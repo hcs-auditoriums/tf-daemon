@@ -126,8 +126,8 @@ def test_channel_eq_input_channel(mixing):
         "hpf": {"on": True, "freq": 200.0, "slope": 12},
         "bands": [
             {"label": "L", "type": "bell", "on": True, "freq": 160.0, "gain": -5.2, "q": 0.14},
-            {"label": "1", "type": "bell", "on": True, "freq": 800.0, "gain": -14.1, "q": 0.25},
-            {"label": "2", "type": "bell", "on": True, "freq": 3350.0, "gain": -5.7, "q": 0.35},
+            {"label": "LM", "type": "bell", "on": True, "freq": 800.0, "gain": -14.1, "q": 0.25},
+            {"label": "HM", "type": "bell", "on": True, "freq": 3350.0, "gain": -5.7, "q": 0.35},
             {"label": "H", "type": "high_shelf", "on": True, "freq": 10000.0, "gain": 4.6, "q": 0.7},
         ]}
     eq2 = channel_eq(mixing, "InCh", 1)
@@ -137,7 +137,7 @@ def test_channel_eq_input_channel(mixing):
 
 def test_channel_eq_stereo_bus(mixing):
     st_l, st_r = channel_eq(mixing, "St", 0), channel_eq(mixing, "St", 1)
-    assert st_l["hpf"] is None and [b["label"] for b in st_l["bands"]] == ["L", "1", "2", "H"]
+    assert st_l["hpf"] is None and [b["label"] for b in st_l["bands"]] == ["L", "LM", "HM", "H"]
     assert st_l["bands"][0]["type"] == "bell"
     assert st_r["bands"][0] == {"label": "L", "type": "hpf", "on": True, "freq": 80.0, "gain": 0.0, "q": 0.7}
     assert st_r["bands"][2]["gain"] == -3.0
@@ -161,7 +161,7 @@ def test_band_types(band, values, expect, on):
     v = default_mixing_values()
     v.update({f"InputChannel:4/PEQ/Bank/{band}/{k}": val for k, val in values.items()})
     eq = channel_eq(Dump(build_dump(mixing_tree(), v)), "InCh", 4)
-    label = {"BandL": "L", "BandH": "H", "Band:0": "1", "Band:1": "2"}[band]
+    label = {"BandL": "L", "BandH": "H", "Band:0": "LM", "Band:1": "HM"}[band]
     b = next(b for b in eq["bands"] if b["label"] == label)
     assert (b["type"], b["on"]) == (expect, on)
 

@@ -176,3 +176,22 @@ def test_ring_list_opens(page):
     alert.click()
     page.locator("#ring-list").wait_for(state="visible", timeout=3000)
     assert "Hz" in page.locator("#ring-list").inner_text()
+
+
+def test_live_listening_starts_and_clears(page):
+    _open(page, "/")
+    page.locator("#mic-check").wait_for(state="visible", timeout=8000)
+    page.wait_for_function("document.getElementById('input') !== null", timeout=8000)
+    channel = int(page.locator("#input").input_value())
+    page.locator("#mic-check").click()
+    panel = page.locator("#vocal-panel")
+    panel.wait_for(state="visible", timeout=4000)
+    try:
+        panel.get_by_role("button", name="Listen live").click()
+        page.locator("#vocal-panel .vp-live").wait_for(timeout=5000)   # "● Live · heard …"
+        panel.get_by_role("button", name="Stop").wait_for(timeout=2000)
+    finally:   # leave the shared demo server as it was
+        page.evaluate("""(ch) => fetch('/api/vocal/clear', {method: 'POST',
+                         headers: {'Content-Type': 'application/json'},
+                         body: JSON.stringify({channel: ch})})""", channel)
+    panel.get_by_role("button", name="Listen live").wait_for(timeout=5000)

@@ -8,26 +8,32 @@ VoiceCollector, per hop, on the newest 4096 samples (85 ms, Hann):
     70-400 Hz lag range is >= 0.45;
   * active frames are summed into the LTAS (voiced and unvoiced: sibilance
     lives in the unvoiced ones), voiced frames give the pitch statistics.
+
+With ``memory_s`` (live listening) older speech fades out exponentially, so the
+spectrum follows the last ~memory_s seconds of talking; without it (a mic check)
+every active frame counts the same.
 """
 
 from __future__ import annotations
 
 import math
+from collections import deque
 from typing import Any
 
 import numpy as np
 
 
 class VoiceCollector:
-    """Accumulates one mic check: speech activity, pitch, long-term spectrum."""
+    """Accumulates a voice: speech activity, pitch, long-term spectrum."""
 
     N = 4096
     ACTIVE_DB = 12.0       # above the noise floor
     MIN_LEVEL_DB = -85.0   # absolute floor for "someone is talking" (dBFS, sine-peak)
     VOICED = 0.45
 
-    def __init__(self, samplerate: int = 48000) -> None:
+    def __init__(self, samplerate: int = 48000, memory_s: float | None = None) -> None:
         self.fs = samplerate
+        self.memory_s = memory_s
         n = self.N
         self.window = np.hanning(n).astype(np.float64)
         self._wsum = float(np.sum(self.window))
@@ -36,12 +42,16 @@ class VoiceCollector:
         self._k0, self._k1 = int(100 * n / samplerate), int(8000 * n / samplerate)
         self._lag0, self._lag1 = int(samplerate / 400), int(samplerate / 70)
         self.ltas = np.zeros(len(self.freqs))
+        self.weight = 0.0          # sum of the frames' weights in ltas (= active frames without memory)
         self.active_frames = 0
         self.voiced_frames = 0
+        self._active_w = 0.0
+        self._voiced_w = 0.0
         self.total_frames = 0
-        self.f0s: list[float] = []
+        keep = None if memory_s is None else max(50, int(memory_s * 20))   # ~20 hops / s
+        self.f0s: deque[float] = deque(maxlen=keep)
         self._floor: float | None = None
-        self._speech_levels: list[float] = []
+        self._speech_levels: deque[float] = deque(maxlen=keep)
         self._last_t: float | None = None
         self.speech_s = 0.0
 
@@ -64,15 +74,25 @@ class VoiceCollector:
         active = level > self._floor + self.ACTIVE_DB and level > self.MIN_LEVEL_DB
         if not active:
             return False
-        self.ltas += p
+        a = 1.0 if self.memory_s is None else math.exp(-dt / self.memory_s)
+        self.ltas = self.ltas * a + p if a != 1.0 else self.ltas + p
+        self.weight = self.weight * a + 1.0
+        self._active_w = self._active_w * a + 1.0
+        self._voiced_w *= a
         self.active_frames += 1
         self.speech_s += dt
         self._speech_levels.append(level)
         f0, strength = self._pitch(x)
         if strength >= self.VOICED:
             self.voiced_frames += 1
+            self._voiced_w += 1.0
             self.f0s.append(f0)
         return True
+
+    @property
+    def mean_ltas(self) -> np.ndarray:
+        """The long-term average power spectrum (per active frame)."""
+        return self.ltas / max(self.weight, 1.0)
 
     def _pitch(self, x: np.ndarray) -> tuple[float, float]:
         n = self.N
@@ -95,7 +115,7 @@ class VoiceCollector:
 
     @property
     def voiced_ratio(self) -> float:
-        return self.voiced_frames / self.active_frames if self.active_frames else 0.0
+        return self._voiced_w / self._active_w if self._active_w else 0.0
 
     @property
     def snr_db(self) -> float | None:

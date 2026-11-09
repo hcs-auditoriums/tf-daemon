@@ -78,8 +78,8 @@ def test_hpf_sits_under_the_voice(voice):
 
 @pytest.mark.parametrize("freq,q,band,issue", [
     (350, 1.4, "L", "boxy"),
-    (1000, 2.0, "1", "nasal / honky"),
-    (3500, 1.5, "2", "harsh"),
+    (1000, 2.0, "LM", "nasal / honky"),
+    (3500, 1.5, "HM", "harsh"),
 ])
 def test_build_ups_are_found(voice, freq, q, band, issue):
     m = only_move(run(shape(voice, lambda f: bell_db(f, freq, 6, q))))
@@ -90,7 +90,7 @@ def test_build_ups_are_found(voice, freq, q, band, issue):
 
 def test_two_problems_at_once(voice):
     r = run(shape(voice, lambda f: bell_db(f, 400, 5, 1.2) + bell_db(f, 3200, 5, 1.5)))
-    assert sorted((b["band"], b["issue"]) for b in r["bands"]) == [("2", "harsh"), ("L", "boxy")]
+    assert sorted((b["band"], b["issue"]) for b in r["bands"]) == [("HM", "harsh"), ("L", "boxy")]
 
 
 def test_dull_voice_gets_a_presence_boost(voice):
@@ -100,7 +100,7 @@ def test_dull_voice_gets_a_presence_boost(voice):
 
 def test_narrow_resonance_gets_a_notch(voice):
     m = only_move(run(shape(voice, lambda f: bell_db(f, 2200, 12, 20))))
-    assert m["kind"] == "notch" and m["q"] >= 6 and abs(m["freq"] - 2200) < 30 and m["band"] == "2"
+    assert m["kind"] == "notch" and m["q"] >= 6 and abs(m["freq"] - 2200) < 30 and m["band"] == "HM"
 
 
 def test_rings_on_the_input_become_notches(voice):
@@ -219,5 +219,19 @@ def test_engine_taps_see_analyzed_inputs():
         while not seen and time.time() < deadline:
             time.sleep(0.05)
         assert {i for i, _ in seen} <= {32, 33} and seen and all(n == 32768 for _, n in seen)
+    finally:
+        app.extensions["tf_stop"]()
+
+
+def test_live_route_starts_a_live_session():
+    cfg, modules, _, vm = _engine_and_module()
+    app = create_app(cfg, modules)
+    try:
+        client = app.test_client()
+        assert client.post("/api/vocal/start", json={"channel": 0, "live": True}).get_json()["ok"]
+        st = client.get("/api/vocal/status").get_json()["sessions"]["0"]
+        assert st["live"] and st["state"] == "live"
+        assert client.post("/api/vocal/stop", json={"channel": 0}).get_json()["ok"]
+        assert client.get("/api/vocal/status").get_json()["sessions"]["0"]["state"] in ("done", "error")
     finally:
         app.extensions["tf_stop"]()

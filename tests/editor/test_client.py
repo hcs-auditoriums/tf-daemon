@@ -322,7 +322,7 @@ def test_cli_prints_eq(console, capsys):
     rc = editor_cli.main(["127.0.0.1", "--port", str(console.port), "--channels", "1-2", "--timeout", "5"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "InCh  1 'GRA'" in out and "1:bell 800 Hz -14.1 dB" in out and "HPF on 200 Hz" in out
+    assert "InCh  1 'GRA'" in out and "LM:bell 800 Hz -14.1 dB" in out and "HPF on 200 Hz" in out
     assert "InCh  2 'Pastor': OFF" in out and "1-knob" in out
     assert "sent:" in out and "11 01" not in out.split("sent:")[1]
     assert_read_only(console)

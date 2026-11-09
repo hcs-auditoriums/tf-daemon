@@ -99,7 +99,7 @@ moments they are actually talking, then suggests, in the TF5's terms:
 
 - an **HPF** just under the voice's lowest pitch (rumble, handling, proximity
   boom);
-- up to four **PEQ bands** (L, 1, 2, H) with frequency, gain and Q, each named
+- up to four **PEQ bands** (L, LM, HM, H) with frequency, gain and Q, each named
   for what it addresses: boomy / muddy, boxy, woody / hollow, nasal / honky,
   tinny / thin, harsh, sibilant, or presence / air for a gentle boost;
 - narrow **notches** for resonances in the mic or room, and for rings the ring

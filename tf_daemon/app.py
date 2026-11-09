@@ -86,7 +86,8 @@ def build_modules(cfg: Config) -> list[Module]:
         _rf_module(cfg, qlxd),
         QLXDModule(qlxd) if qlxd is not None else None,
         tf5,
-        VocalModule(cfg.vocal, audio, cfg.audio.samplerate, desk=tf5) if cfg.vocal.enabled else None,
+        VocalModule(cfg.vocal, audio, cfg.audio.samplerate, desk=tf5, mains=_mains(cfg)) if cfg.vocal.enabled
+        else None,
     ]
     return [m for m in modules if m is not None]
 
@@ -109,6 +110,11 @@ def _tf5_module(cfg: Config, sim: SimConsole | None, on_names: Callable[[dict[in
     assert sim is not None
     demo = replace(cfg.tf5, host=sim.host, port=sim.rcp_port, eq_port=sim.eq_port, eq=True, eq_write=True)
     return TF5Module(demo, on_names, on_gains, simulator=sim)
+
+
+def _mains(cfg: Config) -> tuple[int, ...]:
+    """The inputs carrying the stereo bus (St L / R on the USB patch)."""
+    return tuple(i for i, src in enumerate(patch_from(cfg.tf5.usb_patch)) if src is not None and src[0] == "St")
 
 
 def receiver_range(qlxd: QLXDEngine | None) -> RangeHint | None:

@@ -13,7 +13,8 @@ after a confirmation dialog) sets the input channel's EQ to the suggestion, and
 
 Routes:
   GET  /api/vocal/status        sessions per input: state, progress, result
-  POST /api/vocal/start         {"channel": n}: start (or restart) listening on input n
+  POST /api/vocal/start         {"channel": n, "live": bool}: start (or restart) listening on input n;
+                                live keeps listening and re-suggesting, and checks the mains
   POST /api/vocal/stop          {"channel": n}: stop now and analyze what was heard
   POST /api/vocal/clear         {"channel": n}: forget the session
   POST /api/vocal/apply         {"channel": n, "confirm": true}: set the desk EQ to the suggestion
@@ -39,17 +40,18 @@ log = logging.getLogger(__name__)
 class VocalModule:
     name = "vocal"
 
-    def __init__(self, cfg: VocalConfig, audio: AudioInputs, samplerate: int, desk: DeskEQ | None = None) -> None:
+    def __init__(self, cfg: VocalConfig, audio: AudioInputs, samplerate: int, desk: DeskEQ | None = None,
+                 mains: tuple[int, ...] = ()) -> None:
         self.engine = audio
         self.checks = MicChecks(audio, samplerate, inputs=set(cfg.inputs) or None, target_s=cfg.listen_s,
-                                max_cut_db=cfg.max_cut_db, max_boost_db=cfg.max_boost_db)
+                                max_cut_db=cfg.max_cut_db, max_boost_db=cfg.max_boost_db, mains=mains)
         self.desk = DeskWriter(desk, self.checks.result)
 
     def snapshot(self) -> dict[str, Any]:
         sessions = {}
         for index, s in self.checks.sessions():
-            entry = {"state": s.state, "target_s": s.target_s, "started": s.started, "finished": s.finished,
-                     "label": self.engine.inputs[index].label, **s.collector.progress()}
+            entry = {"state": s.state, "live": s.live, "target_s": s.target_s, "started": s.started,
+                     "finished": s.finished, "label": self.engine.inputs[index].label, **s.collector.progress()}
             if s.result is not None:
                 entry["result"] = s.result
                 entry["current_eq"] = self.desk.current_eq(index)
@@ -84,7 +86,8 @@ class VocalModule:
 
         @bp.post("/start")
         def start():
-            return session_action(self.checks.start)
+            live = (request.get_json(silent=True) or {}).get("live") is True
+            return session_action(lambda ch: self.checks.start(ch, live=live))
 
         @bp.post("/stop")
         def stop():
