@@ -27,9 +27,9 @@ import numpy as np
 
 
 class Transfer:
-    N = 8192                 # frame (170 ms at 48 kHz): ~6 Hz bins
-    DELAY_FRAMES = 12        # frames of cross-correlation before the delay is fixed
-    MIN_PEAK = 4.0           # GCC-PHAT peak / median: below this, keep looking
+    N = 8192  # frame (170 ms at 48 kHz): ~6 Hz bins
+    DELAY_FRAMES = 12  # frames of cross-correlation before the delay is fixed
+    MIN_PEAK = 4.0  # GCC-PHAT peak / median: below this, keep looking
 
     def __init__(self, samplerate: int = 48000, max_delay_s: float = 0.25, memory_s: float | None = None) -> None:
         self.fs = samplerate
@@ -71,13 +71,13 @@ class Transfer:
             if self.delay is None:
                 return False
         d = self.delay
-        xs = np.asarray(x[len(x) - n - d:len(x) - d], dtype=np.float64)
+        xs = np.asarray(x[len(x) - n - d : len(x) - d], dtype=np.float64)
         ys = np.asarray(y[-n:], dtype=np.float64)
         X = np.fft.rfft(xs * self.window)
         Y = np.fft.rfft(ys * self.window)
         a = 1.0 if self.memory_s is None else math.exp(-dt / self.memory_s)
-        self.sxx = self.sxx * a + (X.real ** 2 + X.imag ** 2)
-        self.syy = self.syy * a + (Y.real ** 2 + Y.imag ** 2)
+        self.sxx = self.sxx * a + (X.real**2 + X.imag**2)
+        self.syy = self.syy * a + (Y.real**2 + Y.imag**2)
         self.sxy = self.sxy * a + np.conj(X) * Y
         self.weight = self.weight * a + 1.0
         self.frames += 1
@@ -95,11 +95,11 @@ class Transfer:
         if self._gcc_frames < self.DELAY_FRAMES:
             return
         xc = np.fft.irfft(self._gcc[: n + 1], 2 * n)
-        span = xc[: min(self.max_delay, n) + 1]          # y lags x: non-negative lags only
+        span = xc[: min(self.max_delay, n) + 1]  # y lags x: non-negative lags only
         k = int(np.argmax(span))
         if span[k] >= self.MIN_PEAK * float(np.median(np.abs(xc))) and span[k] > 0:
             self.delay = k
-        else:                                            # not clear yet: start over
+        else:  # not clear yet: start over
             self._gcc[:] = 0
             self._gcc_frames = 0
 

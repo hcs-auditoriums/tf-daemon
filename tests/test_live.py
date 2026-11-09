@@ -46,8 +46,8 @@ def wait_for(path: str, pred, timeout: float = 15.0):
 def status():
     def all_up(s):
         m = s["modules"]
-        return (m["audio"]["frames"] > 0 and m["rf"]["connected"] and m["qlxd"]["online"] >= 4
-                and m["tf5"]["connected"])
+        return m["audio"]["frames"] > 0 and m["rf"]["connected"] and m["qlxd"]["online"] >= 4 and m["tf5"]["connected"]
+
     return wait_for("/api/status", all_up)
 
 
@@ -67,8 +67,8 @@ def test_pages_load(status, page):
 def test_channel_names_come_from_the_simulated_console(status):
     chans = wait_for("/api/audio/meta", lambda m: len(m["channels"]) == 34)["channels"]
     labels = {c["index"]: c["label"] for c in chans}
-    assert labels[0] == "Pastor" and labels[32] == "Main L"   # config labels win
-    assert labels[2] == "BGV 1"                                # read from the console
+    assert labels[0] == "Pastor" and labels[32] == "Main L"  # config labels win
+    assert labels[2] == "BGV 1"  # read from the console
 
 
 def test_console_eq_is_read(status):
@@ -103,7 +103,7 @@ def test_audio_websocket_streams_metadata_console_and_spectra(status):
             elif m is not None:
                 binary += 1
         assert {"tf5", "rings"} <= kinds, kinds
-        assert binary >= 3   # spectrum frames at ~20/s
+        assert binary >= 3  # spectrum frames at ~20/s
     finally:
         ws.close()
 

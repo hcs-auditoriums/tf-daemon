@@ -47,10 +47,11 @@ from .settings import MAX_HZ, RBW_CHOICES, SweepSettings
 log = logging.getLogger(__name__)
 
 SUPERVISE_INTERVAL_S = 3.0  # how often auto mode checks the device / range
-FIT_MARGIN_MHZ = 2.0        # space beyond the outermost receivers
-FIT_MIN_SPAN_MHZ = 10.0     # never zoom in narrower than this
+FIT_MARGIN_MHZ = 2.0  # space beyond the outermost receivers
+FIT_MIN_SPAN_MHZ = 10.0  # never zoom in narrower than this
 
 RangeHint = Callable[[], "tuple[int, int] | None"]
+
 
 def fit_span(freqs_mhz: Iterable[float]) -> tuple[int, int] | None:
     """Start/stop (Hz) covering ``freqs_mhz`` with a margin, whole MHz, at least FIT_MIN_SPAN_MHZ wide."""
@@ -73,8 +74,8 @@ class RFEngine:
         self.range_hint = range_hint
         self.hub = FrameHub()
 
-        self._control = threading.RLock()     # serializes connect/disconnect/start/stop
-        self._lock = threading.Lock()         # guards the state below
+        self._control = threading.RLock()  # serializes connect/disconnect/start/stop
+        self._lock = threading.Lock()  # guards the state below
         self._device_lock = threading.Lock()  # serializes device I/O
         self._connected = False
         self._scanning = False
@@ -90,8 +91,8 @@ class RFEngine:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
-        self._paused = False      # a user stopped / disconnected: auto mode waits for them
-        self._auto_range = True   # current Start/Stop came from range_hint: keep following it
+        self._paused = False  # a user stopped / disconnected: auto mode waits for them
+        self._auto_range = True  # current Start/Stop came from range_hint: keep following it
         self._sup_thread: threading.Thread | None = None
         self._sup_stop = threading.Event()
         self._sup_wake = threading.Event()
@@ -329,13 +330,15 @@ class RFEngine:
                     continue  # straight on to starting the sweep
                 elif not scanning:
                     s = self.start_scan(self._auto_overrides())
-                    log.info("RF auto mode: sweeping %.3f-%.3f MHz, %d points",
-                             s.start_hz / 1e6, s.stop_hz / 1e6, s.points)
+                    log.info(
+                        "RF auto mode: sweeping %.3f-%.3f MHz, %d points", s.start_hz / 1e6, s.stop_hz / 1e6, s.points
+                    )
                 elif auto_range:
                     hint = self._hint()
                     if hint is not None and hint != current:
-                        log.info("RF auto mode: receivers changed, range now %.3f-%.3f MHz",
-                                 hint[0] / 1e6, hint[1] / 1e6)
+                        log.info(
+                            "RF auto mode: receivers changed, range now %.3f-%.3f MHz", hint[0] / 1e6, hint[1] / 1e6
+                        )
                         self.start_scan(self._auto_overrides())
             except (RFDeviceError, ValueError) as e:
                 if str(e) != last_error:  # log each distinct problem once, not every retry

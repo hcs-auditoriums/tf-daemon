@@ -56,8 +56,18 @@ class DisplayBins:
 
 
 class SpectrumAnalyzer:
-    def __init__(self, channels: int, samplerate: int, n_fft: int, hop: int, average_tau: float,
-                 fmin: float, fmax: float, bands_per_octave: int, db_floor: float = -140.0) -> None:
+    def __init__(
+        self,
+        channels: int,
+        samplerate: int,
+        n_fft: int,
+        hop: int,
+        average_tau: float,
+        fmin: float,
+        fmax: float,
+        bands_per_octave: int,
+        db_floor: float = -140.0,
+    ) -> None:
         self.channels = channels
         self.samplerate = samplerate
         self.n_fft = n_fft
@@ -79,7 +89,7 @@ class SpectrumAnalyzer:
         nd = self.bins.count
         self._windowed = np.zeros((channels, n_fft), dtype=np.float32)
         self._spec = np.zeros((channels, nf), dtype=np.complex64)
-        self.power = np.zeros((channels, nf), dtype=np.float32)   # latest instantaneous
+        self.power = np.zeros((channels, nf), dtype=np.float32)  # latest instantaneous
         self.avg = np.zeros((channels, nf), dtype=np.float32)
         self.peak = np.zeros((channels, nf), dtype=np.float32)
         self._tmp = np.zeros((channels, nf), dtype=np.float32)
@@ -135,7 +145,7 @@ class SpectrumAnalyzer:
 
     def _to_display(self, src: np.ndarray, out: np.ndarray) -> None:
         b = self.bins
-        np.maximum.reduceat(src[:, :b.end], b.starts, axis=1, out=out)
+        np.maximum.reduceat(src[:, : b.end], b.starts, axis=1, out=out)
         np.add(out, self._tiny, out=out)
         np.log10(out, out=out)
         np.multiply(out, np.float32(10.0), out=out)

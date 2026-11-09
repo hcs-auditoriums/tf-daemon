@@ -57,14 +57,16 @@ from .editor.dump import Dump, channel_eq
 log = logging.getLogger(__name__)
 
 STR, INT, UINT = 0, 1, 2
-PASSWORD = "s3cret-Pa55word"   # in the fake Property dump; must never leak anywhere
+PASSWORD = "s3cret-Pa55word"  # in the fake Property dump; must never leak anywhere
 
 
 # ---------------------------------------------------------------------- MMSXLIT builder
 
+
 @dataclass
 class C:
     """A collection: name, array size, params [(name, type, elemsize, arraysize)], children."""
+
     name: str
     arraysize: int = 1
     params: list[tuple[str, int, int, int]] = field(default_factory=list)
@@ -80,14 +82,18 @@ def _datasize(c: C) -> int:
 
 
 def _desc(c: C, offset: int) -> bytes:
-    prs = b"".join(b"PR " + struct.pack("<BHH", t, size, arr) + name.encode().ljust(24, b"\0")
-                   for name, t, size, arr in c.params)
+    prs = b"".join(
+        b"PR " + struct.pack("<BHH", t, size, arr) + name.encode().ljust(24, b"\0") for name, t, size, arr in c.params
+    )
     kids, off = b"", sum(p[2] * p[3] for p in c.params)
     for ch in c.children:
         kids += _desc(ch, off)
         off += _datasize(ch) * ch.arraysize
-    head = b"COL0" + c.name.encode().ljust(24, b"\0") + struct.pack(
-        "<5I", len(prs), len(kids), offset, _datasize(c), c.arraysize)
+    head = (
+        b"COL0"
+        + c.name.encode().ljust(24, b"\0")
+        + struct.pack("<5I", len(prs), len(kids), offset, _datasize(c), c.arraysize)
+    )
     return head + prs + kids
 
 
@@ -96,25 +102,32 @@ def build_dump(root: C, values: dict[str, int | str] | None = None, md5: str | N
     desc = _desc(root, 0)
     data = bytearray(_datasize(root) * root.arraysize)
     md5 = md5 or hashlib.md5(desc).hexdigest()
-    head = b"MMSXLIT\0" + root.name.encode().ljust(36, b"\0") + md5.encode().ljust(36, b"\0") \
+    head = (
+        b"MMSXLIT\0"
+        + root.name.encode().ljust(36, b"\0")
+        + md5.encode().ljust(36, b"\0")
         + struct.pack("<II", len(desc), len(data))
+    )
     blob = head + desc + bytes(data)
     if values:
         d = Dump(blob)
         for path, v in values.items():
             off, prm = d.locate(path)
             if prm.type == STR:
-                raw = str(v).encode()[:prm.elemsize - 1].ljust(prm.elemsize, b"\0")
+                raw = str(v).encode()[: prm.elemsize - 1].ljust(prm.elemsize, b"\0")
             else:
                 raw = int(v).to_bytes(prm.elemsize, "little", signed=prm.type == INT)
-            data[off:off + prm.elemsize] = raw
+            data[off : off + prm.elemsize] = raw
         blob = head + desc + bytes(data)
     return blob
 
 
 def _band(name: str, arr: int = 1, switch: str | None = None) -> C:
-    ps = [_p("Type", UINT, 1)] + ([_p(switch, UINT, 1)] if switch else []) + \
-        [_p("Frequency", UINT, 4), _p("Gain", INT, 2), _p("Q", UINT, 2)]
+    ps = (
+        [_p("Type", UINT, 1)]
+        + ([_p(switch, UINT, 1)] if switch else [])
+        + [_p("Frequency", UINT, 4), _p("Gain", INT, 2), _p("Q", UINT, 2)]
+    )
     return C(name, arr, ps)
 
 
@@ -126,14 +139,34 @@ def _peq(hpf: bool, mids: int, low_switch: str | None, high_switch: str | None) 
     if mids:
         bank.append(_band("Band", mids))
     bank.append(_band("BandH", switch=high_switch))
-    backup = C("OneKnobBackup", 1, [], [b for b in bank[1:]])   # same bands, after Bank (as on the TF5)
+    backup = C("OneKnobBackup", 1, [], [b for b in bank[1:]])  # same bands, after Bank (as on the TF5)
     return C("PEQ", 1, [_p("On", UINT, 1)], [C("Bank", 1, [_p("Type", STR, 8)], bank), backup])
 
 
 # InputChannel's collections on the TF5, in order: PEQ is 7 and Fader 19 on the wire.
-INPUT_CHANNEL_CHILDREN = ["Label", "Patch", "Signal", "BuiltIn", "Slot", "Input", "DirectOut", "PEQ", "Gate", "Comp",
-                          "AutoMixer", "ToMix", "ToStMix", "ToFX", "ToMono", "ToStereo", "SubGroup", "DCAGroup",
-                          "MuteGroup", "Fader", "Library"]
+INPUT_CHANNEL_CHILDREN = [
+    "Label",
+    "Patch",
+    "Signal",
+    "BuiltIn",
+    "Slot",
+    "Input",
+    "DirectOut",
+    "PEQ",
+    "Gate",
+    "Comp",
+    "AutoMixer",
+    "ToMix",
+    "ToStMix",
+    "ToFX",
+    "ToMono",
+    "ToStereo",
+    "SubGroup",
+    "DCAGroup",
+    "MuteGroup",
+    "Fader",
+    "Library",
+]
 
 
 def mixing_tree() -> C:
@@ -141,15 +174,24 @@ def mixing_tree() -> C:
     InputChannel's collections in the TF5's order so real wire addresses resolve."""
     label = C("Label", 1, [_p("Name", STR, 64), _p("Color", STR, 8)])
     fader = C("Fader", 1, [_p("Level", INT, 2), _p("On", UINT, 1)])
-    real = {"Label": label, "Patch": C("Patch", 1, [_p("Port", STR, 16)]), "PEQ": _peq(True, 2, None, "LPFOn"),
-            "Fader": fader}
+    real = {
+        "Label": label,
+        "Patch": C("Patch", 1, [_p("Port", STR, 16)]),
+        "PEQ": _peq(True, 2, None, "LPFOn"),
+        "Fader": fader,
+    }
     inputs = [real.get(n) or C(n, 1, [_p("Dummy", UINT, 1)]) for n in INPUT_CHANNEL_CHILDREN]
-    return C("Mixing", 1, [], [
-        C("InputChannel", 40, [], inputs),
-        C("StInChannel", 4, [], [label, _peq(False, 0, "HPFOn", "LPFOn"), fader]),
-        C("Mix", 8, [], [label, fader]),
-        C("Stereo", 2, [], [label, _peq(False, 2, "HPFOn", "LPFOn"), fader]),
-    ])
+    return C(
+        "Mixing",
+        1,
+        [],
+        [
+            C("InputChannel", 40, [], inputs),
+            C("StInChannel", 4, [], [label, _peq(False, 0, "HPFOn", "LPFOn"), fader]),
+            C("Mix", 8, [], [label, fader]),
+            C("Stereo", 2, [], [label, _peq(False, 2, "HPFOn", "LPFOn"), fader]),
+        ],
+    )
 
 
 def default_mixing_values() -> dict[str, int | str]:
@@ -157,41 +199,86 @@ def default_mixing_values() -> dict[str, int | str]:
     v: dict[str, int | str] = {}
     for x in range(40):
         b = f"InputChannel:{x}/PEQ"
-        v.update({f"InputChannel:{x}/Label/Name": f"ch{x + 1}", f"{b}/On": 1, f"{b}/Bank/Type": "BOLD",
-                  f"{b}/Bank/HPF/Frequency": 800, f"{b}/Bank/HPF/Slope": 12,
-                  f"{b}/Bank/BandL/Type": 1, f"{b}/Bank/BandL/Frequency": 1250, f"{b}/Bank/BandL/Q": 700,
-                  f"{b}/Bank/Band:0/Frequency": 10000, f"{b}/Bank/Band:0/Q": 700,
-                  f"{b}/Bank/Band:1/Frequency": 40000, f"{b}/Bank/Band:1/Q": 700,
-                  f"{b}/Bank/BandH/Type": 1, f"{b}/Bank/BandH/Frequency": 100000, f"{b}/Bank/BandH/Q": 700})
+        v.update(
+            {
+                f"InputChannel:{x}/Label/Name": f"ch{x + 1}",
+                f"{b}/On": 1,
+                f"{b}/Bank/Type": "BOLD",
+                f"{b}/Bank/HPF/Frequency": 800,
+                f"{b}/Bank/HPF/Slope": 12,
+                f"{b}/Bank/BandL/Type": 1,
+                f"{b}/Bank/BandL/Frequency": 1250,
+                f"{b}/Bank/BandL/Q": 700,
+                f"{b}/Bank/Band:0/Frequency": 10000,
+                f"{b}/Bank/Band:0/Q": 700,
+                f"{b}/Bank/Band:1/Frequency": 40000,
+                f"{b}/Bank/Band:1/Q": 700,
+                f"{b}/Bank/BandH/Type": 1,
+                f"{b}/Bank/BandH/Frequency": 100000,
+                f"{b}/Bank/BandH/Q": 700,
+            }
+        )
     b = "InputChannel:0/PEQ/Bank"
-    v.update({"InputChannel:0/Label/Name": "GRA", f"{b}/HPF/On": 1, f"{b}/HPF/Frequency": 2000,
-              f"{b}/BandL/Type": 0, f"{b}/BandL/Frequency": 1600, f"{b}/BandL/Gain": -520, f"{b}/BandL/Q": 140,
-              f"{b}/Band:0/Frequency": 8000, f"{b}/Band:0/Gain": -1410, f"{b}/Band:0/Q": 250,
-              f"{b}/Band:1/Frequency": 33500, f"{b}/Band:1/Gain": -570, f"{b}/Band:1/Q": 350,
-              f"{b}/BandH/Type": 1, f"{b}/BandH/Frequency": 100000, f"{b}/BandH/Gain": 460, f"{b}/BandH/Q": 700})
+    v.update(
+        {
+            "InputChannel:0/Label/Name": "GRA",
+            f"{b}/HPF/On": 1,
+            f"{b}/HPF/Frequency": 2000,
+            f"{b}/BandL/Type": 0,
+            f"{b}/BandL/Frequency": 1600,
+            f"{b}/BandL/Gain": -520,
+            f"{b}/BandL/Q": 140,
+            f"{b}/Band:0/Frequency": 8000,
+            f"{b}/Band:0/Gain": -1410,
+            f"{b}/Band:0/Q": 250,
+            f"{b}/Band:1/Frequency": 33500,
+            f"{b}/Band:1/Gain": -570,
+            f"{b}/Band:1/Q": 350,
+            f"{b}/BandH/Type": 1,
+            f"{b}/BandH/Frequency": 100000,
+            f"{b}/BandH/Gain": 460,
+            f"{b}/BandH/Q": 700,
+        }
+    )
     b = "InputChannel:1/PEQ"
-    v.update({"InputChannel:1/Label/Name": "Pastor", f"{b}/On": 0, f"{b}/Bank/Band:0/Gain": 600,
-              f"{b}/Bank/OneKnob/On": 1})
+    v.update(
+        {"InputChannel:1/Label/Name": "Pastor", f"{b}/On": 0, f"{b}/Bank/Band:0/Gain": 600, f"{b}/Bank/OneKnob/On": 1}
+    )
     for x in range(2):
         b = f"Stereo:{x}/PEQ"
-        v.update({f"Stereo:{x}/Label/Name": "Stereo", f"{b}/On": 1, f"{b}/Bank/Type": "BOLD",
-                  f"{b}/Bank/BandL/Frequency": 1250, f"{b}/Bank/BandL/Q": 700,
-                  f"{b}/Bank/Band:0/Frequency": 10000, f"{b}/Bank/Band:0/Q": 700,
-                  f"{b}/Bank/Band:1/Frequency": 40000, f"{b}/Bank/Band:1/Q": 700,
-                  f"{b}/Bank/BandH/Frequency": 100000, f"{b}/Bank/BandH/Q": 700})
-    v["Stereo:1/PEQ/Bank/BandL/Type"] = 2      # the low band as a high-pass filter...
-    v["Stereo:1/PEQ/Bank/BandL/HPFOn"] = 1     # ...switched on
+        v.update(
+            {
+                f"Stereo:{x}/Label/Name": "Stereo",
+                f"{b}/On": 1,
+                f"{b}/Bank/Type": "BOLD",
+                f"{b}/Bank/BandL/Frequency": 1250,
+                f"{b}/Bank/BandL/Q": 700,
+                f"{b}/Bank/Band:0/Frequency": 10000,
+                f"{b}/Bank/Band:0/Q": 700,
+                f"{b}/Bank/Band:1/Frequency": 40000,
+                f"{b}/Bank/Band:1/Q": 700,
+                f"{b}/Bank/BandH/Frequency": 100000,
+                f"{b}/Bank/BandH/Q": 700,
+            }
+        )
+    v["Stereo:1/PEQ/Bank/BandL/Type"] = 2  # the low band as a high-pass filter...
+    v["Stereo:1/PEQ/Bank/BandL/HPFOn"] = 1  # ...switched on
     v["Stereo:1/PEQ/Bank/BandL/Frequency"] = 800
     v["Stereo:1/PEQ/Bank/Band:1/Gain"] = -300
     return v
 
 
 def property_tree() -> C:
-    return C("Property", 1, [], [
-        C("Specification", 1, [], [C("Unit", 1, [_p("Model", STR, 16)])]),
-        C("Status", 1, [], [C("CommSession", 4, [_p("ClientType", STR, 16), _p("State", UINT, 4)])]),
-        C("UserAccount", 1, [], [C("Unit", 1, [_p("Password", STR, 32)])]),
-    ])
+    return C(
+        "Property",
+        1,
+        [],
+        [
+            C("Specification", 1, [], [C("Unit", 1, [_p("Model", STR, 16)])]),
+            C("Status", 1, [], [C("CommSession", 4, [_p("ClientType", STR, 16), _p("State", UINT, 4)])]),
+            C("UserAccount", 1, [], [C("Unit", 1, [_p("Password", STR, 32)])]),
+        ],
+    )
 
 
 def wire_address(dump: Dump, path: str) -> tuple[list[int], list[int]]:
@@ -200,50 +287,93 @@ def wire_address(dump: Dump, path: str) -> tuple[list[int], list[int]]:
     return wp, idx
 
 
-def set_param(func: str, path: list[int], idx: list[int], value: int | str, origin: int = 0xA1,
-              vtype: int | None = None) -> bytes:
+def set_param(
+    func: str, path: list[int], idx: list[int], value: int | str, origin: int = 0xA1, vtype: int | None = None
+) -> bytes:
     """A console -> client set-param notification (built only by the FAKE console)."""
     if isinstance(value, str):
         v = element(T_STR, value)
     else:
         v = element(vtype or (T_S32 if value < 0 else T_U32), [value])
-    return message(SET_PARAM, [element(T_U8, b"\0"), element(T_STR, func), element(T_STR, func),
-                               element(T_U16, [len(path)]), element(T_U32, path), element(T_U32, idx),
-                               element(T_U32, [origin]), v])
+    return message(
+        SET_PARAM,
+        [
+            element(T_U8, b"\0"),
+            element(T_STR, func),
+            element(T_STR, func),
+            element(T_U16, [len(path)]),
+            element(T_U32, path),
+            element(T_U32, idx),
+            element(T_U32, [origin]),
+            v,
+        ],
+    )
 
 
 def dump_message(func: str, blob: bytes) -> bytes:
-    return message(DUMP, [element(T_U8, b"\0"), element(T_STR, func), element(T_STR, func),
-                          element(T_U16, [0]), element(T_U32, []), element(T_U32, []), element(T_U32, [240]),
-                          element(T_U8, blob), element(T_U8, b"")])
+    return message(
+        DUMP,
+        [
+            element(T_U8, b"\0"),
+            element(T_STR, func),
+            element(T_STR, func),
+            element(T_U16, [0]),
+            element(T_U32, []),
+            element(T_U32, []),
+            element(T_U32, [240]),
+            element(T_U8, blob),
+            element(T_U8, b""),
+        ],
+    )
 
 
 def console_hash(func: str, md5: str | None = None) -> bytes:
-    return message(HASH_COMPARE, [element(T_U8, b"\0"), element(T_STR, func),
-                                  element(T_U8, bytes.fromhex(md5 or DESC_MD5[func])),
-                                  element(T_U8, hashlib.md5(func.encode()).digest())])
+    return message(
+        HASH_COMPARE,
+        [
+            element(T_U8, b"\0"),
+            element(T_STR, func),
+            element(T_U8, bytes.fromhex(md5 or DESC_MD5[func])),
+            element(T_U8, hashlib.md5(func.encode()).digest()),
+        ],
+    )
 
 
 # ---------------------------------------------------------------------- fake console
 
+
 class SimEditor:
     """Console side of TCP 50368. Records everything the client sends in ``received``."""
 
-    def __init__(self, mixing_values: dict[str, int | str] | None = None, *, send_on_set_client_type: bool = True,
-                 send_mixing_dump: bool = True, mixing_md5: str | None = None, echo_writes: bool = True,
-                 host: str = "127.0.0.1", port: int = 0) -> None:
-        self.echo_writes = echo_writes   # like the TF5: apply a client's set-param and echo it back
+    def __init__(
+        self,
+        mixing_values: dict[str, int | str] | None = None,
+        *,
+        send_on_set_client_type: bool = True,
+        send_mixing_dump: bool = True,
+        mixing_md5: str | None = None,
+        echo_writes: bool = True,
+        host: str = "127.0.0.1",
+        port: int = 0,
+    ) -> None:
+        self.echo_writes = echo_writes  # like the TF5: apply a client's set-param and echo it back
         self.mixing_values = default_mixing_values() if mixing_values is None else mixing_values
         self.send_on_set_client_type = send_on_set_client_type
         self.send_mixing_dump = send_mixing_dump
         self.mixing_md5 = mixing_md5 or DESC_MD5["Mixing"]
         self.mixing_blob = build_dump(mixing_tree(), self.mixing_values, md5=self.mixing_md5)
-        self.mixing = Dump(self.mixing_blob)   # for computing wire addresses
-        self.property_blob = build_dump(property_tree(), {
-            "Specification/Unit/Model": "TF5", "Status/CommSession:0/ClientType": "Editor",
-            "UserAccount/Unit/Password": PASSWORD}, md5=DESC_MD5["Property"])
+        self.mixing = Dump(self.mixing_blob)  # for computing wire addresses
+        self.property_blob = build_dump(
+            property_tree(),
+            {
+                "Specification/Unit/Model": "TF5",
+                "Status/CommSession:0/ClientType": "Editor",
+                "UserAccount/Unit/Password": PASSWORD,
+            },
+            md5=DESC_MD5["Property"],
+        )
         self.received: list[tuple[str, Message]] = []
-        self.writes: list[tuple[str, int]] = []   # (name path, value) of every set-param the client sent
+        self.writes: list[tuple[str, int]] = []  # (name path, value) of every set-param the client sent
         self.raw: list[tuple[str, bytes]] = []
         self.srv = socket.create_server((host, port))
         self.port = self.srv.getsockname()[1]
@@ -274,7 +404,7 @@ class SimEditor:
                     self._respond(conn, tag, msg)
         except OSError:
             pass
-        except (ValueError, KeyError) as e:   # a malformed frame or unknown parameter: drop the client
+        except (ValueError, KeyError) as e:  # a malformed frame or unknown parameter: drop the client
             log.debug("Simulated editor console dropped a client: %s", e)
             conn.close()
 
@@ -300,8 +430,11 @@ class SimEditor:
                 self.writes.append((name, e[7].value[0]))
                 self.mixing.apply(e[4].value, e[5].value, e[7].value[0])
             if self.echo_writes:
-                self._send(conn, "MMIX", set_param("Mixing", e[4].value, e[5].value, e[7].value[0],
-                                                   origin=0xA0, vtype=e[7].type))
+                self._send(
+                    conn,
+                    "MMIX",
+                    set_param("Mixing", e[4].value, e[5].value, e[7].value[0], origin=0xA0, vtype=e[7].type),
+                )
         elif tag == "EEVT" and msg.cmd == EVENT:
             name, args = msg.elements[2].value, msg.elements[3].value
             self._send(conn, "EEVT", event(name, args, reply=True))
@@ -389,11 +522,21 @@ RCP_PARAMS = [
 
 # A Sunday service: (name, colour, fader dB x100 or None for -inf, on, pan).
 DEMO_INPUTS = [
-    ("Pastor", "Yellow", 0, 1, 0), ("Lead Vox", "Red", -350, 1, 0), ("BGV 1", "Pink", -800, 1, -20),
-    ("BGV 2", "Pink", -800, 1, 20), ("Host", "Yellow", None, 0, 0), ("Kick", "Blue", -500, 1, 0),
-    ("Snare", "Blue", -700, 1, 0), ("OH L", "Blue", -1200, 1, -63), ("OH R", "Blue", -1200, 1, 63),
-    ("Bass DI", "Green", -400, 1, 0), ("Gtr", "Orange", -900, 1, -25), ("Keys L", "Purple", -1000, 1, -63),
-    ("Keys R", "Purple", -1000, 1, 63), ("Acoustic", "Orange", -1100, 1, 25), ("Video L", "SkyBlue", None, 0, -63),
+    ("Pastor", "Yellow", 0, 1, 0),
+    ("Lead Vox", "Red", -350, 1, 0),
+    ("BGV 1", "Pink", -800, 1, -20),
+    ("BGV 2", "Pink", -800, 1, 20),
+    ("Host", "Yellow", None, 0, 0),
+    ("Kick", "Blue", -500, 1, 0),
+    ("Snare", "Blue", -700, 1, 0),
+    ("OH L", "Blue", -1200, 1, -63),
+    ("OH R", "Blue", -1200, 1, 63),
+    ("Bass DI", "Green", -400, 1, 0),
+    ("Gtr", "Orange", -900, 1, -25),
+    ("Keys L", "Purple", -1000, 1, -63),
+    ("Keys R", "Purple", -1000, 1, 63),
+    ("Acoustic", "Orange", -1100, 1, 25),
+    ("Video L", "SkyBlue", None, 0, -63),
     ("Video R", "SkyBlue", None, 0, 63),
 ]
 DEMO_MIXES = ["Wedge DS", "Wedge SR", "Drum IEM", "Vox IEM", "Keys IEM", "Gtr IEM", "Bass IEM", "Lobby"]
@@ -410,13 +553,19 @@ def demo_rcp_values() -> dict[tuple[str, int, int], str]:
     for x in range(40):
         v[(inch + "Label/Name", x, 0)] = f'"ch {x + 1}"'
     for x, (name, color, level, on, pan) in enumerate(DEMO_INPUTS):
-        v.update({(inch + "Label/Name", x, 0): f'"{name}"', (inch + "Label/Color", x, 0): f'"{color}"',
-                  (inch + "Fader/Level", x, 0): str(-32768 if level is None else level),
-                  (inch + "Fader/On", x, 0): str(on), (inch + "ToStereo/Pan", x, 0): str(pan),
-                  (inch + "ToMono/Level", x, 0): "-1000"})
-        for m in range(len(DEMO_MIXES)):   # every source in every monitor mix, most turned down
+        v.update(
+            {
+                (inch + "Label/Name", x, 0): f'"{name}"',
+                (inch + "Label/Color", x, 0): f'"{color}"',
+                (inch + "Fader/Level", x, 0): str(-32768 if level is None else level),
+                (inch + "Fader/On", x, 0): str(on),
+                (inch + "ToStereo/Pan", x, 0): str(pan),
+                (inch + "ToMono/Level", x, 0): "-1000",
+            }
+        )
+        for m in range(len(DEMO_MIXES)):  # every source in every monitor mix, most turned down
             v[(inch + "ToMix/Level", x, m)] = str(-600 if (x + m) % 3 == 0 else -32768)
-    v[(inch + "ToFx/Level", 1, 0)] = "-1200"   # reverb on the lead vocal
+    v[(inch + "ToFx/Level", 1, 0)] = "-1200"  # reverb on the lead vocal
     for x, name in enumerate(["ST L", "ST R"]):
         v[(RCP_PREFIX["St"] + "Label/Name", x, 0)] = f'"{name}"'
         v[(RCP_PREFIX["St"] + "Fader/Level", x, 0)] = "0"
@@ -434,12 +583,25 @@ class SimRCP:
     default to the demo console's. ``received`` keeps the latest lines clients sent.
     """
 
-    def __init__(self, values: dict[tuple[str, int, int], str] | None = None, *, prminfo: list[str] | None = None,
-                 host: str = "127.0.0.1", port: int = 0, drift_s: float = 0.0, seed: int = 1) -> None:
+    def __init__(
+        self,
+        values: dict[tuple[str, int, int], str] | None = None,
+        *,
+        prminfo: list[str] | None = None,
+        host: str = "127.0.0.1",
+        port: int = 0,
+        drift_s: float = 0.0,
+        seed: int = 1,
+    ) -> None:
         self.values = demo_rcp_values() if values is None else values
-        self.prminfo = prminfo if prminfo is not None else [
-            f'"{RCP_PREFIX[k]}{p}" {xs} {ys if ys > 1 else 0} {lo} {hi} {d} "{u}" {t} any rw {s}'
-            for k, p, xs, ys, lo, hi, d, u, t, s in RCP_PARAMS]
+        self.prminfo = (
+            prminfo
+            if prminfo is not None
+            else [
+                f'"{RCP_PREFIX[k]}{p}" {xs} {ys if ys > 1 else 0} {lo} {hi} {d} "{u}" {t} any rw {s}'
+                for k, p, xs, ys, lo, hi, d, u, t, s in RCP_PARAMS
+            ]
+        )
         self.requests = 0
         self.received: deque[str] = deque(maxlen=100_000)
         self._rng = random.Random(seed)
@@ -490,7 +652,7 @@ class SimRCP:
             if value is None:
                 return f"ERROR get {parts[1]} InvalidArgument"
             return f"OK get {parts[1]} {parts[2]} {parts[3]} {value}"
-        return f"ERROR {parts[0]} UnknownCommand"   # tf-daemon never sends set; refuse anything else
+        return f"ERROR {parts[0]} UnknownCommand"  # tf-daemon never sends set; refuse anything else
 
     def set(self, addr: str, x: int, y: int, value: str) -> None:
         """Change a value "on the desk": stored and pushed to every client."""
@@ -518,7 +680,7 @@ class SimRCP:
         """Close every client connection, as a console reboot or cable pull would."""
         for c in list(self.conns):
             try:
-                c.shutdown(socket.SHUT_RDWR)   # close() alone may not send a FIN while _serve is in recv
+                c.shutdown(socket.SHUT_RDWR)  # close() alone may not send a FIN while _serve is in recv
             except OSError:
                 pass
             c.close()
@@ -530,6 +692,7 @@ class SimRCP:
 
 
 # ---------------------------------------------------------------------- both protocols
+
 
 def demo_mixing_values() -> dict[str, int | str]:
     """The editor protocol's view of the demo desk: the test defaults (ch1 has the EQ captured
@@ -559,8 +722,13 @@ class SimConsole:
         self.editor.close()
 
     def status(self) -> dict:
-        return {"host": self.host, "rcp_port": self.rcp_port, "eq_port": self.eq_port,
-                "rcp_requests": self.rcp.requests, "eq_writes": len(self.editor.writes)}
+        return {
+            "host": self.host,
+            "rcp_port": self.rcp_port,
+            "eq_port": self.eq_port,
+            "rcp_requests": self.rcp.requests,
+            "eq_writes": len(self.editor.writes),
+        }
 
     # The desk as the simulated stage hears it (audio.stage.DeskMix).
 
@@ -584,8 +752,10 @@ class SimConsole:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="python -m tf_daemon.console.sim",
-                                 description="Simulated TF5: point tf5.host (with tf5.eq / eq_write) at it.")
+    ap = argparse.ArgumentParser(
+        prog="python -m tf_daemon.console.sim",
+        description="Simulated TF5: point tf5.host (with tf5.eq / eq_write) at it.",
+    )
     ap.add_argument("--host", default="127.0.0.1", help="address to listen on (0.0.0.0 for other machines)")
     ap.add_argument("--rcp-port", type=int, default=49280)
     ap.add_argument("--eq-port", type=int, default=50368)

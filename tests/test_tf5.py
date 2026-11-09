@@ -53,8 +53,11 @@ def test_patch_entries():
 
 
 def test_parse_line_handles_quoted_names():
-    assert parse_line('OK get MIXER:Current/InCh/Label/Name 4 0 "Lead Vox"') == \
-        ("OK", "get", ["MIXER:Current/InCh/Label/Name", "4", "0", "Lead Vox"])
+    assert parse_line('OK get MIXER:Current/InCh/Label/Name 4 0 "Lead Vox"') == (
+        "OK",
+        "get",
+        ["MIXER:Current/InCh/Label/Name", "4", "0", "Lead Vox"],
+    )
     assert parse_line('OK get X 0 0 "unbalanced') is None
 
 
@@ -63,7 +66,7 @@ def test_config_validation(tmp_path):
     assert cfg.tf5.host == "" and cfg.tf5.port == 49280
     assert [m.name for m in build_modules(cfg)] == ["audio"]
     p = tmp_path / "c.toml"
-    for bad in ('[tf5]\nport = 0\n', '[tf5]\nusb_patch = ["Aux 3"]\n', '[tf5]\npassword = 1234\n'):
+    for bad in ("[tf5]\nport = 0\n", '[tf5]\nusb_patch = ["Aux 3"]\n', "[tf5]\npassword = 1234\n"):
         p.write_text(bad)
         with pytest.raises(ConfigError, match="tf5"):
             load_config(p)
@@ -75,35 +78,45 @@ def test_config_validation(tmp_path):
 
 @pytest.fixture
 def console():
-    tf = SimRCP({
-        (INCH + "Label/Name", 0, 0): '"Kick"',
-        (INCH + "Label/Name", 1, 0): '"Lead Vox"',
-        (INCH + "Fader/Level", 1, 0): "-1250",
-        (INCH + "Fader/On", 1, 0): "1",
-        (INCH + "ToStereo/Pan", 1, 0): "-20",
-        (INCH + "Label/Color", 1, 0): '"Blue"',
-        (INCH + "Port/HA/Gain", 1, 0): "3150",
-        (ST + "Label/Name", 0, 0): '"ST L"',
-        (ST + "Fader/Level", 0, 0): "-32768",
-        (INCH + "ToMix/Level", 1, 0): "-32768",
-        (INCH + "ToMix/Level", 1, 7): "-600",
-        (INCH + "ToMix/On", 1, 7): "1",
-        (INCH + "ToFx/Level", 1, 1): "-1000",
-        ("MIXER:Current/Mix/Label/Name", 0, 0): '"STAGE"',
-        ("MIXER:Current/Mix/Label/Name", 7, 0): '"DRUM"',
-    }, prminfo=PRMINFO)
+    tf = SimRCP(
+        {
+            (INCH + "Label/Name", 0, 0): '"Kick"',
+            (INCH + "Label/Name", 1, 0): '"Lead Vox"',
+            (INCH + "Fader/Level", 1, 0): "-1250",
+            (INCH + "Fader/On", 1, 0): "1",
+            (INCH + "ToStereo/Pan", 1, 0): "-20",
+            (INCH + "Label/Color", 1, 0): '"Blue"',
+            (INCH + "Port/HA/Gain", 1, 0): "3150",
+            (ST + "Label/Name", 0, 0): '"ST L"',
+            (ST + "Fader/Level", 0, 0): "-32768",
+            (INCH + "ToMix/Level", 1, 0): "-32768",
+            (INCH + "ToMix/Level", 1, 7): "-600",
+            (INCH + "ToMix/On", 1, 7): "1",
+            (INCH + "ToFx/Level", 1, 1): "-1000",
+            ("MIXER:Current/Mix/Label/Name", 0, 0): '"STAGE"',
+            ("MIXER:Current/Mix/Label/Name", 7, 0): '"DRUM"',
+        },
+        prminfo=PRMINFO,
+    )
     yield tf
     tf.close()
 
 
 def test_names_and_settings_flow_into_the_engine(console):
     cfg = make_config(channels=[{"index": 0, "label": "Main"}])  # an explicit label beats the console's name
-    src = SynthSource(channels=4, active=[0, 1, 2, 3], blocksize=1200, speech_db=-20, noise_db=-50,
-                      tone_hz=2500, tone_db=-15)
+    src = SynthSource(
+        channels=4, active=[0, 1, 2, 3], blocksize=1200, speech_db=-20, noise_db=-50, tone_hz=2500, tone_db=-15
+    )
     engine = AudioEngine(cfg, src)
     patch = [("InCh", 0), ("InCh", 1), ("St", 0), None]
-    client = TF5Client("127.0.0.1", console.port, patch, poll_s=30, on_names=engine.set_console_names,
-                       on_gains=engine.set_console_gains)
+    client = TF5Client(
+        "127.0.0.1",
+        console.port,
+        patch,
+        poll_s=30,
+        on_names=engine.set_console_names,
+        on_gains=engine.set_console_gains,
+    )
     client.start()
     try:
         wait_until(lambda: engine.inputs[2].label == "ST L")
@@ -194,6 +207,7 @@ def test_tf5_routes(console):
 
 
 # ---------------------------------------------------------------- desk changes pushed to the page
+
 
 def test_change_feed(console):
     client = TF5Client("127.0.0.1", console.port, [("InCh", 0), ("InCh", 1)], poll_s=30, on_names=lambda n: None)
@@ -293,16 +307,16 @@ def test_eq_is_pushed_only_when_it_changes():
 
     c, ws, view = Console(), WS(), [1]
     seq, eq_sent = _send_console(ws, c, 0, view, None)
-    assert [m["index"] for m in ws.sent] == [1]           # first look at input 1
+    assert [m["index"] for m in ws.sent] == [1]  # first look at input 1
     seq, eq_sent = _send_console(ws, c, seq, view, eq_sent)
-    assert len(ws.sent) == 1                              # nothing changed: nothing sent
-    c.eq_version += 1                                     # mixing data changed (say a fader), EQ didn't
+    assert len(ws.sent) == 1  # nothing changed: nothing sent
+    c.eq_version += 1  # mixing data changed (say a fader), EQ didn't
     seq, eq_sent = _send_console(ws, c, seq, view, eq_sent)
     assert len(ws.sent) == 1
     c.gains[1] = 6.0
-    c.eq_version += 1                                     # the EQ itself changed
+    c.eq_version += 1  # the EQ itself changed
     seq, eq_sent = _send_console(ws, c, seq, view, eq_sent)
     assert ws.sent[-1] == {"type": "tf5-eq", "index": 1, "eq": {"gain": 6.0}}
-    view[:] = [2]                                         # the page switched input
+    view[:] = [2]  # the page switched input
     seq, eq_sent = _send_console(ws, c, seq, view, eq_sent)
     assert ws.sent[-1]["index"] == 2 and len(ws.sent) == 3

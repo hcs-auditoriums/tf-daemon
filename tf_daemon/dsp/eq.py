@@ -28,17 +28,18 @@ def eq_curve(eq: dict[str, Any] | None, freqs: np.ndarray = CURVE_FREQS) -> np.n
         if b["type"] in ("hpf", "lpf"):
             if b.get("on", True):
                 out += section_db(b["type"], b["freq"], 0.0, BUTTERWORTH_Q, freqs)
-        elif b["gain"] != 0:   # a zero-gain band is flat (TF Editor skips it)
+        elif b["gain"] != 0:  # a zero-gain band is flat (TF Editor skips it)
             out += section_db(b["type"], b["freq"], b["gain"], b["q"], freqs)
     return out
 
 
-def section_db(kind: str, freq: float, gain_db: float, q: float, freqs: np.ndarray = CURVE_FREQS,
-               fs: float = FS) -> np.ndarray:
+def section_db(
+    kind: str, freq: float, gain_db: float, q: float, freqs: np.ndarray = CURVE_FREQS, fs: float = FS
+) -> np.ndarray:
     """|H| in dB of one section at ``freqs``; ``kind``: bell, low_shelf, high_shelf,
     hpf / lpf (2nd order, Q), hpf1 / lpf1 (1st order)."""
     b, a = biquad(kind, freq, gain_db, q, fs)
-    z = np.exp(-1j * 2 * np.pi * np.asarray(freqs, dtype=float) / max(fs, 44100.0))   # z^-1
+    z = np.exp(-1j * 2 * np.pi * np.asarray(freqs, dtype=float) / max(fs, 44100.0))  # z^-1
     h = (b[0] + b[1] * z + b[2] * z * z) / (a[0] + a[1] * z + a[2] * z * z)
     return 20 * np.log10(np.maximum(np.abs(h), 1e-12))
 
@@ -50,7 +51,7 @@ def biquad(kind: str, freq: float, gain_db: float, q: float, fs: float = FS) -> 
     k = math.tan(math.pi * max(freq, 16.0) / fs)
     kk = k * k
     v = 10 ** (abs(gain_db) / 20)
-    if kind == "bell":   # Zoelzer: the cut mirrors the boost
+    if kind == "bell":  # Zoelzer: the cut mirrors the boost
         num, den = (v * k / q, k / q) if gain_db > 0 else (k / q, v * k / q)
         return [1 + kk + num, 2 * (kk - 1), 1 + kk - num], [1 + kk + den, 2 * (kk - 1), 1 + kk - den]
     if kind in ("low_shelf", "high_shelf"):

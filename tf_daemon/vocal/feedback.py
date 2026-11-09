@@ -42,11 +42,11 @@ from .transfer import Transfer
 # correlates with itself and would fake a strong leak.
 POINTS = 150.0 * 2.0 ** (np.arange(0, 122) / 24)
 WIDTH_OCT = 1 / 12
-MIN_COHERENCE = 0.6       # both measurements, per band
-MIN_FRAMES = 40           # ~2 s of each kind before trusting it
-MIN_GOOD_SHARE = 0.3      # share of the bands that must be clear (the top octave often has little in it)
-MARGIN_DB = 6.0           # keep at least this much headroom (for boosts, and auto mode)
-IDLE_MAINS_DB = -60.0     # the mains must carry something (dBFS RMS) to measure the leak
+MIN_COHERENCE = 0.6  # both measurements, per band
+MIN_FRAMES = 40  # ~2 s of each kind before trusting it
+MIN_GOOD_SHARE = 0.3  # share of the bands that must be clear (the top octave often has little in it)
+MARGIN_DB = 6.0  # keep at least this much headroom (for boosts, and auto mode)
+IDLE_MAINS_DB = -60.0  # the mains must carry something (dBFS RMS) to measure the leak
 MAINS_OVER_MIC_DB = 10.0  # ... clearly louder than the idle mic, so what it hears is mostly the PA
 
 
@@ -56,7 +56,7 @@ class Feedback:
 
     def process_idle(self, mains: np.ndarray, mic: np.ndarray) -> None:
         """One hop while this mic's talker is quiet: learn the PA -> mic leak."""
-        level = lambda x: 10 * np.log10(float(np.mean(np.asarray(x[-self.leak.N:], dtype=np.float64) ** 2)) + 1e-30)  # noqa: E731
+        level = lambda x: 10 * np.log10(float(np.mean(np.asarray(x[-self.leak.N :], dtype=np.float64) ** 2)) + 1e-30)  # noqa: E731
         m = level(mains)
         if m < IDLE_MAINS_DB or m - level(mic) < MAINS_OVER_MIC_DB:
             return
@@ -68,8 +68,11 @@ class Feedback:
     def headroom(self, forward: Transfer | None) -> dict[str, Any]:
         """Headroom per band and its minimum, from the forward (mic -> mains) transfer."""
         if forward is None or forward.frames < MIN_FRAMES or self.leak.frames < MIN_FRAMES:
-            need = "the voice in the mains" if forward is None or forward.frames < MIN_FRAMES else \
-                "the PA at this mic while it's idle (needs other sound in the mains)"
+            need = (
+                "the voice in the mains"
+                if forward is None or forward.frames < MIN_FRAMES
+                else "the PA at this mic while it's idle (needs other sound in the mains)"
+            )
             return {"known": False, "note": f"feedback headroom: still measuring {need}…"}
         fg, fc = forward.bands(POINTS, WIDTH_OCT)
         lg, lc = self.leak.bands(POINTS, WIDTH_OCT)
@@ -78,12 +81,17 @@ class Feedback:
             return {"known": False, "note": "feedback headroom: the measurements aren't clear enough yet"}
         head = np.where(good, -(fg + lg), np.nan)
         k = int(np.nanargmin(head))
-        out: dict[str, Any] = {"known": True, "min_db": round(float(head[k]), 1), "at_hz": round(float(POINTS[k]), -1),
-               "leak_delay_ms": None if self.leak.delay is None else round(self.leak.delay / self.leak.fs * 1000, 1),
-               "points": [round(float(f), 1) for f in POINTS],
-               "headroom": [None if np.isnan(h) else round(float(h), 1) for h in head]}
-        out["note"] = (f"closest to feedback at {out['at_hz']:.0f} Hz: {out['min_db']:.0f} dB of headroom"
-                       + (" (less than the safety margin)" if out["min_db"] < MARGIN_DB else ""))
+        out: dict[str, Any] = {
+            "known": True,
+            "min_db": round(float(head[k]), 1),
+            "at_hz": round(float(POINTS[k]), -1),
+            "leak_delay_ms": None if self.leak.delay is None else round(self.leak.delay / self.leak.fs * 1000, 1),
+            "points": [round(float(f), 1) for f in POINTS],
+            "headroom": [None if np.isnan(h) else round(float(h), 1) for h in head],
+        }
+        out["note"] = f"closest to feedback at {out['at_hz']:.0f} Hz: {out['min_db']:.0f} dB of headroom" + (
+            " (less than the safety margin)" if out["min_db"] < MARGIN_DB else ""
+        )
         return out
 
 
@@ -105,4 +113,5 @@ def boost_cap(fb: dict[str, Any]) -> Callable[[float], float] | None:
     def cap(freq: float) -> float:
         h = headroom_at(fb, freq)
         return float("inf") if h is None else max(0.0, h - MARGIN_DB)
+
     return cap

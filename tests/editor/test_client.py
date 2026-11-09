@@ -38,9 +38,15 @@ from tf_daemon.console.editor.codec import (
 from tf_daemon.console.editor.dump import channel_eq
 
 EXPECTED_HANDSHAKE = [
-    ("MPRO", SUBSCRIBE), ("MPRO", HASH_COMPARE), ("MPRO", SYNC_OPEN), ("MPRO", SYNC_CLOSE),
+    ("MPRO", SUBSCRIBE),
+    ("MPRO", HASH_COMPARE),
+    ("MPRO", SYNC_OPEN),
+    ("MPRO", SYNC_CLOSE),
     ("EEVT", EVENT),
-    ("MMIX", SUBSCRIBE), ("MMIX", HASH_COMPARE), ("MMIX", SYNC_OPEN), ("MMIX", SYNC_CLOSE),
+    ("MMIX", SUBSCRIBE),
+    ("MMIX", HASH_COMPARE),
+    ("MMIX", SYNC_OPEN),
+    ("MMIX", SYNC_CLOSE),
 ]
 
 
@@ -48,7 +54,9 @@ def test_handshake_sync_and_eq(console, client_for):
     changes = []
     client = client_for(console, on_change=lambda: changes.append(1))
     wait_until(lambda: client.synced)
-    assert console.sent_by_client()[:len(EXPECTED_HANDSHAKE)] == EXPECTED_HANDSHAKE
+    # The handshake's last frames may still be on their way to the console when synced is set.
+    wait_until(lambda: len(console.sent_by_client()) >= len(EXPECTED_HANDSHAKE))
+    assert console.sent_by_client()[: len(EXPECTED_HANDSHAKE)] == EXPECTED_HANDSHAKE
     assert console.events_from_client()[0] == (EVENT, "SetClientType", "TYPE:StageMix SYNCDIR:2")
     sub = console.received[0][1]
     assert sub.elements[0].value == "Property"
@@ -82,10 +90,10 @@ def test_captured_board_pushes_resolve(mixing):
         name, _, prm = mixing.resolve(push["path"], push["idx"])
         expect = "InputChannel:{}/".format(push["idx"][0]) + CAPTURED_NAMES[tuple(push["path"])].format(*push["idx"])
         assert name == expect
-        assert (prm.type == 1) == (push["type"] == T_S32)          # signed values land on signed params
+        assert (prm.type == 1) == (push["type"] == T_S32)  # signed values land on signed params
         assert push["origin"] == 0xA1
     gains = [p["value"] for p in pushes if p["path"] == [0, 7, 1, 3, 2]]
-    assert min(gains) == -1800 and max(gains) == 1800             # a sweep over the full +-18 dB
+    assert min(gains) == -1800 and max(gains) == 1800  # a sweep over the full +-18 dB
 
 
 def test_captured_board_pushes_apply_in_order(mixing):
@@ -100,11 +108,14 @@ def test_captured_board_pushes_apply_in_order(mixing):
     assert eq["bands"][3]["freq"] == last["InputChannel:0/PEQ/Bank/BandH/Frequency"] / 10
 
 
-@pytest.mark.parametrize("path, idx", [
-    ([0, 7, 0, 2, 2], [0, 0, 0, 0, 0]),   # the guide's old children-only address for BandL/Gain
-    ([0, 7, 1, 3], [0, 0, 0, 0]),         # ends at a collection
-    ([0, 7, 3], [0, 0, 0]),               # PEQ has 1 parameter + 2 collections
-])
+@pytest.mark.parametrize(
+    "path, idx",
+    [
+        ([0, 7, 0, 2, 2], [0, 0, 0, 0, 0]),  # the guide's old children-only address for BandL/Gain
+        ([0, 7, 1, 3], [0, 0, 0, 0]),  # ends at a collection
+        ([0, 7, 3], [0, 0, 0]),  # PEQ has 1 parameter + 2 collections
+    ],
+)
 def test_resolve_rejects_children_only_addresses(mixing, path, idx):
     with pytest.raises(ProtocolError):
         mixing.resolve(path, idx)
@@ -143,9 +154,9 @@ def test_live_changes_from_the_desk(console, client_for):
     wait_until(lambda: not client.eq("InCh", 0)["on"])
     console.push_change("InputChannel:0/Label/Name", "Choir")
     wait_until(lambda: client.get("InputChannel:0/Label/Name") == "Choir")
-    console.push_change("Stereo:0/PEQ/Bank/Band:1/Gain", 250, origin=0xA0)         # origin doesn't matter to us
+    console.push_change("Stereo:0/PEQ/Bank/Band:1/Gain", 250, origin=0xA0)  # origin doesn't matter to us
     wait_until(lambda: client.eq("St", 0)["bands"][2]["gain"] == 2.5)
-    console.push_change("InputChannel:3/PEQ/Bank/BandL/Gain", 120, vtype=T_S16)     # narrow types decode too
+    console.push_change("InputChannel:3/PEQ/Bank/BandL/Gain", 120, vtype=T_S16)  # narrow types decode too
     wait_until(lambda: client.eq("InCh", 3)["bands"][0]["gain"] == 1.2)
     console.push_change("InputChannel:3/PEQ/Bank/BandL/Type", 1, vtype=T_U8)
     wait_until(lambda: client.eq("InCh", 3)["bands"][0]["type"] == "low_shelf")
@@ -157,16 +168,16 @@ def test_bad_pushes_are_ignored(console, client_for):
     client = client_for(console)
     wait_until(lambda: client.synced)
     before = client.eq("InCh", 0)
-    console.push("MMIX", set_param("Mixing", [0, 99, 0], [0, 0, 0], 5))                  # no such parameter
-    console.push("MMIX", set_param("Mixing", [0, 0, 0], [45, 0, 0], 5))                  # channel 46
-    console.push("MMIX", set_param("Processing", [0, 0, 0], [0, 0, 0], 5))               # other function
+    console.push("MMIX", set_param("Mixing", [0, 99, 0], [0, 0, 0], 5))  # no such parameter
+    console.push("MMIX", set_param("Mixing", [0, 0, 0], [45, 0, 0], 5))  # channel 46
+    console.push("MMIX", set_param("Processing", [0, 0, 0], [0, 0, 0], 5))  # other function
     gain = wire_address(console.mixing, "InputChannel:0/PEQ/Bank/BandL/Gain")
-    console.push("MMIX", set_param("Mixing", *gain, "text"))                             # wrong type
-    console.push("MMIX", set_param("Mixing", *gain, 70000))                              # doesn't fit int16
-    console.push("MMIX", message(SET_PARAM, [element(T_U8, b"\0")]))                    # truncated
-    console.push("MMIX", message((0x01, 0x05, 0x01)))                                    # unknown command
-    console.push("MPRO", set_param("Property", [0], [0], 1))                             # Property: ignored
-    console.push_change("InputChannel:9/PEQ/Bank/Band:0/Gain", -100)                     # a good one last
+    console.push("MMIX", set_param("Mixing", *gain, "text"))  # wrong type
+    console.push("MMIX", set_param("Mixing", *gain, 70000))  # doesn't fit int16
+    console.push("MMIX", message(SET_PARAM, [element(T_U8, b"\0")]))  # truncated
+    console.push("MMIX", message((0x01, 0x05, 0x01)))  # unknown command
+    console.push("MPRO", set_param("Property", [0], [0], 1))  # Property: ignored
+    console.push_change("InputChannel:9/PEQ/Bank/Band:0/Gain", -100)  # a good one last
     wait_until(lambda: client.eq("InCh", 9)["bands"][1]["gain"] == -1.0)
     assert client.eq("InCh", 0) == before and client.connected and client.changes == 1
     # The four Mixing pushes that didn't fit are counted and shown, not silently dropped.
@@ -182,10 +193,11 @@ def test_events_are_answered_like_tf_editor(console, client_for):
     n = len(console.raw)
     console.push_event("KeepAlive")
     console.push_event("NotifySyncStatus", "SCN0INI:23 SCN0REQ:0 LIB0INI:142")
-    console.push_event("RecallScene", "scene_a 3")          # not ours to acknowledge
+    console.push_event("RecallScene", "scene_a 3")  # not ours to acknowledge
     console.push_event("SendWarningMessage", "x")
-    wait_until(lambda: (EVENT_REPLY, "NotifySyncStatus", "SCN0INI:23 SCN0REQ:0 LIB0INI:142")
-               in console.events_from_client())
+    wait_until(
+        lambda: (EVENT_REPLY, "NotifySyncStatus", "SCN0INI:23 SCN0REQ:0 LIB0INI:142") in console.events_from_client()
+    )
     replies = [e for e in console.events_from_client() if e[0] == EVENT_REPLY]
     assert (EVENT_REPLY, "KeepAlive", "") in replies
     assert not any(name in ("RecallScene", "SendWarningMessage") for _, name, _ in console.events_from_client())
@@ -220,7 +232,7 @@ def test_falls_back_without_on_set_client_type(client_for, monkeypatch):
     try:
         client = client_for(fake)
         wait_until(lambda: client.synced)
-        assert fake.sent_by_client()[:len(EXPECTED_HANDSHAKE)] == EXPECTED_HANDSHAKE
+        assert fake.sent_by_client()[: len(EXPECTED_HANDSHAKE)] == EXPECTED_HANDSHAKE
         assert_read_only(fake)
     finally:
         fake.close()
@@ -246,7 +258,7 @@ def test_unknown_firmware_descriptor_is_reported(client_for):
         wait_until(lambda: client.synced)
         st = client.status()
         assert st["descriptor_md5"] == "00112233445566778899aabbccddeeff" and not st["descriptor_known"]
-        assert client.eq("InCh", 0) is not None   # read by name, not by position
+        assert client.eq("InCh", 0) is not None  # read by name, not by position
     finally:
         fake.close()
 
@@ -300,8 +312,9 @@ def test_a_bug_that_tries_to_write_stops_the_client(console, client_for, monkeyp
     assert "refused" in caplog.text
     n = client.connects
     import time
+
     time.sleep(0.5)
-    assert client.connects == n                    # no retry
+    assert client.connects == n  # no retry
 
 
 def test_password_never_leaks(console, client_for, caplog):
@@ -311,12 +324,13 @@ def test_password_never_leaks(console, client_for, caplog):
         console.push_change("InputChannel:0/PEQ/On", 0)
         wait_until(lambda: client.changes == 1)
         client.stop()
-    assert PASSWORD.encode() in console.property_blob          # it really was sent to the client
+    assert PASSWORD.encode() in console.property_blob  # it really was sent to the client
     assert PASSWORD not in caplog.text
     assert PASSWORD not in repr(client.status()) and PASSWORD not in repr(vars(client))
 
 
 # ====================================================================== probe CLI
+
 
 def test_cli_prints_eq(console, capsys):
     rc = editor_cli.main(["127.0.0.1", "--port", str(console.port), "--channels", "1-2", "--timeout", "5"])

@@ -46,8 +46,8 @@ log = logging.getLogger(__name__)
 
 PUBLISH_MIN_INTERVAL_S = 0.25
 KNOWN_SAVE_MIN_INTERVAL_S = 5.0  # catalog changes are written at most this often
-PROBE_ATTEMPTS = 3          # a found host that never answers this many times is dropped...
-REJECT_RETRY_S = 600.0      # ...and ignored for this long
+PROBE_ATTEMPTS = 3  # a found host that never answers this many times is dropped...
+REJECT_RETRY_S = 600.0  # ...and ignored for this long
 _HOST = re.compile(r"^[A-Za-z0-9.\-]+(?::\d{1,5})?$")
 
 
@@ -75,11 +75,11 @@ class QLXDEngine:
         self._known_saved_at = 0.0
         self.hub = FrameHub()
 
-        self._lock = threading.RLock()       # guards the receiver set and network state
+        self._lock = threading.RLock()  # guards the receiver set and network state
         self._apply_lock = threading.Lock()  # serializes rebuilds; never taken by callbacks
-        self._generation = 0                 # bumped per rebuild; stale listeners are ignored
+        self._generation = 0  # bumped per rebuild; stale listeners are ignored
         self._receivers: dict[str, tuple[Receiver, str]] = {}  # key -> (receiver, source)
-        self._rejected: dict[str, float] = {}                    # key -> monotonic time
+        self._rejected: dict[str, float] = {}  # key -> monotonic time
         self._iface: Interface | None = None
         self._net_error: str | None = None
         self._listener: SLPListener | None = None
@@ -219,8 +219,12 @@ class QLXDEngine:
                     continue
                 key = self._known_key(snap)
                 entry = self._known.get(key, {})
-                new = {"name": snap["name"], "device_id": snap["device_id"],
-                       "frequency_mhz": snap["frequency_mhz"], "host": snap["host"]}
+                new = {
+                    "name": snap["name"],
+                    "device_id": snap["device_id"],
+                    "frequency_mhz": snap["frequency_mhz"],
+                    "host": snap["host"],
+                }
                 if any(entry.get(k) != v for k, v in new.items()):
                     self._known_dirty = True
                 self._known[key] = {**new, "last_seen": snap["last_seen"]}  # last_seen alone isn't worth a write
@@ -267,9 +271,16 @@ class QLXDEngine:
             out = []
             for key in self._known.keys() | live.keys():
                 e = live.get(key) or self._known[key]
-                out.append({"key": key, "name": e["name"], "device_id": e["device_id"],
-                            "frequency_mhz": e["frequency_mhz"], "online": key in live,
-                            "last_seen": e["last_seen"]})
+                out.append(
+                    {
+                        "key": key,
+                        "name": e["name"],
+                        "device_id": e["device_id"],
+                        "frequency_mhz": e["frequency_mhz"],
+                        "online": key in live,
+                        "last_seen": e["last_seen"],
+                    }
+                )
         return sorted(out, key=lambda d: d["frequency_mhz"])
 
     # ------------------------------------------------------------------ network / receivers
@@ -301,8 +312,11 @@ class QLXDEngine:
             name = self.settings["interface"]
             self._iface = find_interface(name)
             if self._iface is None:
-                self._net_error = (f"interface {name!r} not found" if name
-                                   else "no interface with a link-local (169.254.x.x) address; pick one")
+                self._net_error = (
+                    f"interface {name!r} not found"
+                    if name
+                    else "no interface with a link-local (169.254.x.x) address; pick one"
+                )
             elif not self._iface.ipv4:
                 self._net_error = f"{self._iface.name} has no IPv4 address"
             else:
@@ -327,8 +341,14 @@ class QLXDEngine:
         key = f"{host}:{port}"
         if key in self._receivers:
             return
-        r = Receiver(host, port, self._iface if bind else None, self._dirty.set,
-                     meter_poll_s=self.meter_poll_s, full_poll_s=self.full_poll_s)
+        r = Receiver(
+            host,
+            port,
+            self._iface if bind else None,
+            self._dirty.set,
+            meter_poll_s=self.meter_poll_s,
+            full_poll_s=self.full_poll_s,
+        )
         self._receivers[key] = (r, source)
         r.start()
 
@@ -346,8 +366,11 @@ class QLXDEngine:
 
     def _prune(self) -> None:
         with self._lock:
-            dead = [k for k, (r, src) in self._receivers.items()
-                    if src == "found" and not r.ever_online and r.failures >= PROBE_ATTEMPTS]
+            dead = [
+                k
+                for k, (r, src) in self._receivers.items()
+                if src == "found" and not r.ever_online and r.failures >= PROBE_ATTEMPTS
+            ]
             for k in dead:
                 r, _ = self._receivers.pop(k)
                 r.signal_stop()
@@ -381,8 +404,12 @@ class QLXDEngine:
     def status(self) -> dict[str, Any]:
         snap = self.snapshot()
         rx = snap["receivers"]
-        return {"interface": snap["network"]["interface"], "receivers": len(rx),
-                "online": sum(1 for r in rx if r["online"]), "error": snap["network"]["error"]}
+        return {
+            "interface": snap["network"]["interface"],
+            "receivers": len(rx),
+            "online": sum(1 for r in rx if r["online"]),
+            "error": snap["network"]["error"],
+        }
 
     def interfaces(self) -> list[dict[str, Any]]:
         return [i.as_dict() for i in list_interfaces()]

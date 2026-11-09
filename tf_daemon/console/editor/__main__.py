@@ -21,8 +21,10 @@ def _parse_channels(spec: str) -> list[int]:
 
 def main(argv: list[str] | None = None) -> int:
     """Connect once, print the EQ of some input channels, optionally keep watching. Read-only."""
-    ap = argparse.ArgumentParser(prog="python -m tf_daemon.console.editor",
-                                 description="Read (never write) the TF5's EQ over the TF Editor protocol.")
+    ap = argparse.ArgumentParser(
+        prog="python -m tf_daemon.console.editor",
+        description="Read (never write) the TF5's EQ over the TF Editor protocol.",
+    )
     ap.add_argument("host")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--channels", default="1-8", help="input channels, e.g. 1-8,12 (default 1-8)")

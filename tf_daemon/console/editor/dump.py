@@ -14,17 +14,17 @@ from .codec import T_U8, Message, ProtocolError
 @dataclass
 class Prm:
     name: str
-    type: int        # 0 string, 1 signed, 2 unsigned
+    type: int  # 0 string, 1 signed, 2 unsigned
     elemsize: int
     arraysize: int
-    offset: int      # within the owning collection
+    offset: int  # within the owning collection
 
 
 @dataclass
 class Col:
     name: str
-    offset: int      # within the parent collection
-    datasize: int    # one array element
+    offset: int  # within the parent collection
+    datasize: int  # one array element
     arraysize: int
     params: list[Prm] = field(default_factory=list)
     children: list[Col] = field(default_factory=list)
@@ -52,8 +52,8 @@ class Dump:
     def __init__(self, blob: bytes) -> None:
         if blob[:8] != b"MMSXLIT\0" or len(blob) < 0x58:
             raise ProtocolError("not an MMSXLIT dump")
-        self.func = blob[8:0x2c].split(b"\0", 1)[0].decode("ascii", errors="replace")
-        self.desc_md5 = blob[0x2c:0x50].split(b"\0", 1)[0].decode("ascii", errors="replace")
+        self.func = blob[8:0x2C].split(b"\0", 1)[0].decode("ascii", errors="replace")
+        self.desc_md5 = blob[0x2C:0x50].split(b"\0", 1)[0].decode("ascii", errors="replace")
         desc_len, data_len = struct.unpack_from("<II", blob, 0x50)
         if 0x58 + desc_len + data_len > len(blob):
             raise ProtocolError("dump shorter than its header says")
@@ -63,26 +63,26 @@ class Dump:
         if end != self._desc_end:
             raise ProtocolError("descriptor length mismatch")
         self.root = root
-        self.data = bytearray(blob[self._desc_end:self._desc_end + data_len])
+        self.data = bytearray(blob[self._desc_end : self._desc_end + data_len])
         if root.datasize * root.arraysize > len(self.data):
             raise ProtocolError("data image smaller than the descriptor")
         del self._blob
 
     def _col(self, pos: int) -> tuple[Col, int]:
         b = self._blob
-        if pos + 0x30 > self._desc_end or b[pos:pos + 4] != b"COL0":
+        if pos + 0x30 > self._desc_end or b[pos : pos + 4] != b"COL0":
             raise ProtocolError(f"expected COL0 at 0x{pos:x}")
-        name = b[pos + 4:pos + 0x1c].split(b"\0", 1)[0].decode("ascii", errors="replace")
-        pbytes, cbytes, off, size, arr = struct.unpack_from("<5I", b, pos + 0x1c)
+        name = b[pos + 4 : pos + 0x1C].split(b"\0", 1)[0].decode("ascii", errors="replace")
+        pbytes, cbytes, off, size, arr = struct.unpack_from("<5I", b, pos + 0x1C)
         col = Col(name, off, size, arr)
         p, poff = pos + 0x30, 0
         if pbytes % 32 or p + pbytes + cbytes > self._desc_end:
             raise ProtocolError(f"bad collection sizes in {name!r}")
         for _ in range(pbytes // 32):
-            if b[p:p + 3] != b"PR ":
+            if b[p : p + 3] != b"PR ":
                 raise ProtocolError(f"expected PR at 0x{p:x}")
             typ, esz, parr = struct.unpack_from("<BHH", b, p + 3)
-            pname = b[p + 8:p + 32].split(b"\0", 1)[0].decode("ascii", errors="replace")
+            pname = b[p + 8 : p + 32].split(b"\0", 1)[0].decode("ascii", errors="replace")
             col.params.append(Prm(pname, typ, esz, parr, poff))
             poff += esz * parr
             p += 32
@@ -159,7 +159,7 @@ class Dump:
             k = next((n for n, c in enumerate(node.children) if c.name == name), None)
             if k is None:
                 raise KeyError(part)
-            wp.append(len(node.params) + k)   # parameters first, then child collections
+            wp.append(len(node.params) + k)  # parameters first, then child collections
             node = node.children[k]
             if not 0 <= i < node.arraysize:
                 raise KeyError(f"{part}: index out of range (size {node.arraysize})")
@@ -173,7 +173,7 @@ class Dump:
         return wp + [k], idx + [i], node.params[k]
 
     def _read(self, off: int, prm: Prm) -> int | str:
-        raw = bytes(self.data[off:off + prm.elemsize])
+        raw = bytes(self.data[off : off + prm.elemsize])
         if len(raw) != prm.elemsize:
             raise ProtocolError("parameter past end of data image")
         if prm.type == 0:
@@ -189,7 +189,7 @@ class Dump:
         if prm.type == 0:
             if not isinstance(value, str):
                 raise ProtocolError(f"{name}: expected a string")
-            raw = value.encode("utf-8")[:max(0, prm.elemsize - 1)].ljust(prm.elemsize, b"\0")
+            raw = value.encode("utf-8")[: max(0, prm.elemsize - 1)].ljust(prm.elemsize, b"\0")
         else:
             if not isinstance(value, int):
                 raise ProtocolError(f"{name}: expected an integer")
@@ -197,7 +197,7 @@ class Dump:
                 raw = value.to_bytes(prm.elemsize, "little", signed=prm.type == 1)
             except OverflowError:
                 raise ProtocolError(f"{name}: {value} doesn't fit {prm.elemsize} byte(s)") from None
-        self.data[off:off + prm.elemsize] = raw
+        self.data[off : off + prm.elemsize] = raw
         return name
 
 
@@ -239,11 +239,17 @@ def channel_eq(dump: Dump, kind: str, x: int) -> dict[str, Any] | None:
             "bands": [],
         }
         if _has(dump, f"{base}/Bank/HPF/On"):
-            eq["hpf"] = {"on": bool(g(bank + "HPF/On")), "freq": int(g(bank + "HPF/Frequency")) / 10,
-                         "slope": int(_opt(g, bank + "HPF/Slope", 12))}
+            eq["hpf"] = {
+                "on": bool(g(bank + "HPF/On")),
+                "freq": int(g(bank + "HPF/Frequency")) / 10,
+                "slope": int(_opt(g, bank + "HPF/Slope", 12)),
+            }
         eq["bands"].append(_band(g, bank + "BandL", "L", low=True))
-        n_mid = dump.root.child(col).child("PEQ").child("Bank").child("Band").arraysize \
-            if _has_col(dump, col, "Band") else 0
+        n_mid = (
+            dump.root.child(col).child("PEQ").child("Bank").child("Band").arraysize
+            if _has_col(dump, col, "Band")
+            else 0
+        )
         for i in range(n_mid):
             eq["bands"].append(_band(g, f"{bank}Band:{i}", MID_LABELS[i] if n_mid == len(MID_LABELS) else str(i + 1)))
         eq["bands"].append(_band(g, bank + "BandH", "H", high=True))
@@ -288,5 +294,11 @@ def _band(g: Callable[[str], Any], path: str, label: str, low: bool = False, hig
         on = bool(_opt(g, path + ("/HPFOn" if low else "/LPFOn"), 0))
     elif (low or high) and t == 1:
         kind = "low_shelf" if low else "high_shelf"
-    return {"label": label, "type": kind, "on": on, "freq": g(path + "/Frequency") / 10,
-            "gain": g(path + "/Gain") / 100, "q": g(path + "/Q") / 1000}
+    return {
+        "label": label,
+        "type": kind,
+        "on": on,
+        "freq": g(path + "/Frequency") / 10,
+        "gain": g(path + "/Gain") / 100,
+        "q": g(path + "/Q") / 1000,
+    }

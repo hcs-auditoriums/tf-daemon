@@ -27,8 +27,8 @@ class VoiceCollector:
     """Accumulates a voice: speech activity, pitch, long-term spectrum."""
 
     N = 4096
-    ACTIVE_DB = 12.0       # above the noise floor
-    MIN_LEVEL_DB = -85.0   # absolute floor for "someone is talking" (dBFS, sine-peak)
+    ACTIVE_DB = 12.0  # above the noise floor
+    MIN_LEVEL_DB = -85.0  # absolute floor for "someone is talking" (dBFS, sine-peak)
     VOICED = 0.45
 
     def __init__(self, samplerate: int = 48000, memory_s: float | None = None) -> None:
@@ -42,13 +42,13 @@ class VoiceCollector:
         self._k0, self._k1 = int(100 * n / samplerate), int(8000 * n / samplerate)
         self._lag0, self._lag1 = int(samplerate / 400), int(samplerate / 70)
         self.ltas = np.zeros(len(self.freqs))
-        self.weight = 0.0          # sum of the frames' weights in ltas (= active frames without memory)
+        self.weight = 0.0  # sum of the frames' weights in ltas (= active frames without memory)
         self.active_frames = 0
         self.voiced_frames = 0
         self._active_w = 0.0
         self._voiced_w = 0.0
         self.total_frames = 0
-        keep = None if memory_s is None else max(50, int(memory_s * 20))   # ~20 hops / s
+        keep = None if memory_s is None else max(50, int(memory_s * 20))  # ~20 hops / s
         self.f0s: deque[float] = deque(maxlen=keep)
         self._floor: float | None = None
         self._speech_levels: deque[float] = deque(maxlen=keep)
@@ -62,13 +62,13 @@ class VoiceCollector:
         """Analyze the newest N samples at stream time ``now`` (s). True if speech."""
         dt = 0.05 if self._last_t is None else min(max(now - self._last_t, 0.0), 0.5)
         self._last_t = now
-        x = np.asarray(frame[-self.N:], dtype=np.float64)
+        x = np.asarray(frame[-self.N :], dtype=np.float64)
         if len(x) < self.N:
             return False
         self.total_frames += 1
         spec = np.fft.rfft(x * self.window)
         p = np.abs(spec) ** 2
-        level = self._db(float(np.sum(p[self._k0:self._k1])))
+        level = self._db(float(np.sum(p[self._k0 : self._k1])))
         # Noise floor: follows the level down at once, creeps up 3 dB/s.
         self._floor = level if self._floor is None else min(level, self._floor + 3.0 * dt)
         active = level > self._floor + self.ACTIVE_DB and level > self.MIN_LEVEL_DB
@@ -101,7 +101,7 @@ class VoiceCollector:
         if ac[0] <= 0:
             return 0.0, 0.0
         r = ac / ac[0] / np.maximum(self._win_ac / self._win_ac[0], 1e-3)
-        seg = r[self._lag0:self._lag1 + 1]
+        seg = r[self._lag0 : self._lag1 + 1]
         best = float(seg.max())
         # Prefer the shortest lag close to the best (avoids picking an octave below).
         lag = self._lag0 + int(np.flatnonzero(seg >= 0.9 * best)[0])
@@ -124,5 +124,8 @@ class VoiceCollector:
         return float(np.median(self._speech_levels) - self._floor)
 
     def progress(self) -> dict[str, Any]:
-        return {"speech_s": round(self.speech_s, 1), "voiced_ratio": round(self.voiced_ratio, 2),
-                "f0_hz": round(float(np.median(self.f0s)), 1) if len(self.f0s) >= 5 else None}
+        return {
+            "speech_s": round(self.speech_s, 1),
+            "voiced_ratio": round(self.voiced_ratio, 2),
+            "f0_hz": round(float(np.median(self.f0s)), 1) if len(self.f0s) >= 5 else None,
+        }

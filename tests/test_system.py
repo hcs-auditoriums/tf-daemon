@@ -82,7 +82,7 @@ def test_update_runs_one_at_a_time_and_reports_state(client_for, update_files, m
     script.write_text(
         'echo "remote=$UPDATE_REMOTE branch=$UPDATE_BRANCH"; sleep 1\n'
         'printf \'{"state": "up_to_date", "message": "already at abc", "pid": %d, "time": %d}\' $$ $(date +%s)'
-        f' > {system.UPDATE_STATE}\n'
+        f" > {system.UPDATE_STATE}\n"
     )
     monkeypatch.setattr(system, "UPDATE_SCRIPT", script)
     client = client_for(None)

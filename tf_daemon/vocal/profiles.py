@@ -59,8 +59,10 @@ class ProfileStore:
     def list(self) -> list[dict[str, Any]]:
         with self._lock:
             items = sorted(self._profiles.items(), key=lambda kv: kv[0].lower())
-        return [{"name": n, "saved_at": p.get("saved_at"), "from": p.get("from"), "summary": summary(p["values"])}
-                for n, p in items]
+        return [
+            {"name": n, "saved_at": p.get("saved_at"), "from": p.get("from"), "summary": summary(p["values"])}
+            for n, p in items
+        ]
 
     def get(self, name: Any) -> dict[str, int]:
         with self._lock:
@@ -76,8 +78,11 @@ class ProfileStore:
         with self._lock:
             if name not in self._profiles and len(self._profiles) >= MAX_PROFILES:
                 raise ValueError(f"at most {MAX_PROFILES} profiles; delete some first")
-            self._profiles[name] = {"values": {k: int(values[k]) for k in PATHS}, "saved_at": time.time(),
-                                    "from": source}
+            self._profiles[name] = {
+                "values": {k: int(values[k]) for k in PATHS},
+                "saved_at": time.time(),
+                "from": source,
+            }
             self._save()
         return {"name": name}
 
@@ -105,9 +110,11 @@ def changes_to(current: dict[str, Any], values: dict[str, int]) -> list[tuple[st
 
 def summary(values: dict[str, int]) -> str:
     """'HPF 90 Hz · L -4.0 @ 230 · HM -3.0 @ 2.5k' for a list."""
+
     def f(raw: int) -> str:
         hz = raw / 10
         return f"{hz / 1000:g}k" if hz >= 1000 else f"{hz:.0f}"
+
     parts = [] if values.get("PEQ/On") else ["EQ off"]
     if values.get("PEQ/Bank/HPF/On"):
         parts.append(f"HPF {f(values['PEQ/Bank/HPF/Frequency'])} Hz")

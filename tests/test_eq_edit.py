@@ -29,21 +29,25 @@ def rig():
 def test_a_person_edit_reaches_the_desk(rig):
     c, tf5 = rig()
     assert c.get("/api/tf5/eq/0").get_json()["writable"] is True
-    r = c.put("/api/tf5/eq/0", json={"changes": [[GAIN, -450], ["PEQ/Bank/Band:1/Frequency", 31500]],
-                                      "confirm": True}).get_json()
+    r = c.put(
+        "/api/tf5/eq/0", json={"changes": [[GAIN, -450], ["PEQ/Bank/Band:1/Frequency", 31500]], "confirm": True}
+    ).get_json()
     assert r["ok"] and all(x["confirmed"] for x in r["results"])
     wait_until(lambda: tf5.eq_raw(0, [GAIN])[GAIN] == -450)
     band = c.get("/api/tf5/eq/0").get_json()["eq"]["bands"][2]
     assert (band["label"], band["gain"], band["freq"]) == ("HM", -4.5, 3150.0)
 
 
-@pytest.mark.parametrize("body, error", [
-    ({"changes": [[GAIN, -450]]}, "confirm"),
-    ({"changes": [[GAIN, "-450"]], "confirm": True}, "changes"),
-    ({"changes": [], "confirm": True}, "changes"),
-    ({"changes": [[GAIN, 5000]], "confirm": True}, "outside"),              # past +-18 dB
-    ({"changes": [["Fader/Level", 0]], "confirm": True}, "writable"),       # not an EQ parameter
-])
+@pytest.mark.parametrize(
+    "body, error",
+    [
+        ({"changes": [[GAIN, -450]]}, "confirm"),
+        ({"changes": [[GAIN, "-450"]], "confirm": True}, "changes"),
+        ({"changes": [], "confirm": True}, "changes"),
+        ({"changes": [[GAIN, 5000]], "confirm": True}, "outside"),  # past +-18 dB
+        ({"changes": [["Fader/Level", 0]], "confirm": True}, "writable"),  # not an EQ parameter
+    ],
+)
 def test_refused_edits(rig, body, error):
     c, tf5 = rig()
     before = tf5.eq_raw(0, [GAIN])
@@ -54,7 +58,7 @@ def test_refused_edits(rig, body, error):
 
 def test_no_editing_without_eq_write(rig):
     c, tf5 = rig()
-    tf5.eq_client.writes = False          # as with tf5.eq_write = false
+    tf5.eq_client.writes = False  # as with tf5.eq_write = false
     assert c.get("/api/tf5/eq/0").get_json()["writable"] is False
     r = c.put("/api/tf5/eq/0", json={"changes": [[GAIN, -450]], "confirm": True})
     assert r.status_code == 400 and "eq_write" in r.get_json()["error"]

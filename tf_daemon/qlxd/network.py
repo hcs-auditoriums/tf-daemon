@@ -52,8 +52,9 @@ def list_interfaces() -> list[Interface]:
 
 
 # Virtual adapters that also carry 169.254.x.x addresses; never auto-selected.
-_VIRTUAL = re.compile(r"tailscale|zerotier|^zt|docker|^br-|^veth|^virbr|vethernet|^wg|^tun|^tap|bluetooth|loopback",
-                      re.I)
+_VIRTUAL = re.compile(
+    r"tailscale|zerotier|^zt|docker|^br-|^veth|^virbr|vethernet|^wg|^tun|^tap|bluetooth|loopback", re.I
+)
 
 
 def find_interface(name: str | None) -> Interface | None:
@@ -108,8 +109,11 @@ class SLPListener:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind(("", SLP_PORT))
-            s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
-                         struct.pack("4s4s", socket.inet_aton(SLP_GROUP), socket.inet_aton(ip)))
+            s.setsockopt(
+                socket.IPPROTO_IP,
+                socket.IP_ADD_MEMBERSHIP,
+                struct.pack("4s4s", socket.inet_aton(SLP_GROUP), socket.inet_aton(ip)),
+            )
             s.settimeout(1.0)
         except OSError as e:
             self.error = f"cannot listen for SLP on {self.iface.name} ({ip}): {e}"

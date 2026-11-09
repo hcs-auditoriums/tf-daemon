@@ -16,7 +16,7 @@ def test_eq_config(tmp_path):
     t = load_config(None).tf5
     assert t.eq is False and t.eq_port == 50368
     p = tmp_path / "c.toml"
-    for bad in ('[tf5]\neq = "yes"\n', '[tf5]\neq = 1\n', '[tf5]\neq_port = 0\n', '[tf5]\neq_port = 70000\n'):
+    for bad in ('[tf5]\neq = "yes"\n', "[tf5]\neq = 1\n", "[tf5]\neq_port = 0\n", "[tf5]\neq_port = 70000\n"):
         p.write_text(bad)
         with pytest.raises(ConfigError, match="tf5.eq"):
             load_config(p)
@@ -36,7 +36,7 @@ def _closed_port():
 
 
 def _app(eq, eq_port=None, usb_patch=None):
-    tf5 = {"host": "127.0.0.1", "port": _closed_port(), "eq": eq}   # no RCP console: EQ is independent
+    tf5 = {"host": "127.0.0.1", "port": _closed_port(), "eq": eq}  # no RCP console: EQ is independent
     if eq_port:
         tf5["eq_port"] = eq_port
     if usb_patch is not None:
@@ -64,15 +64,29 @@ def test_eq_route(console):
         wait_until(lambda: c.get("/api/tf5/eq/0").get_json()["synced"])
         d = c.get("/api/tf5/eq/0").get_json()
         assert d["index"] == 0 and d["source"] == "InCh 1" and d["connected"]
-        assert d["eq"]["bands"][1] == {"label": "LM", "type": "bell", "on": True, "freq": 800.0, "gain": -14.1,
-                                         "q": 0.25}
+        assert d["eq"]["bands"][1] == {
+            "label": "LM",
+            "type": "bell",
+            "on": True,
+            "freq": 800.0,
+            "gain": -14.1,
+            "q": 0.25,
+        }
         assert len(d["freqs"]) == len(d["curve"]) == 241
         assert d["freqs"][0] == 20.0 and d["freqs"][-1] == 20000.0
         assert min(d["curve"]) < -20 and all(isinstance(v, float) for v in d["curve"])
         off = c.get("/api/tf5/eq/1").get_json()
         assert off["eq"]["on"] is False and set(off["curve"]) == {0.0}
-        assert c.get("/api/tf5/eq/2").get_json() == {"index": 2, "source": None, "connected": True, "synced": True,
-                                                     "writable": False, "eq": None, "freqs": [], "curve": []}
+        assert c.get("/api/tf5/eq/2").get_json() == {
+            "index": 2,
+            "source": None,
+            "connected": True,
+            "synced": True,
+            "writable": False,
+            "eq": None,
+            "freqs": [],
+            "curve": [],
+        }
         st = c.get("/api/tf5/eq/3").get_json()
         assert st["source"] == "St R" and st["eq"]["bands"][0]["type"] == "hpf"
         assert c.get("/api/tf5/eq/4").get_json()["eq"]["bands"][1]["freq"] == 1000.0
@@ -114,10 +128,10 @@ def test_page_has_the_eq_toggle():
     assert "yEq(b.gain)" in handles and "yEq(eqAt(b.freq) ?? 0)" in handles and "yEq(eqAt(eq.hpf.freq) ?? 0)" in handles
     # The console sidebar has its own EQ graph, redrawn on every pushed change.
     side = re.search(r"function drawPanelEq\(\) \{(.*?)\n\}\n", js, re.S).group(1)
-    assert "eqAt(f)" in side and "eqHalf()" in side and "peqRange" not in js   # the spectrum's scale
+    assert "eqAt(f)" in side and "eqHalf()" in side and "peqRange" not in js  # the spectrum's scale
     set_range = re.search(r"function setRange\(min, max\) \{(.*?)\n\}\n", js, re.S).group(1)
     assert "drawPanelEq()" in set_range
     on_eq = re.search(r"function onConsoleEq\(msg\) \{(.*?)\n\}\n", js, re.S).group(1)
     assert "drawPanelEq()" in on_eq
     css = (static / "style.css").read_text(encoding="utf-8")
-    assert re.search(r"\.cp-eq \{[^}]*position: static", css)   # not the full-page canvas rule
+    assert re.search(r"\.cp-eq \{[^}]*position: static", css)  # not the full-page canvas rule

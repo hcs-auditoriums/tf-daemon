@@ -8,8 +8,16 @@ N = 32768
 
 
 def make(channels=1, **kw):
-    args = dict(channels=channels, samplerate=FS, n_fft=N, hop=2400, average_tau=3.0,
-                fmin=50.0, fmax=16000.0, bands_per_octave=48)
+    args = dict(
+        channels=channels,
+        samplerate=FS,
+        n_fft=N,
+        hop=2400,
+        average_tau=3.0,
+        fmin=50.0,
+        fmax=16000.0,
+        bands_per_octave=48,
+    )
     args.update(kw)
     return SpectrumAnalyzer(**args)
 
@@ -38,7 +46,7 @@ def test_display_bins_count_and_mapping():
 def test_bin_centered_sine_reads_dbfs(amp_db):
     a = make()
     f = 64 * FS / N  # exactly on bin 64 -> no scalloping
-    freq = f * 40    # 2343.75 Hz, still bin-centered
+    freq = f * 40  # 2343.75 Hz, still bin-centered
     a.process(sine(freq, 10 ** (amp_db / 20))[None, :])
     i = int(np.argmin(np.abs(a.bins.centers - freq)))
     assert a.avg_db[0, i] == pytest.approx(amp_db, abs=0.05)
@@ -76,8 +84,8 @@ def test_live_trace_follows_the_signal_immediately():
     level = float(a.live_db[0, i])
     assert level == pytest.approx(a.avg_db[0, i], abs=0.1)  # steady: real-time == average
     a.process(quiet)
-    assert a.live_db[0, i] < -100           # gone at once in the real-time trace
-    assert a.avg_db[0, i] > level - 1       # still there in the 3 s average
+    assert a.live_db[0, i] < -100  # gone at once in the real-time trace
+    assert a.avg_db[0, i] > level - 1  # still there in the 3 s average
     assert a.peak_db[0, i] == pytest.approx(level, abs=0.01)  # and held as the peak
 
 

@@ -75,8 +75,14 @@ class DeviceSource(Source):
     STALL_S = 2.0
     CHECK_S = 0.5
 
-    def __init__(self, device_match: str, blocksize: int, samplerate: int = REQUIRED_SAMPLERATE,
-                 channels: int = 34, sd_module=None) -> None:
+    def __init__(
+        self,
+        device_match: str,
+        blocksize: int,
+        samplerate: int = REQUIRED_SAMPLERATE,
+        channels: int = 34,
+        sd_module=None,
+    ) -> None:
         self.device_match = device_match
         self.blocksize = blocksize
         self.samplerate = samplerate
@@ -86,6 +92,7 @@ class DeviceSource(Source):
         if self._sd is None:
             try:
                 import sounddevice as sd
+
                 self._sd = sd
             except (OSError, ImportError) as e:  # PortAudio shared library (or the package) missing
                 self._load_error = f"Could not load PortAudio ({e}). On Raspberry Pi OS: sudo apt install libportaudio2"
@@ -118,8 +125,14 @@ class DeviceSource(Source):
         self._close()
 
     def stats(self) -> dict:
-        return {"device": self.device_name, "connected": self._stream is not None, "error": self._error,
-                "overflows": self._overflows, "callbacks": self._callbacks, "reconnects": self._reconnects}
+        return {
+            "device": self.device_name,
+            "connected": self._stream is not None,
+            "error": self._error,
+            "overflows": self._overflows,
+            "callbacks": self._callbacks,
+            "reconnects": self._reconnects,
+        }
 
     # ------------------------------------------------------------------ supervisor thread
 
@@ -142,8 +155,9 @@ class DeviceSource(Source):
             else:
                 silent = time.monotonic() - self._last_cb
                 if not self._stream_active() or silent > self.STALL_S:
-                    log.warning("Audio device %s stopped delivering audio (%.1f s silent); reopening",
-                                self.device_name, silent)
+                    log.warning(
+                        "Audio device %s stopped delivering audio (%.1f s silent); reopening", self.device_name, silent
+                    )
                     self._error = "device stopped delivering audio (unplugged?)"
                     self._close()
                     self._reconnects += 1
@@ -165,16 +179,23 @@ class DeviceSource(Source):
         index, info = matches[0]
         open_ch = min(int(info["max_input_channels"]), self.channels)
         sd.check_input_settings(device=index, channels=open_ch, samplerate=self.samplerate, dtype="float32")
-        stream = sd.InputStream(device=index, channels=open_ch, samplerate=self.samplerate,
-                                blocksize=self.blocksize, dtype="float32", callback=self._callback)
+        stream = sd.InputStream(
+            device=index,
+            channels=open_ch,
+            samplerate=self.samplerate,
+            blocksize=self.blocksize,
+            dtype="float32",
+            callback=self._callback,
+        )
         self._last_cb = time.monotonic()  # grace period for the first callback
         self._open_channels = open_ch
         stream.start()
         self._stream = stream
         self.device_name = info["name"]
         if open_ch < self.channels:
-            log.warning("%s has %d input channels; inputs %d-%d stay silent", info["name"], open_ch,
-                        open_ch + 1, self.channels)
+            log.warning(
+                "%s has %d input channels; inputs %d-%d stay silent", info["name"], open_ch, open_ch + 1, self.channels
+            )
         log.info("Audio device [%d] %s open: %d channels @ %d Hz", index, info["name"], open_ch, self.samplerate)
 
     def _callback(self, indata, frames, time_info, status) -> None:  # PortAudio thread
@@ -296,8 +317,9 @@ class VoiceGen:
     MAX_HARMONICS = 48
     VOICE_FMAX = 5000.0
 
-    def __init__(self, rng: np.random.Generator, samplerate: int, blocksize: int,
-                 f0_range: tuple[float, float] = (95.0, 240.0)) -> None:
+    def __init__(
+        self, rng: np.random.Generator, samplerate: int, blocksize: int, f0_range: tuple[float, float] = (95.0, 240.0)
+    ) -> None:
         self._rng = rng
         self.samplerate = samplerate
         self.f0_range = f0_range
@@ -308,7 +330,7 @@ class VoiceGen:
         self._voiced = False
         self._seg_left = 0  # samples remaining in current syllable or gap
         self._k = np.arange(1, self.MAX_HARMONICS + 1, dtype=np.float64)[:, None]
-        self._k_amp = (1.0 / self._k)  # ~ -6 dB/octave rolloff
+        self._k_amp = 1.0 / self._k  # ~ -6 dB/octave rolloff
         self._t = np.arange(1, blocksize + 1, dtype=np.float64)
 
     def _next_segment(self) -> None:
@@ -361,8 +383,19 @@ class SynthSource(_PacedSource):
 
     name = "synth"
 
-    def __init__(self, channels: int, active: list[int], blocksize: int, *, speech_db: float, noise_db: float,
-                 tone_hz: float, tone_db: float, seed: int = 1, samplerate: int = REQUIRED_SAMPLERATE) -> None:
+    def __init__(
+        self,
+        channels: int,
+        active: list[int],
+        blocksize: int,
+        *,
+        speech_db: float,
+        noise_db: float,
+        tone_hz: float,
+        tone_db: float,
+        seed: int = 1,
+        samplerate: int = REQUIRED_SAMPLERATE,
+    ) -> None:
         super().__init__(channels, blocksize, samplerate)
         self.active = list(active)
         self._rng = np.random.default_rng(seed)
@@ -371,8 +404,8 @@ class SynthSource(_PacedSource):
         # Levels are AES17 dBFS: a full-scale sine is 0 dBFS, so RMS = 10^(dB/20) / sqrt(2).
         # This matches the analyzer, where a sine at X dBFS reads X on its peak bin.
         self._speech_amp = _db_to_amp(speech_db) / np.sqrt(2.0)  # RMS while voiced (voice is unit RMS)
-        self._noise_amp = _db_to_amp(noise_db) / np.sqrt(2.0)    # noise loop is unit RMS
-        self._tone_peak = _db_to_amp(speech_db + tone_db)        # sine amplitude
+        self._noise_amp = _db_to_amp(noise_db) / np.sqrt(2.0)  # noise loop is unit RMS
+        self._tone_peak = _db_to_amp(speech_db + tone_db)  # sine amplitude
         self._tone_w = 2 * np.pi * tone_hz / fs
         self._tone_phase = 0.0
 
@@ -406,8 +439,10 @@ def _read_wav(path: Path) -> tuple[np.ndarray, int]:
             ch, width, fs, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
             raw = w.readframes(n)
     except wave.Error as e:
-        raise SourceError(f"Cannot read {path}: {e}. Only integer PCM WAV is supported "
-                          "(convert float WAVs with e.g. `sox in.wav -b 24 out.wav`).") from e
+        raise SourceError(
+            f"Cannot read {path}: {e}. Only integer PCM WAV is supported "
+            "(convert float WAVs with e.g. `sox in.wav -b 24 out.wav`)."
+        ) from e
     if width == 1:
         x = (np.frombuffer(raw, np.uint8).astype(np.float32) - 128.0) / 128.0
     elif width == 2:
@@ -433,8 +468,10 @@ class WavSource(_PacedSource):
             raise SourceError(f"WAV file not found: {path}")
         data, fs = _read_wav(path)
         if fs != samplerate:
-            raise SourceError(f"{path} is {fs} Hz; tf-daemon requires {samplerate} Hz "
-                              f"(resample with e.g. `sox in.wav -r {samplerate} out.wav`)")
+            raise SourceError(
+                f"{path} is {fs} Hz; tf-daemon requires {samplerate} Hz "
+                f"(resample with e.g. `sox in.wav -r {samplerate} out.wav`)"
+            )
         if len(data) < blocksize:
             raise SourceError(f"{path} is shorter than one block")
         super().__init__(data.shape[1], blocksize, samplerate)
@@ -446,7 +483,7 @@ class WavSource(_PacedSource):
     def _fill(self, block: np.ndarray) -> None:
         n, L = block.shape[0], len(self._data)
         first = min(n, L - self._pos)
-        block[:first] = self._data[self._pos:self._pos + first]
+        block[:first] = self._data[self._pos : self._pos + first]
         if first < n:
-            block[first:] = self._data[:n - first]
+            block[first:] = self._data[: n - first]
         self._pos = (self._pos + n) % L

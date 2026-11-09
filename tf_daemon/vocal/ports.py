@@ -9,8 +9,8 @@ if TYPE_CHECKING:
     from ..config import Channel
     from ..dsp.ring import RingLog
 
-Tap = Callable[[int, Any, float], None]   # (input, samples, stream time), on the analysis thread
-FrameTap = Callable[[dict[int, Any], float], None]   # ({input: samples}, stream time), once per hop
+Tap = Callable[[int, Any, float], None]  # (input, samples, stream time), on the analysis thread
+FrameTap = Callable[[dict[int, Any], float], None]  # ({input: samples}, stream time), once per hop
 
 
 class AudioInputs(Protocol):

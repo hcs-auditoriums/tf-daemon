@@ -24,9 +24,16 @@ from .config import load_config
 
 setup_logging(os.environ.get("TF_DAEMON_LOG", "INFO"))
 _cfg_path = os.environ.get("TF_DAEMON_CONFIG", "config.toml")
-_cfg = load_config(_cfg_path, source_overrides(
-    os.environ.get("TF_DAEMON_SOURCE"), os.environ.get("TF_DAEMON_WAV"), os.environ.get("TF_DAEMON_RF_SOURCE"),
-    os.environ.get("TF_DAEMON_QLXD_SOURCE"), os.environ.get("TF_DAEMON_TF5_SOURCE")))
+_cfg = load_config(
+    _cfg_path,
+    source_overrides(
+        os.environ.get("TF_DAEMON_SOURCE"),
+        os.environ.get("TF_DAEMON_WAV"),
+        os.environ.get("TF_DAEMON_RF_SOURCE"),
+        os.environ.get("TF_DAEMON_QLXD_SOURCE"),
+        os.environ.get("TF_DAEMON_TF5_SOURCE"),
+    ),
+)
 _modules = build_modules(_cfg)
 app = create_app(_cfg, _modules, config_path=_cfg_path)
 logging.getLogger(__name__).info("tf-daemon WSGI app ready")

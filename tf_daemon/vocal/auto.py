@@ -41,32 +41,37 @@ from .session import MicChecks
 log = logging.getLogger(__name__)
 
 TICK_S = 1.0
-STEP_EVERY_S = 4.0       # slow loop: at most one step this often
-STEP_DB = 1.0            # slow loop: largest gain change per band per step
-NEAR_ZERO = 50           # raw gain (0.5 dB): a band this close to flat can be moved / retyped
-TALKING_WITHIN_S = 1.5   # slow loop: only while the person has talked this recently
+STEP_EVERY_S = 4.0  # slow loop: at most one step this often
+STEP_DB = 1.0  # slow loop: largest gain change per band per step
+NEAR_ZERO = 50  # raw gain (0.5 dB): a band this close to flat can be moved / retyped
+TALKING_WITHIN_S = 1.5  # slow loop: only while the person has talked this recently
 NOTCH_Q = 8.0
 NOTCH_STEP_DB = 3.0
 NOTCH_MAX_DB = 9.0
 NOTCH_HOLD_S = 60.0
 HPF_STEP_HZ = 10.0
 BANDS = ("PEQ/Bank/BandL", "PEQ/Bank/Band:0", "PEQ/Bank/Band:1", "PEQ/Bank/BandH")
-SLOT_RANGES = {"PEQ/Bank/BandL": (0, 400), "PEQ/Bank/Band:0": (250, 1600), "PEQ/Bank/Band:1": (1000, 5000),
-               "PEQ/Bank/BandH": (3500, 20000)}
-PATHS = ["PEQ/On", "PEQ/Bank/HPF/On", "PEQ/Bank/HPF/Frequency"] + \
-    [f"{b}/{p}" for b in BANDS for p in ("Type", "Frequency", "Gain", "Q")]
+SLOT_RANGES = {
+    "PEQ/Bank/BandL": (0, 400),
+    "PEQ/Bank/Band:0": (250, 1600),
+    "PEQ/Bank/Band:1": (1000, 5000),
+    "PEQ/Bank/BandH": (3500, 20000),
+}
+PATHS = ["PEQ/On", "PEQ/Bank/HPF/On", "PEQ/Bank/HPF/Frequency"] + [
+    f"{b}/{p}" for b in BANDS for p in ("Type", "Frequency", "Gain", "Q")
+]
 
 
 class _Channel:
     def __init__(self, baseline: dict[str, int]) -> None:
-        self.baseline = baseline            # the desk before auto was turned on (for Undo)
-        self.known = dict(baseline)         # what the desk holds, as far as we know
+        self.baseline = baseline  # the desk before auto was turned on (for Undo)
+        self.known = dict(baseline)  # what the desk holds, as far as we know
         self.acted_revision = 0
         self.last_step = 0.0
-        self.held: dict[str, float] = {}    # band -> hold until (a notch)
+        self.held: dict[str, float] = {}  # band -> hold until (a notch)
         self.log: deque[dict[str, Any]] = deque(maxlen=50)
         self.stopped: str | None = None
-        self.pending = False                # the last step didn't reach the suggestion yet
+        self.pending = False  # the last step didn't reach the suggestion yet
 
 
 class AutoEQ:
@@ -77,7 +82,7 @@ class AutoEQ:
         self.max_boost = round(max_boost_db * 100)
         self._lock = threading.Lock()
         self._channels: dict[int, _Channel] = {}
-        self._stopped: dict[int, _Channel] = {}   # kept for Undo / the log after a stop
+        self._stopped: dict[int, _Channel] = {}  # kept for Undo / the log after a stop
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -166,7 +171,7 @@ class AutoEQ:
         for index, ch in items:
             try:
                 self._tick_channel(index, ch, now)
-            except Exception as e:   # never leave it running in a state we don't understand
+            except Exception as e:  # never leave it running in a state we don't understand
                 log.exception("Auto EQ failed on input %d", index + 1)
                 self.disarm(index, f"stopped: {e}")
 
@@ -177,7 +182,7 @@ class AutoEQ:
             return
         raw = desk.eq_raw(index, PATHS)
         changed = [p for p in PATHS if raw.get(p) != ch.known.get(p)]
-        if changed:   # someone changed the EQ on the desk: they're in charge now
+        if changed:  # someone changed the EQ on the desk: they're in charge now
             self.disarm(index, f"stopped: the EQ was changed on the desk ({changed[0].removeprefix('PEQ/')})")
             return
         if raw.get("PEQ/On") != 1:
@@ -192,22 +197,23 @@ class AutoEQ:
             ok = {r["path"]: r.get("actual", r["value"]) for r in results if r["confirmed"]}
             for p, v in changes:
                 ch.known[p] = int(ok.get(p, v))
-            if len(ok) < len(changes):   # the desk didn't take every change: re-read before going on
+            if len(ok) < len(changes):  # the desk didn't take every change: re-read before going on
                 fresh = desk.eq_raw(index, PATHS)
                 ch.known.update({p: int(v) for p, v in fresh.items() if isinstance(v, int)})
             self._log(ch, "eq", changes, why)
 
     # ------------------------------------------------------------------ fast loop: feedback
 
-    def _feedback_step(self, index: int, ch: _Channel, cur: dict[str, int],
-                       now: float) -> tuple[list[tuple[str, int]], str]:
+    def _feedback_step(
+        self, index: int, ch: _Channel, cur: dict[str, int], now: float
+    ) -> tuple[list[tuple[str, int]], str]:
         live = self.checks.rings_for(index, live_only=True)
         if not live:
             return [], ""
         changes: list[tuple[str, int]] = []
         for ring in live:
             f = float(ring["freq"])
-            for b in BANDS:   # no boost anywhere near a ring
+            for b in BANDS:  # no boost anywhere near a ring
                 if cur[f"{b}/Gain"] > 0 and abs(math.log2(cur[f"{b}/Frequency"] / 10 / f)) <= 1 / 6:
                     changes.append((f"{b}/Gain", 0))
             band = self._notch_band(cur, f)
@@ -232,14 +238,19 @@ class AutoEQ:
         for b in BANDS:
             if abs(math.log2(cur[f"{b}/Frequency"] / 10 / f)) < 1 / 24 and cur[f"{b}/Q"] >= 5000:
                 return b
-        fits = [b for b in BANDS if SLOT_RANGES[b][0] <= f < SLOT_RANGES[b][1]
-                and not (b in ("PEQ/Bank/BandL", "PEQ/Bank/BandH") and cur[f"{b}/Type"] == 2)]
+        fits = [
+            b
+            for b in BANDS
+            if SLOT_RANGES[b][0] <= f < SLOT_RANGES[b][1]
+            and not (b in ("PEQ/Bank/BandL", "PEQ/Bank/BandH") and cur[f"{b}/Type"] == 2)
+        ]
         return min(fits, key=lambda b: abs(cur[f"{b}/Gain"])) if fits else None
 
     # ------------------------------------------------------------------ slow loop: tone
 
-    def _tone_step(self, index: int, ch: _Channel, cur: dict[str, int],
-                   now: float) -> tuple[list[tuple[str, int]], str]:
+    def _tone_step(
+        self, index: int, ch: _Channel, cur: dict[str, int], now: float
+    ) -> tuple[list[tuple[str, int]], str]:
         if now - ch.last_step < STEP_EVERY_S:
             return [], ""
         s = next((s for i, s in self.checks.sessions() if i == index), None)
@@ -250,7 +261,7 @@ class AutoEQ:
         if not model.get("settled") or (model.get("revision", 0) <= ch.acted_revision and not ch.pending):
             return [], ""
         if not s.talking(TALKING_WITHIN_S):
-            return [], ""   # only while the person is talking
+            return [], ""  # only while the person is talking
         eq = self.desk.eq(index).get("eq") if self.desk is not None else None
         if not eq:
             return [], ""
@@ -265,24 +276,29 @@ class AutoEQ:
         changes += self._hpf_step(cur, target_d)
         ch.last_step = now
         ch.acted_revision = model.get("revision", 0)
-        ch.pending = bool(changes)   # keep stepping on the same revision until it's reached
+        ch.pending = bool(changes)  # keep stepping on the same revision until it's reached
         return changes, f"towards the suggestion (revision {ch.acted_revision})"
 
-    def _band_step(self, b: str, cur: dict[str, int], target: dict[str, int], *,
-                   boosts_ok: bool) -> list[tuple[str, int]]:
+    def _band_step(
+        self, b: str, cur: dict[str, int], target: dict[str, int], *, boosts_ok: bool
+    ) -> list[tuple[str, int]]:
         tg = target.get(f"{b}/Gain")
         if tg is None:
             return []
         tg = max(-self.max_cut, min(tg, self.max_boost if boosts_ok else 0))
         cg = cur[f"{b}/Gain"]
-        moves = [(p, target[f"{b}/{p}"]) for p in ("Type", "Frequency", "Q")
-                 if f"{b}/{p}" in target and target[f"{b}/{p}"] != cur[f"{b}/{p}"]
-                 and not (p == "Frequency" and abs(math.log2(target[f"{b}/{p}"] / cur[f"{b}/{p}"])) < 1 / 48)
-                 and not (p == "Q" and abs(math.log(target[f"{b}/{p}"] / cur[f"{b}/{p}"])) < 0.1)]
+        moves = [
+            (p, target[f"{b}/{p}"])
+            for p in ("Type", "Frequency", "Q")
+            if f"{b}/{p}" in target
+            and target[f"{b}/{p}"] != cur[f"{b}/{p}"]
+            and not (p == "Frequency" and abs(math.log2(target[f"{b}/{p}"] / cur[f"{b}/{p}"])) < 1 / 48)
+            and not (p == "Q" and abs(math.log(target[f"{b}/{p}"] / cur[f"{b}/{p}"])) < 0.1)
+        ]
         if moves:
-            if abs(cg) <= NEAR_ZERO:   # flat: move / retype it now, inaudibly
+            if abs(cg) <= NEAR_ZERO:  # flat: move / retype it now, inaudibly
                 return [(f"{b}/{p}", v) for p, v in moves] + ([(f"{b}/Gain", 0)] if cg else [])
-            tg = 0                     # fade it out first
+            tg = 0  # fade it out first
         step = round(STEP_DB * 100)
         new = cg + max(-step, min(step, tg - cg))
         return [(f"{b}/Gain", new)] if new != cg else []
@@ -293,7 +309,7 @@ class AutoEQ:
         if tf is None:
             return []
         out: list[tuple[str, int]] = []
-        if cur["PEQ/Bank/HPF/On"] != 1:   # switch it on low, then walk it up
+        if cur["PEQ/Bank/HPF/On"] != 1:  # switch it on low, then walk it up
             return [("PEQ/Bank/HPF/Frequency", 200), ("PEQ/Bank/HPF/On", 1)]
         cf = cur["PEQ/Bank/HPF/Frequency"]
         step = round(HPF_STEP_HZ * 10)
@@ -311,5 +327,11 @@ class AutoEQ:
 
     @staticmethod
     def _log(ch: _Channel, action: str, changes: list[tuple[str, int]], why: str) -> None:
-        ch.log.append({"at": time.time(), "action": action, "why": why,
-                       "changes": [f"{p.removeprefix('PEQ/Bank/').removeprefix('PEQ/')} = {v}" for p, v in changes]})
+        ch.log.append(
+            {
+                "at": time.time(),
+                "action": action,
+                "why": why,
+                "changes": [f"{p.removeprefix('PEQ/Bank/').removeprefix('PEQ/')} = {v}" for p, v in changes],
+            }
+        )

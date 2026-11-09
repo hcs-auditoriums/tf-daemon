@@ -29,6 +29,7 @@ def client_for():
         clients.append(c)
         c.start()
         return c
+
     yield make
     for c in clients:
         c.stop()

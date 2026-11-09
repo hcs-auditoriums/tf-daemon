@@ -30,9 +30,9 @@ class DeskWriter:
     def __init__(self, desk: DeskEQ | None, suggestion: Callable[[int], dict[str, Any] | None]) -> None:
         self.desk = desk
         self._suggestion = suggestion
-        self._apply_lock = threading.Lock()                    # one desk write at a time
-        self._undo: dict[int, list[tuple[str, int]]] = {}      # input -> desk values before the first apply
-        self._applied: dict[int, dict[str, Any]] = {}          # input -> outcome of the last apply / undo
+        self._apply_lock = threading.Lock()  # one desk write at a time
+        self._undo: dict[int, list[tuple[str, int]]] = {}  # input -> desk values before the first apply
+        self._applied: dict[int, dict[str, Any]] = {}  # input -> outcome of the last apply / undo
 
     def writable(self) -> DeskEQ | None:
         return self.desk if self.desk is not None and self.desk.eq_writable else None
@@ -83,24 +83,33 @@ class DeskWriter:
     def apply_suggestion(self, index: int) -> dict[str, Any]:
         """SET THE DESK EQ to the suggestion. Only from a person's confirmed request."""
         with self._apply_lock:
-            changes, lines = self.plan(index)   # raises unless the desk is writable
+            changes, lines = self.plan(index)  # raises unless the desk is writable
             out = self._write_locked(index, changes, "apply", lines)
-        log.info("Vocal assist: applied the suggested EQ to input %d on request (%d/%d confirmed by the desk)",
-                 index + 1, out["confirmed"], out["sent"])
+        log.info(
+            "Vocal assist: applied the suggested EQ to input %d on request (%d/%d confirmed by the desk)",
+            index + 1,
+            out["confirmed"],
+            out["sent"],
+        )
         return out
 
-    def write_values(self, index: int, changes: list[tuple[str, int]], action: str,
-                     lines: list[str]) -> dict[str, Any]:
+    def write_values(self, index: int, changes: list[tuple[str, int]], action: str, lines: list[str]) -> dict[str, Any]:
         """SET channel EQ values (raw, paths relative to the channel), keeping what they replace
         for Undo. Only from a person's confirmed request (a profile recall, a copy)."""
         with self._apply_lock:
             out = self._write_locked(index, changes, action, lines)
-        log.info("Vocal assist: %s on input %d on request (%d/%d confirmed by the desk)", action, index + 1,
-                 out["confirmed"], out["sent"])
+        log.info(
+            "Vocal assist: %s on input %d on request (%d/%d confirmed by the desk)",
+            action,
+            index + 1,
+            out["confirmed"],
+            out["sent"],
+        )
         return out
 
-    def _write_locked(self, index: int, changes: list[tuple[str, int]], action: str,
-                      lines: list[str]) -> dict[str, Any]:
+    def _write_locked(
+        self, index: int, changes: list[tuple[str, int]], action: str, lines: list[str]
+    ) -> dict[str, Any]:
         console = self.writable()
         if console is None:
             raise PermissionError("writing to the desk is off (tf5.eq_write)")
@@ -132,15 +141,25 @@ class DeskWriter:
             results = console.write_eq(index, changes)
             del self._undo[index]
             out = self._record(index, "undo", results, [f"{p.removeprefix('PEQ/')} = {v}" for p, v in changes])
-        log.info("Vocal assist: undid the applied EQ on input %d on request (%d/%d confirmed by the desk)",
-                 index + 1, out["confirmed"], out["sent"])
+        log.info(
+            "Vocal assist: undid the applied EQ on input %d on request (%d/%d confirmed by the desk)",
+            index + 1,
+            out["confirmed"],
+            out["sent"],
+        )
         return out
 
     def history(self) -> dict[str, Any]:
         return {"undo": {str(i): True for i in self._undo}, "applied": {str(i): a for i, a in self._applied.items()}}
 
     def _record(self, index: int, action: str, results: list[dict[str, Any]], lines: list[str]) -> dict[str, Any]:
-        out = {"action": action, "at": time.time(), "sent": len(results),
-               "confirmed": sum(1 for r in results if r["confirmed"]), "results": results, "changes": lines}
+        out = {
+            "action": action,
+            "at": time.time(),
+            "sent": len(results),
+            "confirmed": sum(1 for r in results if r["confirmed"]),
+            "results": results,
+            "changes": lines,
+        }
         self._applied[index] = out
         return out

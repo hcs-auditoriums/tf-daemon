@@ -48,19 +48,23 @@ from .codec import (
 
 # What may be sent. Everything else raises ReadOnlyViolation.
 ALLOWED_PARAM_CMDS = {SUBSCRIBE, HASH_COMPARE, SYNC_OPEN, SYNC_CLOSE}
-ALLOWED_EVENTS = {"KeepAlive": "", "SetClientType": CLIENT_TYPE}   # request name -> exact args
-ALLOWED_EVENT_REPLIES = {"KeepAlive", "NotifySyncStatus"}         # console events we acknowledge
+ALLOWED_EVENTS = {"KeepAlive": "", "SetClientType": CLIENT_TYPE}  # request name -> exact args
+ALLOWED_EVENT_REPLIES = {"KeepAlive", "NotifySyncStatus"}  # console events we acknowledge
 
 # The only parameters write() may change: an input channel's PEQ switch, high-pass
 # and bands (guides/tf5_api.md section 5). Raw limits per parameter name.
-WRITABLE = re.compile(r"InputChannel:\d+/PEQ/(On|Bank/HPF/(On|Frequency)"
-                      r"|Bank/(BandL|Band:\d|BandH)/(Type|Frequency|Gain|Q|LPFOn))")
+WRITABLE = re.compile(
+    r"InputChannel:\d+/PEQ/(On|Bank/HPF/(On|Frequency)"
+    r"|Bank/(BandL|Band:\d|BandH)/(Type|Frequency|Gain|Q|LPFOn))"
+)
 WRITE_LIMITS = {
-    "On": (0, 1), "LPFOn": (0, 1), "Type": (0, 2),
-    "HPF/Frequency": (200, 6000),     # 20-600 Hz (raw Hz x 10)
-    "Frequency": (200, 200000),       # 20 Hz - 20 kHz
-    "Gain": (-1800, 1800),            # +-18 dB (raw dB x 100)
-    "Q": (100, 10000),                # 0.1 - 10 (raw x 1000)
+    "On": (0, 1),
+    "LPFOn": (0, 1),
+    "Type": (0, 2),
+    "HPF/Frequency": (200, 6000),  # 20-600 Hz (raw Hz x 10)
+    "Frequency": (200, 200000),  # 20 Hz - 20 kHz
+    "Gain": (-1800, 1800),  # +-18 dB (raw dB x 100)
+    "Q": (100, 10000),  # 0.1 - 10 (raw x 1000)
 }
 
 
@@ -86,8 +90,12 @@ def check_outbound(tag: str, payload: bytes, allow_set: Callable[[Message], bool
     if tag == EVENT_TAG:
         if msg.cmd not in (EVENT, EVENT_REPLY):
             raise ReadOnlyViolation(f"EEVT command {bytes(msg.cmd).hex(' ')} not allowed")
-        if len(els) != 4 or [e.type for e in els] != [T_U32, T_U32, T_STR, T_STR] \
-                or els[0].value != [0] or els[1].value != [0]:
+        if (
+            len(els) != 4
+            or [e.type for e in els] != [T_U32, T_U32, T_STR, T_STR]
+            or els[0].value != [0]
+            or els[1].value != [0]
+        ):
             raise ReadOnlyViolation("malformed event")
         name, args = els[2].value, els[3].value
         if msg.cmd == EVENT:
@@ -112,7 +120,13 @@ def check_outbound(tag: str, payload: bytes, allow_set: Callable[[Message], bool
         if len(els) != 2 or els[0] != Element(T_STR, func) or els[1] != Element(T_U8, b"\x80"):
             raise ReadOnlyViolation("malformed subscribe")
     elif msg.cmd == HASH_COMPARE:
-        if len(els) != 4 or els[0] != Element(T_U8, b"\0") or els[1] != Element(T_STR, func) \
-                or els[2].type != T_U8 or len(els[2].value) != 16 \
-                or els[3].type != T_U8 or len(els[3].value) != 16:
+        if (
+            len(els) != 4
+            or els[0] != Element(T_U8, b"\0")
+            or els[1] != Element(T_STR, func)
+            or els[2].type != T_U8
+            or len(els[2].value) != 16
+            or els[3].type != T_U8
+            or len(els[3].value) != 16
+        ):
             raise ReadOnlyViolation("malformed hash compare")

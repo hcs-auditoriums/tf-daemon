@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-Source = tuple[str, int]   # ("InCh", 0-based channel) or ("St", 0 = L / 1 = R)
+Source = tuple[str, int]  # ("InCh", 0-based channel) or ("St", 0 = L / 1 = R)
 
 TF_INPUT_CHANNELS = 40
 _PATCH_RE = re.compile(r"^\s*(?:(?:InCh|Ch)\s*(\d+)|St\s*([LR]))\s*$", re.IGNORECASE)
@@ -26,7 +26,7 @@ def parse_patch_entry(entry: str) -> Source | None:
         return None
     m = _PATCH_RE.match(str(entry))
     if not m:
-        raise ValueError(f"unknown usb_patch entry {entry!r} (expected \"InCh N\", \"St L\", \"St R\" or \"\")")
+        raise ValueError(f'unknown usb_patch entry {entry!r} (expected "InCh N", "St L", "St R" or "")')
     if m.group(1):
         n = int(m.group(1))
         if not 1 <= n <= TF_INPUT_CHANNELS:

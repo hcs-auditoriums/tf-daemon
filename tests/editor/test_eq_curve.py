@@ -1,6 +1,5 @@
 """The EQ curve (dsp/eq.py), checked against TF Editor's own maths (tests/tf_editor_reference.py)."""
 
-
 import numpy as np
 import pytest
 import tf_editor_reference as ref
@@ -12,8 +11,13 @@ KINDS = ["bell", "low_shelf", "high_shelf", "lpf", "hpf", "lpf1", "hpf1"]
 
 
 def _eq(*bands, on=True, hpf=None):
-    return {"on": on, "bank": "BOLD", "one_knob": False, "hpf": hpf,
-            "bands": [dict(label=str(i), **{"on": True, **b}) for i, b in enumerate(bands)]}
+    return {
+        "on": on,
+        "bank": "BOLD",
+        "one_knob": False,
+        "hpf": hpf,
+        "bands": [dict(label=str(i), **{"on": True, **b}) for i, b in enumerate(bands)],
+    }
 
 
 def _at(curve_db, freqs, f):
@@ -24,8 +28,9 @@ def _ref_sections(eq):
     """The 6-section table TF Editor builds for this EQ (FUN_0051a080), for the reference."""
     out = []
     if eq["hpf"]:
-        out.append(("hpf1" if eq["hpf"]["slope"] == 6 else "hpf", eq["hpf"]["freq"], 1.0 if eq["hpf"]["on"] else 0.0,
-                    0.707106))
+        out.append(
+            ("hpf1" if eq["hpf"]["slope"] == 6 else "hpf", eq["hpf"]["freq"], 1.0 if eq["hpf"]["on"] else 0.0, 0.707106)
+        )
     for b in eq["bands"]:
         if b["type"] in ("hpf", "lpf"):
             out.append((b["type"], b["freq"], 1.0 if b["on"] else 0.0, 0.707106))
@@ -43,8 +48,9 @@ def test_section_matches_tf_editors_designer(seed):
         g = float(rng.uniform(-18, 18))
         filt = kind in ("lpf", "hpf", "lpf1", "hpf1")
         mine = section_db(kind, f0, 0.0 if filt else g, q)
-        theirs = [ref.response_db(ref.design(48000, q, 1.0 if filt else g, f0, ref.TYPE[kind]), f, 48000)
-                  for f in CURVE_FREQS]
+        theirs = [
+            ref.response_db(ref.design(48000, q, 1.0 if filt else g, f0, ref.TYPE[kind]), f, 48000) for f in CURVE_FREQS
+        ]
         assert np.allclose(mine, theirs, atol=1e-6), kind
 
 
@@ -56,7 +62,6 @@ def test_curve_matches_tf_editor_for_board_like_settings(mixing):
     for x in (0, 1):
         eq = channel_eq(mixing, "St", x)
         assert np.allclose(eq_curve(eq), ref.curve(_ref_sections(eq), CURVE_FREQS), atol=1e-6)
-
 
 
 def test_curve_flat_when_off_missing_or_zero_gain():
@@ -75,9 +80,9 @@ def test_curve_flat_when_off_missing_or_zero_gain():
 @pytest.mark.parametrize("q", [0.1, 0.7, 4, 16])
 def test_bell_hits_its_gain_at_its_frequency(gain, q):
     c = section_db("bell", 1000, gain, q, np.array([1000.0, 500.0, 2000.0, 20.0]))
-    assert c[0] == pytest.approx(gain, abs=1e-6)            # bilinear with pre-warping: exact at f0
+    assert c[0] == pytest.approx(gain, abs=1e-6)  # bilinear with pre-warping: exact at f0
     assert abs(c[1]) < abs(gain) and abs(c[2]) < abs(gain)
-    assert abs(c[1] - c[2]) < 0.5                            # ~symmetric an octave either side
+    assert abs(c[1] - c[2]) < 0.5  # ~symmetric an octave either side
     if q >= 0.7:
         assert abs(c[3]) < 0.5
 
@@ -99,28 +104,28 @@ def test_bell_q_sets_width():
 def test_shelves_are_two_first_order_sections(gain):
     f = np.array([10.0, 1000.0, 23000.0])
     v = 10 ** (abs(gain) / 20)
-    corner = 20 * np.log10((1 + v) / 2) * np.sign(gain)     # |(j + sqrt V) / (j + 1)|^2, twice
+    corner = 20 * np.log10((1 + v) / 2) * np.sign(gain)  # |(j + sqrt V) / (j + 1)|^2, twice
     low = section_db("low_shelf", 1000, gain, 0.7, f)
     high = section_db("high_shelf", 1000, gain, 0.7, f)
     assert low[0] == pytest.approx(gain, abs=0.05) and abs(low[2]) < 0.3
     assert high[2] == pytest.approx(gain, abs=0.3) and abs(high[0]) < 0.05
     assert low[1] == pytest.approx(corner, abs=1e-6) and high[1] == pytest.approx(corner, abs=1e-6)
-    assert np.allclose(section_db("low_shelf", 1000, gain, 0.2, f), low)    # Q isn't used
+    assert np.allclose(section_db("low_shelf", 1000, gain, 0.2, f), low)  # Q isn't used
     assert np.allclose(section_db("low_shelf", 1000, -gain, 0.7, f), -low)  # cut mirrors boost
 
 
 def test_hpf_and_lpf_slopes():
     f = np.array([25.0, 50.0, 100.0, 200.0, 400.0, 10000.0])
     c = section_db("hpf", 100, 0, 0.707106, f)
-    assert c[2] == pytest.approx(-3.01, abs=0.01)             # -3 dB at the corner
-    assert c[0] - c[1] == pytest.approx(-12, abs=0.3)         # 12 dB/oct below it
+    assert c[2] == pytest.approx(-3.01, abs=0.01)  # -3 dB at the corner
+    assert c[0] - c[1] == pytest.approx(-12, abs=0.3)  # 12 dB/oct below it
     assert c[5] == pytest.approx(0, abs=0.01)
     assert np.allclose(eq_curve(_eq(hpf={"on": True, "freq": 100, "slope": 12}), f), c)
     band_hpf = eq_curve(_eq({"type": "hpf", "freq": 100, "gain": 9, "q": 3}), f)
-    assert np.allclose(band_hpf, c)                           # band gain / Q don't matter for filters
+    assert np.allclose(band_hpf, c)  # band gain / Q don't matter for filters
     lpf = section_db("lpf", 100, 0, 0.707106, f)
     assert lpf[2] == pytest.approx(-3.01, abs=0.01) and lpf[3] - lpf[4] == pytest.approx(12, abs=0.3)
-    f1 = np.array([5.0, 10.0, 1000.0, 2000.0, 4000.0])   # first order: asymptotic further from the corner
+    f1 = np.array([5.0, 10.0, 1000.0, 2000.0, 4000.0])  # first order: asymptotic further from the corner
     first = eq_curve(_eq(hpf={"on": True, "freq": 1000, "slope": 6}), f1)
     assert first[2] == pytest.approx(-3.01, abs=0.01) and first[1] - first[0] == pytest.approx(6, abs=0.1)
     lpf1 = section_db("lpf1", 100, 0, 0.7, np.array([100.0, 2000.0, 4000.0]))
@@ -132,22 +137,23 @@ def test_bands_add_up_in_db():
     a = {"type": "bell", "freq": 100, "gain": -6, "q": 2}
     b = {"type": "high_shelf", "freq": 8000, "gain": 4, "q": 0.7}
     h = {"on": True, "freq": 40, "slope": 12}
-    assert np.allclose(eq_curve(_eq(a, b, hpf=h), f), eq_curve(_eq(a), f) + eq_curve(_eq(b), f)
-                       + eq_curve(_eq(hpf=h), f))
+    assert np.allclose(
+        eq_curve(_eq(a, b, hpf=h), f), eq_curve(_eq(a), f) + eq_curve(_eq(b), f) + eq_curve(_eq(hpf=h), f)
+    )
 
 
 def test_curve_of_the_captured_channel(mixing):
     c = eq_curve(channel_eq(mixing, "InCh", 0))
     assert np.all(np.isfinite(c))
-    assert _at(c, CURVE_FREQS, 20000) > _at(c, CURVE_FREQS, 3350) + 6   # the high shelf lifts the top
-    assert _at(c, CURVE_FREQS, 800) < -14.1                             # the cut, deepened by its neighbours
-    assert _at(c, CURVE_FREQS, 50) < -20                                # HPF at 200 Hz
+    assert _at(c, CURVE_FREQS, 20000) > _at(c, CURVE_FREQS, 3350) + 6  # the high shelf lifts the top
+    assert _at(c, CURVE_FREQS, 800) < -14.1  # the cut, deepened by its neighbours
+    assert _at(c, CURVE_FREQS, 50) < -20  # HPF at 200 Hz
 
 
 def test_parameters_are_clamped_like_tf_editor():
     f = np.array([100.0, 1000.0])
-    assert np.allclose(section_db("bell", 1000, 6, 0.0, f), section_db("bell", 1000, 6, 0.1, f))   # Q >= 0.1
-    assert np.allclose(section_db("bell", 5, 6, 1, f), section_db("bell", 16, 6, 1, f))           # f >= 16 Hz
+    assert np.allclose(section_db("bell", 1000, 6, 0.0, f), section_db("bell", 1000, 6, 0.1, f))  # Q >= 0.1
+    assert np.allclose(section_db("bell", 5, 6, 1, f), section_db("bell", 16, 6, 1, f))  # f >= 16 Hz
     assert np.allclose(section_db("bell", 1000, 6, 1, f, fs=8000), section_db("bell", 1000, 6, 1, f, fs=44100))
     with pytest.raises(ValueError):
         biquad("notch", 1000, 0, 1)

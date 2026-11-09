@@ -70,8 +70,39 @@ from ..config import RingConfig
 from .spectrum import blackman_harris
 
 # ISO 1/3-octave centres (the TF's GEQ bands).
-GEQ_BANDS = [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250,
-             1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000]
+GEQ_BANDS = [
+    20,
+    25,
+    31.5,
+    40,
+    50,
+    63,
+    80,
+    100,
+    125,
+    160,
+    200,
+    250,
+    315,
+    400,
+    500,
+    630,
+    800,
+    1000,
+    1250,
+    1600,
+    2000,
+    2500,
+    3150,
+    4000,
+    5000,
+    6300,
+    8000,
+    10000,
+    12500,
+    16000,
+    20000,
+]
 
 # sensitivity -> (min prominence dB, sustain seconds)
 SENSITIVITY = {"low": (14.0, 1.2), "normal": (10.0, 0.8), "high": (7.0, 0.5)}
@@ -98,14 +129,14 @@ class RingSettings:
     fmin: float = 80.0
     fmax: float = 12000.0
     min_prominence_db: float = 10.0
-    min_level_db: float = -75.0     # dBFS (sine-peak); quieter peaks are ignored
+    min_level_db: float = -75.0  # dBFS (sine-peak); quieter peaks are ignored
     sustain_s: float = 0.8
-    avg_tau_s: float = 1.0          # slow path averaging
-    phpr_db: float = 12.0           # peak must exceed its 2nd/3rd harmonic by this
-    mains_hz: float = 60.0          # hum harmonics up to 1 kHz are skipped; 0 = off
+    avg_tau_s: float = 1.0  # slow path averaging
+    phpr_db: float = 12.0  # peak must exceed its 2nd/3rd harmonic by this
+    mains_hz: float = 60.0  # hum harmonics up to 1 kHz are skipped; 0 = off
     growth_db_s: float = 6.0
-    tail_bb_drop_db: float = 10.0   # broadband fall that marks the end of a phrase
-    tail_margin_db: float = 8.0     # how much less than that the ring must have fallen
+    tail_bb_drop_db: float = 10.0  # broadband fall that marks the end of a phrase
+    tail_margin_db: float = 8.0  # how much less than that the ring must have fallen
 
     @classmethod
     def from_config(cls, r: RingConfig) -> RingSettings:
@@ -187,7 +218,7 @@ class RingDetector:
         self._band_starts = starts[:-1] - self.k0
         self._band_counts = np.diff(starts)
         self._band_logf = np.log((starts[:-1] + starts[1:] - 1) / 2 * self.df)
-        self._bin_logf = np.log(self.freqs[self.k0:self.k1 + 1])
+        self._bin_logf = np.log(self.freqs[self.k0 : self.k1 + 1])
 
         hum = [settings.mains_hz * k for k in range(1, int(1000 // settings.mains_hz) + 1)] if settings.mains_hz else []
         self._hum = np.array(hum)
@@ -204,7 +235,7 @@ class RingDetector:
 
         Returns the rings currently present on this input.
         """
-        x = frame[-self.s.n_fft:].astype(np.float64) * self.window
+        x = frame[-self.s.n_fft :].astype(np.float64) * self.window
         p = np.abs(np.fft.rfft(x)) ** 2
         if self._p_avg is None:
             self._p_avg = p.copy()
@@ -227,7 +258,7 @@ class RingDetector:
         return 10.0 * np.log10(p + 1e-30) + self._db_offset
 
     def _background(self, p: np.ndarray) -> np.ndarray:
-        seg = p[self.k0:self.k1 + 1]
+        seg = p[self.k0 : self.k1 + 1]
         sums = np.add.reduceat(seg, self._band_starts)
         bands_db = self._db(sums / self._band_counts)
         self._last_band_median = float(np.median(bands_db))
@@ -249,7 +280,7 @@ class RingDetector:
             w = self._span(km)
             if km + w >= len(db):
                 continue
-            worst = min(worst, float(db[k] - np.max(db[km - w:km + w + 1])))
+            worst = min(worst, float(db[k] - np.max(db[km - w : km + w + 1])))
         return worst
 
     def _in_series(self, db: np.ndarray, prom: np.ndarray, k: int) -> bool:
@@ -259,21 +290,21 @@ class RingDetector:
             w = self._span(km)
             if km - w < self.k0:
                 break
-            j = km - w + int(np.argmax(db[km - w:km + w + 1]))
+            j = km - w + int(np.argmax(db[km - w : km + w + 1]))
             if db[j] >= db[k] - 3.0 and prom[j - self.k0] >= self.s.min_prominence_db:
                 return True
         return False
 
     def _peaks(self, p: np.ndarray) -> list[tuple[float, float, float]]:
         db = self._db(p)
-        seg = db[self.k0:self.k1 + 1]
+        seg = db[self.k0 : self.k1 + 1]
         prom = seg - self._background(p)
         is_max = np.zeros(seg.shape, dtype=bool)
         is_max[1:-1] = (seg[1:-1] > seg[:-2]) & (seg[1:-1] >= seg[2:])
         cand = np.flatnonzero(is_max & (prom >= self.s.min_prominence_db) & (seg >= self.s.min_level_db))
         if cand.size == 0:
             return []
-        cand = cand[np.argsort(prom[cand])[::-1][:self.MAX_PEAKS]]
+        cand = cand[np.argsort(prom[cand])[::-1][: self.MAX_PEAKS]]
         out = []
         for c in cand:
             k = int(c) + self.k0
@@ -316,8 +347,7 @@ class RingDetector:
                 ts = np.array([h[0] for h in win]) - win[0][0]
                 slope = float(np.polyfit(ts, [h[1] for h in win], 1)[0]) if len(win) >= 4 else -math.inf
                 prom = float(np.median([h[2] for h in win]))
-                if (seen and sum(seen) / len(seen) >= 0.6 and slope >= -2.0
-                        and prom >= s.min_prominence_db + 5):
+                if seen and sum(seen) / len(seen) >= 0.6 and slope >= -2.0 and prom >= s.min_prominence_db + 5:
                     t.kind = "sustained"
             if t.kind:
                 found.append((t, t.kind))
@@ -346,8 +376,11 @@ class RingDetector:
                 recent = t.window(now, 0.6)
                 bb_drop = max(bb) - bb[-1]
                 ring_drop = max(h[1] for h in recent) - recent[-1][1]
-                if (bb_drop >= s.tail_bb_drop_db and ring_drop <= bb_drop - s.tail_margin_db
-                        and recent[-1][2] >= s.min_prominence_db + 3):
+                if (
+                    bb_drop >= s.tail_bb_drop_db
+                    and ring_drop <= bb_drop - s.tail_margin_db
+                    and recent[-1][2] >= s.min_prominence_db + 3
+                ):
                     kind = "tail"
             if kind and (t.kind is None or KIND_RANK[kind] > KIND_RANK[t.kind]):
                 t.kind = kind  # a track keeps its strongest classification
@@ -360,8 +393,15 @@ class RingDetector:
             if any(abs(r["freq"] - t.f) <= max(2 * self.df, 0.01 * t.f) for r in rings):
                 continue
             h = t.hist[-1]
-            rings.append({"freq": round(t.f, 1), "level": round(h[1], 1), "prominence": round(h[2], 1),
-                          "kind": kind, "since": t.born})
+            rings.append(
+                {
+                    "freq": round(t.f, 1),
+                    "level": round(h[1], 1),
+                    "prominence": round(h[2], 1),
+                    "kind": kind,
+                    "since": t.born,
+                }
+            )
         return rings
 
 
@@ -372,16 +412,16 @@ class RingEvent:
     label: str
     freq: float
     kind: str
-    level: float          # loudest seen
-    prominence: float     # largest seen
-    first_seen: float     # wall clock
+    level: float  # loudest seen
+    prominence: float  # largest seen
+    first_seen: float  # wall clock
     last_seen: float
-    count: int = 1        # separate occurrences
+    count: int = 1  # separate occurrences
     active: bool = True
     # Inputs feeding this ring (rings on a bus): input -> smoothed contribution (dB), and labels.
     contrib: dict[int, float] = field(default_factory=dict)
     contrib_labels: dict[int, str] = field(default_factory=dict)
-    contrib_basis: str = ""   # "fader": level at the ring frequency + fader; "level": level only
+    contrib_basis: str = ""  # "fader": level at the ring frequency + fader; "level": level only
 
     SOURCES_WITHIN_DB = 12.0
     MAX_SOURCES = 3
@@ -391,14 +431,29 @@ class RingEvent:
             return []
         ranked = sorted(self.contrib.items(), key=lambda kv: -kv[1])
         top = ranked[0][1]
-        return [{"channel": i, "label": self.contrib_labels.get(i, f"Ch {i + 1}"), "rel_db": round(c - top, 1)}
-                for i, c in ranked[:self.MAX_SOURCES] if c >= top - self.SOURCES_WITHIN_DB]
+        return [
+            {"channel": i, "label": self.contrib_labels.get(i, f"Ch {i + 1}"), "rel_db": round(c - top, 1)}
+            for i, c in ranked[: self.MAX_SOURCES]
+            if c >= top - self.SOURCES_WITHIN_DB
+        ]
 
     def to_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "channel": self.channel, "label": self.label, "freq": self.freq, "kind": self.kind,
-                "level": self.level, "prominence": self.prominence, "first_seen": self.first_seen,
-                "last_seen": self.last_seen, "count": self.count, "active": self.active,
-                "geq": geq_band(self.freq), "sources": self.sources(), "sources_basis": self.contrib_basis}
+        return {
+            "id": self.id,
+            "channel": self.channel,
+            "label": self.label,
+            "freq": self.freq,
+            "kind": self.kind,
+            "level": self.level,
+            "prominence": self.prominence,
+            "first_seen": self.first_seen,
+            "last_seen": self.last_seen,
+            "count": self.count,
+            "active": self.active,
+            "geq": geq_band(self.freq),
+            "sources": self.sources(),
+            "sources_basis": self.contrib_basis,
+        }
 
 
 class RingLog:
@@ -430,12 +485,21 @@ class RingLog:
             for r in rings:
                 if any(abs(r["freq"] - f) <= self.IGNORE_MATCH * f for f in self._ignored):
                     continue
-                ev = next((e for e in self._events if e.channel == channel and e.id not in seen
-                           and abs(e.freq - r["freq"]) <= self.MATCH * e.freq
-                           and (e.active or now - e.last_seen <= self.merge_s)), None)
+                ev = next(
+                    (
+                        e
+                        for e in self._events
+                        if e.channel == channel
+                        and e.id not in seen
+                        and abs(e.freq - r["freq"]) <= self.MATCH * e.freq
+                        and (e.active or now - e.last_seen <= self.merge_s)
+                    ),
+                    None,
+                )
                 if ev is None:
-                    ev = RingEvent(self._next_id, channel, label, r["freq"], r["kind"], r["level"],
-                                   r["prominence"], now, now)
+                    ev = RingEvent(
+                        self._next_id, channel, label, r["freq"], r["kind"], r["level"], r["prominence"], now, now
+                    )
                     self._next_id += 1
                     self._events.append(ev)
                     changed = True
@@ -461,7 +525,7 @@ class RingLog:
                     e.active = False
                     changed = True
             if len(self._events) > self.KEEP:
-                self._events = sorted(self._events, key=lambda e: (e.active, e.last_seen))[-self.KEEP:]
+                self._events = sorted(self._events, key=lambda e: (e.active, e.last_seen))[-self.KEEP :]
             if changed:
                 self.version += 1
 
@@ -470,16 +534,21 @@ class RingLog:
         with self._lock:
             return [(e.channel, e.freq) for e in self._events if e.active and e.channel in channels]
 
-    def set_sources(self, channel: int, freq: float, contributions: list[tuple[int, str, float]],
-                    basis: str) -> None:
+    def set_sources(self, channel: int, freq: float, contributions: list[tuple[int, str, float]], basis: str) -> None:
         """Contribution (dB) of each input to the live ring at ``freq`` on ``channel``.
 
         Smoothed in the power domain over the ring's life, so one noisy
         measurement doesn't reorder the list.
         """
         with self._lock:
-            ev = next((e for e in self._events if e.channel == channel and e.active
-                       and abs(e.freq - freq) <= self.MATCH * e.freq), None)
+            ev = next(
+                (
+                    e
+                    for e in self._events
+                    if e.channel == channel and e.active and abs(e.freq - freq) <= self.MATCH * e.freq
+                ),
+                None,
+            )
             if ev is None:
                 return
             before = [s["channel"] for s in ev.sources()]
@@ -508,8 +577,12 @@ class RingLog:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             events = sorted(self._events, key=lambda e: (not e.active, -e.last_seen))
-            return {"type": "rings", "version": self.version, "events": [e.to_dict() for e in events],
-                    "ignored": list(self._ignored)}
+            return {
+                "type": "rings",
+                "version": self.version,
+                "events": [e.to_dict() for e in events],
+                "ignored": list(self._ignored),
+            }
 
     def clear(self) -> None:
         """Forget past events (live ones stay)."""
@@ -526,6 +599,5 @@ class RingLog:
 
     def unignore(self, freq: float | None = None) -> None:
         with self._lock:
-            self._ignored = [] if freq is None else [f for f in self._ignored
-                                                     if abs(f - freq) > self.IGNORE_MATCH * f]
+            self._ignored = [] if freq is None else [f for f in self._ignored if abs(f - freq) > self.IGNORE_MATCH * f]
             self.version += 1

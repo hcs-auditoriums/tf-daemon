@@ -18,16 +18,17 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-MAX_POINTS = 450        # tinySA Ultra firmware limit
+MAX_POINTS = 450  # tinySA Ultra firmware limit
 BASIC_MAX_POINTS = 290  # original tinySA (no scan data comes back above this)
 
 # The original tinySA has two inputs on separate SMA connectors; a sweep only
 # sees the one selected with `mode low|high input` (it does not switch itself).
-BASIC_LOW_MAX_HZ = 350_000_000   # LOW input:  0.1 - 350 MHz
+BASIC_LOW_MAX_HZ = 350_000_000  # LOW input:  0.1 - 350 MHz
 BASIC_HIGH_MIN_HZ = 240_000_000  # HIGH input: 240 - 960 MHz
 
 
 SERIAL_TIMEOUT_S = 20.0  # longest wait for a tinySA reply (a 450-point sweep takes a few seconds)
+
 
 class RFDeviceError(RuntimeError):
     pass
@@ -106,8 +107,7 @@ class TinySADevice(RFDevice):
         # The Ultra identifies as "tinySA4" / "ULTRA"; the original model only sweeps 290 points.
         self.ultra = bool(re.search(r"tinySA4|ultra", info, re.I))
         self.max_points = MAX_POINTS if self.ultra else BASIC_MAX_POINTS
-        log.info("tinySA connected: %s (max %d points)", info.splitlines()[0] if info else "(no info)",
-                 self.max_points)
+        log.info("tinySA connected: %s (max %d points)", info.splitlines()[0] if info else "(no info)", self.max_points)
         return info
 
     def close(self) -> None:
@@ -149,7 +149,8 @@ def basic_input_for(start_hz: int, stop_hz: int) -> str:
         return "high"
     raise ValueError(
         f"{start_hz / 1e6:g}-{stop_hz / 1e6:g} MHz spans both tinySA inputs: LOW covers up to "
-        f"{BASIC_LOW_MAX_HZ / 1e6:g} MHz, HIGH from {BASIC_HIGH_MIN_HZ / 1e6:g} MHz; pick a range within one")
+        f"{BASIC_LOW_MAX_HZ / 1e6:g} MHz, HIGH from {BASIC_HIGH_MIN_HZ / 1e6:g} MHz; pick a range within one"
+    )
 
 
 class SimTinySA(RFDevice):

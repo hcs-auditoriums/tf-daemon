@@ -44,8 +44,15 @@ def build_source(cfg: Config, desk: DeskMix | None = None) -> Source:
         idx = [c.index for c in cfg.channels]
         s = cfg.synth
         return SynthSource(
-            channels=max(idx) + 1, active=idx, blocksize=a.blocksize, samplerate=a.samplerate,
-            speech_db=s.speech_db, noise_db=s.noise_db, tone_hz=s.tone_hz, tone_db=s.tone_db, seed=s.seed,
+            channels=max(idx) + 1,
+            active=idx,
+            blocksize=a.blocksize,
+            samplerate=a.samplerate,
+            speech_db=s.speech_db,
+            noise_db=s.noise_db,
+            tone_hz=s.tone_hz,
+            tone_db=s.tone_db,
+            seed=s.seed,
         )
     if a.source == "stage":
         return StageSource(a.channels, a.blocksize, stage_settings(cfg), desk, a.samplerate)
@@ -63,9 +70,19 @@ def stage_settings(cfg: Config) -> StageSettings:
     talkers = [c.index for c in cfg.channels if c.index not in st.values() and c.index != house]
     inch = {i: src[1] for i, src in enumerate(patch) if src is not None and src[0] == "InCh"}
     s = cfg.synth
-    return StageSettings(talkers=talkers, mains=(st[0], st[1]), house_mic=house, desk_channel=inch.get,
-                         speech_db=s.speech_db, noise_db=s.noise_db, tone_hz=s.tone_hz, tone_db=s.tone_db,
-                         pa_leak_db=s.pa_leak_db, room_rt60=s.room_rt60, seed=s.seed)
+    return StageSettings(
+        talkers=talkers,
+        mains=(st[0], st[1]),
+        house_mic=house,
+        desk_channel=inch.get,
+        speech_db=s.speech_db,
+        noise_db=s.noise_db,
+        tone_hz=s.tone_hz,
+        tone_db=s.tone_db,
+        pa_leak_db=s.pa_leak_db,
+        room_rt60=s.room_rt60,
+        seed=s.seed,
+    )
 
 
 def build_modules(cfg: Config) -> list[Module]:
@@ -86,8 +103,7 @@ def build_modules(cfg: Config) -> list[Module]:
         _rf_module(cfg, qlxd),
         QLXDModule(qlxd) if qlxd is not None else None,
         tf5,
-        VocalModule(cfg.vocal, audio, cfg.audio.samplerate, desk=tf5, mains=_mains(cfg)) if cfg.vocal.enabled
-        else None,
+        VocalModule(cfg.vocal, audio, cfg.audio.samplerate, desk=tf5, mains=_mains(cfg)) if cfg.vocal.enabled else None,
     ]
     return [m for m in modules if m is not None]
 
@@ -99,8 +115,12 @@ def _rf_module(cfg: Config, qlxd: QLXDEngine | None) -> RFModule | None:
     return RFModule(RFEngine(cfg.rf, device, range_hint=receiver_range(qlxd)))
 
 
-def _tf5_module(cfg: Config, sim: SimConsole | None, on_names: Callable[[dict[int, str]], None],
-                on_gains: Callable[[dict[int, float | None]], None]) -> TF5Module | None:
+def _tf5_module(
+    cfg: Config,
+    sim: SimConsole | None,
+    on_names: Callable[[dict[int, str]], None],
+    on_gains: Callable[[dict[int, float | None]], None],
+) -> TF5Module | None:
     source = cfg.tf5.active_source
     if source == "off":
         return None
@@ -124,8 +144,7 @@ def receiver_range(qlxd: QLXDEngine | None) -> RangeHint | None:
     return lambda: fit_span(r["frequency_mhz"] for r in qlxd.frequencies())
 
 
-def create_app(cfg: Config, modules: list[Module], start: bool = True,
-               config_path: str | Path | None = None) -> Flask:
+def create_app(cfg: Config, modules: list[Module], start: bool = True, config_path: str | Path | None = None) -> Flask:
     """``config_path`` is the file the /config page edits (None: editing disabled)."""
     app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
     sock = Sock(app)

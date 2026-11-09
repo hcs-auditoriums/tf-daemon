@@ -151,6 +151,7 @@ def test_device_that_rejects_the_format_is_retried(fast):
 def test_app_starts_without_the_audio_device(fast, monkeypatch):
     """The real crash we hit: no TF5 at startup must not stop the server."""
     import tf_daemon.app as app_mod
+
     sd = FakeSD(plugged=False)
     real = app_mod.DeviceSource
     monkeypatch.setattr(app_mod, "DeviceSource", lambda *a, **kw: real(*a, sd_module=sd, **kw))

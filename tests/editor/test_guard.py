@@ -40,9 +40,19 @@ from tf_daemon.console.editor.guard import ReadOnlyViolation, check_outbound
 
 
 def _set_param_bytes(func, path, idx, value_el, origin=0xA0):
-    return message(SET_PARAM, [element(T_U8, b"\0"), element(T_STR, func), element(T_STR, func),
-                               element(T_U16, [len(path)]), element(T_U32, path), element(T_U32, idx),
-                               element(T_U32, [origin]), value_el])
+    return message(
+        SET_PARAM,
+        [
+            element(T_U8, b"\0"),
+            element(T_STR, func),
+            element(T_STR, func),
+            element(T_U16, [len(path)]),
+            element(T_U32, path),
+            element(T_U32, idx),
+            element(T_U32, [origin]),
+            value_el,
+        ],
+    )
 
 
 GUIDE_WRITE_EXAMPLE = (  # guides/tf5_api.md 4.4: set ch1 BandL gain to -5.20 dB. MUST be refused.
@@ -54,7 +64,8 @@ GUIDE_WRITE_EXAMPLE = (  # guides/tf5_api.md 4.4: set ch1 BandL gain to -5.20 dB
     "14 00000005 00000000 00000007 00000001 00000003 00000002"
     "14 00000005 00000000 00000000 00000000 00000000 00000000"
     "14 00000001 000000A0"
-    "24 00000001 FFFFFDF8")
+    "24 00000001 FFFFFDF8"
+)
 
 
 def test_guide_write_example_decodes_and_is_refused():
@@ -81,8 +92,10 @@ FORBIDDEN = {
     "set-param Mixing s32": ("MMIX", _set_param_bytes("Mixing", [0, 7, 0, 2, 2], [0] * 5, element(T_S32, [-520]))),
     "set-param Mixing u32": ("MMIX", _set_param_bytes("Mixing", [0, 19, 1], [14, 0, 0], element(T_U32, [0]))),
     "set-param Mixing str": ("MMIX", _set_param_bytes("Mixing", [0, 0, 0], [0, 0, 0], element(T_STR, "x"))),
-    "set-param console origin": ("MMIX", _set_param_bytes("Mixing", [0, 19, 1], [0, 0, 0], element(T_U32, [1]),
-                                                          origin=0xA1)),
+    "set-param console origin": (
+        "MMIX",
+        _set_param_bytes("Mixing", [0, 19, 1], [0, 0, 0], element(T_U32, [1]), origin=0xA1),
+    ),
     "set-param Property": ("MPRO", _set_param_bytes("Property", [2, 0, 0], [0, 1, 0], element(T_STR, "Editor"))),
     "full dump Mixing": ("MMIX", dump_message("Mixing", build_dump(mixing_tree()))),
     "full dump Property": ("MPRO", dump_message("Property", b"MMSXLIT\0")),
@@ -92,8 +105,13 @@ FORBIDDEN = {
     "subscribe SceneStatus": ("MSCS", subscribe("SceneStatus")),
     "tag/function mismatch": ("MPRO", subscribe("Mixing")),
     "subscribe bad flag": ("MMIX", message(SUBSCRIBE, [element(T_STR, "Mixing"), element(T_U8, b"\x00")])),
-    "hash short md5": ("MMIX", message(HASH_COMPARE, [element(T_U8, b"\0"), element(T_STR, "Mixing"),
-                                                      element(T_U8, b"\0" * 4), element(T_U8, bytes(16))])),
+    "hash short md5": (
+        "MMIX",
+        message(
+            HASH_COMPARE,
+            [element(T_U8, b"\0"), element(T_STR, "Mixing"), element(T_U8, b"\0" * 4), element(T_U8, bytes(16))],
+        ),
+    ),
     "sync with payload": ("MMIX", message(SYNC_OPEN, [element(T_U32, [1])])),
     "file transfer": ("d000", message((0x02, 0x01, 0x01))),
     "DS_A": ("DS_A", message((0x04, 0x01, 0x01))),
@@ -106,8 +124,10 @@ FORBIDDEN = {
     "reply to unknown event": ("EEVT", event("RecallScene", "", reply=True)),
     "KeepAlive with args": ("EEVT", event("KeepAlive", "x")),
     "event as set-param": ("EEVT", _set_param_bytes("Mixing", [0], [0], element(T_U32, [0]))),
-    "event bad ids": ("EEVT", message(EVENT, [element(T_U32, [1]), element(T_U32, [0]), element(T_STR, "KeepAlive"),
-                                              element(T_STR, "")])),
+    "event bad ids": (
+        "EEVT",
+        message(EVENT, [element(T_U32, [1]), element(T_U32, [0]), element(T_STR, "KeepAlive"), element(T_STR, "")]),
+    ),
     "garbage": ("MMIX", b"\x00\x01\x02"),
 }
 
@@ -161,15 +181,16 @@ def test_editor_has_a_single_send_path_and_one_guarded_write_builder():
     assert sorted(p.name for p in EDITOR.glob("*.py")) == files
     code = {name: _code(EDITOR / name) for name in files}
     everything = "\n".join(code.values())
-    assert everything.count("sendall(") == 1 and code["client.py"].count("sendall(") == 1, \
+    assert everything.count("sendall(") == 1 and code["client.py"].count("sendall(") == 1, (
         "all sending must go through TFEditorClient._send"
+    )
     assert not re.search(r"\.send\(|sendto\(|sendmsg\(", everything)
     send_def = re.search(r"def _send\(self.*?\n(.*?)\n    def ", code["client.py"], re.S).group(1)
     assert send_def.index("check_outbound(") < send_def.index("sendall(")
     assert not re.search(r"message\(\s*DUMP", everything), "no dump builder may exist"
     assert len(re.findall(r"message\(\s*SET_PARAM", everything)) == 1
-    assert re.search(r"def set_param_message\(.*?\n\s+return message\(SET_PARAM", code["codec.py"], re.S)
-    assert len(re.findall(r"set_param_message\(", everything)) == 2   # its definition and one call
+    assert re.search(r"def set_param_message\(.*?\n\s+return message\(\s*SET_PARAM", code["codec.py"], re.S)
+    assert len(re.findall(r"set_param_message\(", everything)) == 2  # its definition and one call
     calls = [m.start() for m in re.finditer(r"set_param_message\(", code["client.py"])]
     write_def = re.search(r"    def write\(self.*?(?=\n    def )", code["client.py"], re.S)
     assert len(calls) == 1 and write_def.start() <= calls[0] < write_def.end()
@@ -188,43 +209,53 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
     calls: dict[str, list[str]] = {}
     for p in PKG.rglob("*.py"):
         code = "\n".join(line.split("#", 1)[0] for line in p.read_text(encoding="utf-8").splitlines())
-        for name, pattern in (("write", r"(\beq_client|\bec|TFEditorClient\b.*)\.write\("),
-                              ("write_eq", r"\.write_eq\("),
-                              ("apply_suggestion", r"\.apply_suggestion\("), ("undo", r"\.undo\(")):
+        for name, pattern in (
+            ("write", r"(\beq_client|\bec|TFEditorClient\b.*)\.write\("),
+            ("write_eq", r"\.write_eq\("),
+            ("apply_suggestion", r"\.apply_suggestion\("),
+            ("undo", r"\.undo\("),
+        ):
             for _ in re.finditer(pattern, code):
                 calls.setdefault(name, []).append(p.relative_to(PKG).as_posix())
-    assert calls.get("write") == ["console/module.py"]        # ec.write(...) in TF5Module.write_eq only
+    assert calls.get("write") == ["console/module.py"]  # ec.write(...) in TF5Module.write_eq only
     console_src = (PKG / "console" / "module.py").read_text(encoding="utf-8")
     assert "ec = self.eq_client" in console_src
-    assert sorted(calls.get("write_eq", [])) == ["console/module.py", "vocal/auto.py", "vocal/auto.py",
-                                                  "vocal/desk.py", "vocal/desk.py"]
+    assert sorted(calls.get("write_eq", [])) == [
+        "console/module.py",
+        "vocal/auto.py",
+        "vocal/auto.py",
+        "vocal/desk.py",
+        "vocal/desk.py",
+    ]
     # The page's EQ editing: PUT /api/tf5/eq/<usb>, refused without "confirm": true before any write.
-    eq_set = console_src[console_src.index("def eq_set(usb: int):"):]
+    eq_set = console_src[console_src.index("def eq_set(usb: int):") :]
     assert eq_set.index('.get("confirm") is not True') < eq_set.index("self.write_eq(")
     vocal_src = (PKG / "vocal" / "module.py").read_text(encoding="utf-8")
     assert re.search(r"desk_write\(self\.desk\.apply_suggestion\)", vocal_src)
     assert re.search(r"desk_write\(self\.desk\.undo\)", vocal_src)
-    assert "apply_suggestion" not in calls and "undo" not in calls   # never called, only handed to desk_write
+    assert "apply_suggestion" not in calls and "undo" not in calls  # never called, only handed to desk_write
     assert '.get("confirm") is not True' in vocal_src
     # Profile recall / copy: write_values, only from those two methods, only handed to desk_write.
-    assert sorted(re.findall(r"desk_write\(lambda ch: self\.(recall_profile|copy_eq)\(", vocal_src)) == \
-        ["copy_eq", "recall_profile"]
+    assert sorted(re.findall(r"desk_write\(lambda ch: self\.(recall_profile|copy_eq)\(", vocal_src)) == [
+        "copy_eq",
+        "recall_profile",
+    ]
     assert len(re.findall(r"\.(recall_profile|copy_eq)\(", vocal_src)) == 2
     defs = {m.group(1): m.start() for m in re.finditer(r"\n    def (\w+)\(", vocal_src)}
     writes = [m.start() for m in re.finditer(r"\.write_values\(", vocal_src)]
-    assert sorted(max((n for n, at in defs.items() if at < w), key=lambda n: defs[n]) for w in writes) == \
-        ["copy_eq", "recall_profile"]
+    assert sorted(max((n for n, at in defs.items() if at < w), key=lambda n: defs[n]) for w in writes) == [
+        "copy_eq",
+        "recall_profile",
+    ]
     # Auto EQ: exists only with vocal.auto_allowed; turning it on and its undo need the confirmation.
-    assert re.search(r"self\.auto = AutoEQ\(.*?\)\s*\\?\s*if cfg\.auto_allowed else None", vocal_src, re.S)
+    assert re.search(r"self\.auto = \(?\s*AutoEQ\(.*?\)\s*\\?\s*if cfg\.auto_allowed\s+else None", vocal_src, re.S)
     assert re.search(r"desk_write\(self\.auto\.arm\)", vocal_src)
     assert re.search(r"desk_write\(self\.auto\.undo\)", vocal_src)
     auto_src = (PKG / "vocal" / "auto.py").read_text(encoding="utf-8")
     tick = re.search(r"    def tick\(self.*?(?=\n    def )", auto_src, re.S).group(0)
-    assert "list(self._channels.items())" in tick                  # only channels a person turned on
+    assert "list(self._channels.items())" in tick  # only channels a person turned on
     writers = [m.start() for m in re.finditer(r"\.write_eq\(", auto_src)]
     defs = {m.group(1): m.start() for m in re.finditer(r"\n    def (\w+)\(", auto_src)}
-    owner = lambda pos: max((n for n, at in defs.items() if at < pos), key=lambda n: defs[n])   # noqa: E731
+    owner = lambda pos: max((n for n, at in defs.items() if at < pos), key=lambda n: defs[n])  # noqa: E731
     assert sorted(owner(w) for w in writers) == ["_tick_channel", "undo"]
-    assert "the EQ was changed on the desk" in auto_src            # it stops when someone else touches it
-
-
+    assert "the EQ was changed on the desk" in auto_src  # it stops when someone else touches it

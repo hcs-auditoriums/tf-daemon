@@ -24,9 +24,18 @@ class Desk(FlatDesk):
 
 def bell(f, g, q):
     flat = {"type": "bell", "on": True, "gain": 0.0, "q": 1.0}
-    return {"on": True, "bank": "PRECISE", "one_knob": False, "hpf": None, "bands": [
-        {**flat, "label": "L", "freq": 100.0}, {**flat, "label": "LM", "freq": f, "gain": g, "q": q},
-        {**flat, "label": "HM", "freq": 3000.0}, {**flat, "label": "H", "freq": 8000.0}]}
+    return {
+        "on": True,
+        "bank": "PRECISE",
+        "one_knob": False,
+        "hpf": None,
+        "bands": [
+            {**flat, "label": "L", "freq": 100.0},
+            {**flat, "label": "LM", "freq": f, "gain": g, "q": q},
+            {**flat, "label": "HM", "freq": 3000.0},
+            {**flat, "label": "H", "freq": 8000.0},
+        ],
+    }
 
 
 def run(desk, seconds, leak=-40.0, talkers=(0,), house=31):
@@ -41,10 +50,12 @@ def run(desk, seconds, leak=-40.0, talkers=(0,), house=31):
 
 
 def level_at(x, f, nfft=1 << 15):
-    spec = np.mean([np.abs(np.fft.rfft(x[i:i + nfft] * np.hanning(nfft))) ** 2
-                    for i in range(0, len(x) - nfft + 1, nfft // 2)], axis=0)
+    spec = np.mean(
+        [np.abs(np.fft.rfft(x[i : i + nfft] * np.hanning(nfft))) ** 2 for i in range(0, len(x) - nfft + 1, nfft // 2)],
+        axis=0,
+    )
     k = int(round(f * nfft / FS))
-    return 10 * np.log10(spec[k - 30:k + 31].mean() + 1e-30)
+    return 10 * np.log10(spec[k - 30 : k + 31].mean() + 1e-30)
 
 
 def test_the_mains_carry_the_desk_eq():
@@ -53,7 +64,7 @@ def test_the_mains_carry_the_desk_eq():
     for f in (300.0, 1000.0, 3000.0):
         measured = level_at(x[:, 32], f) - level_at(x[:, 0], f)
         assert measured == pytest.approx(float(eq_curve(eq, np.array([f]))[0]), abs=1.0), f
-    assert np.array_equal(x[:, 32], x[:, 33])   # mono mains on both stereo-bus channels
+    assert np.array_equal(x[:, 32], x[:, 33])  # mono mains on both stereo-bus channels
 
 
 def test_a_channel_that_is_off_is_not_in_the_mains():
@@ -66,7 +77,7 @@ def test_too_much_gain_rings_at_the_leak_resonance(fader, grows):
     _, x = run(Desk(fader), 4.0, leak=-18.0)
     first, last = level_at(x[:FS, 32], 2480.0), level_at(x[-FS:, 32], 2480.0)
     assert bool(last - first > 6) == grows
-    assert np.max(np.abs(x[:, 32])) <= 0.9 + 1e-6   # the limiter keeps it bounded
+    assert np.max(np.abs(x[:, 32])) <= 0.9 + 1e-6  # the limiter keeps it bounded
 
 
 def test_the_house_mic_hears_the_mains_after_the_room_delay():
@@ -74,8 +85,8 @@ def test_the_house_mic_hears_the_mains_after_the_room_delay():
     mains, house = x[:, 32], x[:, 31]
     n = 1 << 18
     xc = np.fft.irfft(np.fft.rfft(house[-n:]) * np.conj(np.fft.rfft(mains[-n:])))
-    lag = int(np.argmax(xc[:FS // 10]))
-    assert abs(lag - round(12.0 / 343.0 * FS + 256)) <= 2   # 12 m at 343 m/s, + the room colour's latency
+    lag = int(np.argmax(xc[: FS // 10]))
+    assert abs(lag - round(12.0 / 343.0 * FS + 256)) <= 2  # 12 m at 343 m/s, + the room colour's latency
 
 
 def test_talkers_take_turns():
@@ -91,11 +102,12 @@ def test_talkers_take_turns():
 
 def test_cheap_enough_to_run_live():
     import time
+
     st = StageSettings(talkers=[0, 1], mains=(32, 33), house_mic=31)
     src = StageSource(34, N, st, Desk(0.0))
     b = np.zeros((N, 34), np.float32)
     t0 = time.perf_counter()
-    for _ in range(40):   # one second of audio
+    for _ in range(40):  # one second of audio
         src._fill(b)
     assert time.perf_counter() - t0 < 0.5
 
@@ -109,8 +121,11 @@ def test_config_builds_the_stage_from_the_patch():
 
 def test_demo_desk_eq_changes_reach_the_simulated_mains():
     """In demo mode the stage and the TF5 module share one simulated console."""
-    cfg = make_config(audio={"source": "stage"}, tf5={"source": "demo"},
-                      channels=[{"index": 0, "label": "Pastor"}, {"index": 32}, {"index": 33}])
+    cfg = make_config(
+        audio={"source": "stage"},
+        tf5={"source": "demo"},
+        channels=[{"index": 0, "label": "Pastor"}, {"index": 32}, {"index": 33}],
+    )
     modules = build_modules(cfg)
     app = create_app(cfg, modules)
     try:

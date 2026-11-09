@@ -49,14 +49,14 @@ from .voice import VoiceCollector
 
 log = logging.getLogger(__name__)
 
-LIVE_MEMORY_S = 60.0     # live: how much recent speech the spectrum and mains check follow
-LIVE_EVERY_S = 3.0       # live: re-analyze after this much new speech
-LIVE_MIN_S = 8.0         # live: first suggestion after this much speech
+LIVE_MEMORY_S = 60.0  # live: how much recent speech the spectrum and mains check follow
+LIVE_EVERY_S = 3.0  # live: re-analyze after this much new speech
+LIVE_MIN_S = 8.0  # live: first suggestion after this much speech
 MIN_MAINS_COHERENCE = 0.5
-SETTLED_DB = 0.5         # live: a suggestion that moves less than this (RMS), three times running, has settled
+SETTLED_DB = 0.5  # live: a suggestion that moves less than this (RMS), three times running, has settled
 MAINS_MISMATCH_DB = 3.0  # mains shape vs desk EQ shape: more than this is worth saying
-EQ_CHECK_HOPS = 20       # look at the channel EQ on the desk about once a second
-IDLE_AFTER_S = 0.75      # a mic counts as idle (for the feedback leak) this long after its last speech
+EQ_CHECK_HOPS = 20  # look at the channel EQ on the desk about once a second
+IDLE_AFTER_S = 0.75  # a mic counts as idle (for the feedback leak) this long after its last speech
 
 
 class _Session:
@@ -67,16 +67,16 @@ class _Session:
         self.mains = Transfer(samplerate, max_delay_s=0.1, memory_s=memory) if live else None
         self.feedback = Feedback(samplerate) if live else None
         self.last_speech_t = float("-inf")
-        self.last_t = float("-inf")       # stream time of the latest hop heard
+        self.last_t = float("-inf")  # stream time of the latest hop heard
         self.house = Transfer(samplerate, max_delay_s=0.25, memory_s=memory) if house else None
         self.target_s = target_s
-        self.state = "live" if live else "listening"   # listening | live | done | error
+        self.state = "live" if live else "listening"  # listening | live | done | error
         self.started = time.time()
         self.finished: float | None = None
         self.result: dict[str, Any] | None = None
-        self.analyzed_at = 0.0   # speech_s at the last live analysis
+        self.analyzed_at = 0.0  # speech_s at the last live analysis
         self.revisions = 0
-        self.eq_seen: np.ndarray | None = None   # the channel EQ the transfers were measured through
+        self.eq_seen: np.ndarray | None = None  # the channel EQ the transfers were measured through
         self.hops = 0
         self._last_curve: np.ndarray | None = None
         self._changes: deque[float] = deque(maxlen=3)
@@ -99,13 +99,13 @@ class _Session:
         ref = (points >= 200) & (points <= 6300)
         dev = np.asarray(result["deviation"]) + (eq_now if eq_now is not None else 0.0)
         after = np.asarray(result["after"])
-        rms = lambda d: round(float(np.sqrt(np.mean((d[ref] - np.median(d[ref])) ** 2))), 1)   # noqa: E731
+        rms = lambda d: round(float(np.sqrt(np.mean((d[ref] - np.median(d[ref])) ** 2))), 1)  # noqa: E731
         result["model"] = {
             "revision": self.revisions,
             "change_db": None if change is None else round(change, 1),
             "settled": len(self._changes) == 3 and max(self._changes) < SETTLED_DB,
-            "off_now_db": rms(dev),           # how far the voice is from the target with the desk EQ now
-            "off_after_db": rms(after),       # ... and with the suggestion instead
+            "off_now_db": rms(dev),  # how far the voice is from the target with the desk EQ now
+            "off_after_db": rms(after),  # ... and with the suggestion instead
         }
 
     def talking(self, within_s: float) -> bool:
@@ -122,10 +122,20 @@ class MicChecks:
     ``mains`` are the inputs carrying the stereo bus (for the live mains check). While a
     session runs, its input (and the mains) are kept analyzed by the engine."""
 
-    def __init__(self, audio: AudioInputs, samplerate: int, *, inputs: set[int] | None, target_s: float,
-                 max_cut_db: float, max_boost_db: float, mains: tuple[int, ...] = (), house_mic: int | None = None,
-                 tilt_db_oct: float = 0.0,
-                 eq_curve: Callable[[int, np.ndarray], np.ndarray | None] = lambda index, freqs: None) -> None:
+    def __init__(
+        self,
+        audio: AudioInputs,
+        samplerate: int,
+        *,
+        inputs: set[int] | None,
+        target_s: float,
+        max_cut_db: float,
+        max_boost_db: float,
+        mains: tuple[int, ...] = (),
+        house_mic: int | None = None,
+        tilt_db_oct: float = 0.0,
+        eq_curve: Callable[[int, np.ndarray], np.ndarray | None] = lambda index, freqs: None,
+    ) -> None:
         self.engine = audio
         self.inputs = inputs
         self.target_s = target_s
@@ -134,7 +144,7 @@ class MicChecks:
         self.mains = tuple(mains)
         self.house_mic = house_mic
         self.tilt_db_oct = tilt_db_oct
-        self._eq_curve = eq_curve   # the channel EQ on the desk now, at given freqs (dB)
+        self._eq_curve = eq_curve  # the channel EQ on the desk now, at given freqs (dB)
         self._fs = samplerate
         self._lock = threading.Lock()
         self._sessions: dict[int, _Session] = {}
@@ -155,8 +165,12 @@ class MicChecks:
             self._release_locked(index)
             self._sessions[index] = _Session(self._fs, self.target_s, live, house is not None)
             self._held[index] = held
-        log.info("Vocal %s started on input %d (%s)", "live listening" if live else "mic check", index + 1,
-                 self.engine.inputs[index].label)
+        log.info(
+            "Vocal %s started on input %d (%s)",
+            "live listening" if live else "mic check",
+            index + 1,
+            self.engine.inputs[index].label,
+        )
 
     def stop(self, index: int) -> None:
         """Stop listening now and keep (a mic check: make) the suggestion from what was heard."""
@@ -205,8 +219,11 @@ class MicChecks:
             s.hops += 1
             if s.hops % EQ_CHECK_HOPS == 1 and (s.mains is not None or s.house is not None):
                 self._follow_eq(index, s)
-            mains = (np.mean([frames[m] for m in self.mains], axis=0)
-                     if self.mains and all(m in frames for m in self.mains) else None)
+            mains = (
+                np.mean([frames[m] for m in self.mains], axis=0)
+                if self.mains and all(m in frames for m in self.mains)
+                else None
+            )
             if speech:
                 s.last_speech_t = stream_t
             else:
@@ -241,7 +258,7 @@ class MicChecks:
         """When the channel EQ changes, the mic -> mains / house paths change: start their
         averages over, so they never mix sound from before and after the move."""
         curve = self._eq_curve(index, POINTS)
-        eq = curve if curve is not None else np.zeros(len(POINTS))   # unknown: taken as flat
+        eq = curve if curve is not None else np.zeros(len(POINTS))  # unknown: taken as flat
         if s.eq_seen is not None and not np.allclose(eq, s.eq_seen, atol=0.05):
             for t in (s.mains, s.house):
                 if t is not None:
@@ -266,9 +283,15 @@ class MicChecks:
             if s.house is not None:
                 room_db, room = room_correction(s.house, POINTS, self._eq_curve(index, POINTS))
             fb = s.feedback.headroom(s.mains) if s.feedback is not None else None
-            result = analyze(s.collector, self.rings_for(index), max_cut_db=self.max_cut_db,
-                             max_boost_db=self.max_boost_db, room_db=room_db, tilt_db_oct=self.tilt_db_oct,
-                             boost_cap=boost_cap(fb) if fb else None)
+            result = analyze(
+                s.collector,
+                self.rings_for(index),
+                max_cut_db=self.max_cut_db,
+                max_boost_db=self.max_boost_db,
+                room_db=room_db,
+                tilt_db_oct=self.tilt_db_oct,
+                boost_cap=boost_cap(fb) if fb else None,
+            )
             if fb is not None:
                 result["feedback"] = fb
         except Exception as e:  # never break the analysis thread over a suggestion
@@ -286,13 +309,17 @@ class MicChecks:
             if self._sessions.get(index) is not s:
                 return  # restarted or cleared meanwhile
             if s.live and not result.get("ok") and s.result is not None and s.result.get("ok"):
-                result = s.result   # stopping live: keep the last good suggestion
+                result = s.result  # stopping live: keep the last good suggestion
             s.result = result
             s.state = "done" if result.get("ok") else "error"
             s.finished = time.time()
             self._release_locked(index)
-        log.info("Vocal %s on input %d: %s", "live listening" if s.live else "mic check", index + 1,
-                 f"{len(result.get('bands', []))} band(s)" if result.get("ok") else result.get("error"))
+        log.info(
+            "Vocal %s on input %d: %s",
+            "live listening" if s.live else "mic check",
+            index + 1,
+            f"{len(result.get('bands', []))} band(s)" if result.get("ok") else result.get("error"),
+        )
 
 
 def mains_check(t: Transfer, eq_db: np.ndarray | None = None) -> dict[str, Any]:
@@ -304,16 +331,24 @@ def mains_check(t: Transfer, eq_db: np.ndarray | None = None) -> dict[str, Any]:
         verdict, note = "unknown", "listening for the voice in the mains…"
     elif coh is None or coh < MIN_MAINS_COHERENCE:
         barely = coh is not None and coh < 0.2
-        verdict, note = "weak", ("the voice is barely in the mains (fader down, channel off, or muted?)" if barely
-                                 else "the voice is mixed with a lot else in the mains")
+        verdict, note = (
+            "weak",
+            (
+                "the voice is barely in the mains (fader down, channel off, or muted?)"
+                if barely
+                else "the voice is mixed with a lot else in the mains"
+            ),
+        )
     else:
         verdict, note = "ok", f"in the mains at {summary['gain_db']:+.1f} dB re the mic"
         mismatch = _eq_mismatch(t, eq_db)
         summary["eq_mismatch_db"] = mismatch
         if mismatch is not None and mismatch > MAINS_MISMATCH_DB:
             verdict = "differs"
-            note += (f"; its tone differs from the desk EQ by up to {mismatch:.0f} dB "
-                     "(dynamics, a bus EQ or another channel in the path?)")
+            note += (
+                f"; its tone differs from the desk EQ by up to {mismatch:.0f} dB "
+                "(dynamics, a bus EQ or another channel in the path?)"
+            )
     return {**summary, "verdict": verdict, "note": note}
 
 

@@ -4,6 +4,7 @@
 #   ./dev test [ARGS]      all tests in parallel; ARGS go to pytest (./dev test -k reconnects)
 #   ./dev logs             follow the server log
 #   ./dev lint             ruff + mypy (what CI runs besides the tests)
+#   ./dev fix              fix what ruff can, and format the code
 #   ./dev up | down        start (rebuilding if needed) / stop
 #   ./dev open [PAGE]      open the running app in the browser (./dev open rf)
 #   ./dev help             list these commands
@@ -37,7 +38,8 @@ Dev container shortcuts (each starts the container if it isn't running):
                          e.g. ./dev test tests/test_tf5.py -k reconnects
                               ./dev test -n 0 --pdb     (serial, debugger)
   ./dev logs             follow the server log (Ctrl+C to stop following)
-  ./dev lint             ruff (style, bugs) and mypy (types), as CI runs them
+  ./dev lint             ruff (style, bugs, formatting) and mypy (types), as CI runs them
+  ./dev fix              fix what ruff can (imports, unused names ...) and format the code
   ./dev open [PAGE]      open the running app in the browser
                          PAGE: rf | qlxd | config (default: the audio page)
   ./dev up               start, rebuilding the image if pyproject.toml changed
@@ -56,7 +58,8 @@ case "$cmd" in
   shell) docker compose up -d && docker compose exec app bash ;;
   test)  docker compose up -d && docker compose exec app pytest "$@" ;;
   logs)  docker compose up -d && docker compose logs -f app ;;
-  lint)  docker compose up -d && docker compose exec app ruff check . && docker compose exec app mypy ;;
+  lint)  docker compose up -d && docker compose exec app ruff check . && docker compose exec app ruff format --check . && docker compose exec app mypy ;;
+  fix)   docker compose up -d && docker compose exec app ruff check --fix . && docker compose exec app ruff format . ;;
   open)  open_app "${1:-}" ;;
   help|-h|--help|"") usage ;;
   *)     echo "unknown command: $cmd" >&2; echo >&2; usage >&2; exit 2 ;;

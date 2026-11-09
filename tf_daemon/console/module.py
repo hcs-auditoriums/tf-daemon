@@ -45,9 +45,13 @@ class TF5Module:
 
     name = "tf5"
 
-    def __init__(self, cfg: TF5Config, on_names: Callable[[dict[int, str]], None],
-                 on_gains: Callable[[dict[int, float | None]], None] | None = None,
-                 simulator: SimConsole | None = None) -> None:
+    def __init__(
+        self,
+        cfg: TF5Config,
+        on_names: Callable[[dict[int, str]], None],
+        on_gains: Callable[[dict[int, float | None]], None] | None = None,
+        simulator: SimConsole | None = None,
+    ) -> None:
         t = cfg
         self.simulator = simulator
         if t.username or t.password:
@@ -117,7 +121,7 @@ class TF5Module:
             "source": source_label(src) if src is not None else None,
             "connected": ec.connected,
             "synced": ec.synced,
-            "writable": ec.writes and src is not None and src[0] == "InCh",   # the page may offer editing
+            "writable": ec.writes and src is not None and src[0] == "InCh",  # the page may offer editing
             "eq": settings,
             "freqs": [round(float(f), 2) for f in CURVE_FREQS] if settings else [],
             "curve": [round(float(v), 2) for v in eq_curve(settings)] if settings else [],
@@ -133,8 +137,7 @@ class TF5Module:
 
         @bp.get("/channels")
         def channels():
-            return jsonify({"connected": client.connected, "channels": client.channels(),
-                            "mixes": client.mixes()})
+            return jsonify({"connected": client.connected, "channels": client.channels(), "mixes": client.mixes()})
 
         @bp.get("/eq/<int:usb>")
         def eq(usb: int):
@@ -147,12 +150,21 @@ class TF5Module:
             # Changes the desk: only a person's edit (the page sends confirm with each drag / entry).
             body = request.get_json(silent=True) or {}
             if body.get("confirm") is not True:
-                return jsonify({"ok": False, "error": "changing the desk needs \"confirm\": true"}), 400
+                return jsonify({"ok": False, "error": 'changing the desk needs "confirm": true'}), 400
             changes = body.get("changes")
-            if not isinstance(changes, list) or not changes or not all(
-                    isinstance(c, list) and len(c) == 2 and isinstance(c[0], str) and isinstance(c[1], int)
-                    and not isinstance(c[1], bool) for c in changes):
-                return jsonify({"ok": False, "error": "body needs \"changes\": [[path, raw value], ...]"}), 400
+            if (
+                not isinstance(changes, list)
+                or not changes
+                or not all(
+                    isinstance(c, list)
+                    and len(c) == 2
+                    and isinstance(c[0], str)
+                    and isinstance(c[1], int)
+                    and not isinstance(c[1], bool)
+                    for c in changes
+                )
+            ):
+                return jsonify({"ok": False, "error": 'body needs "changes": [[path, raw value], ...]'}), 400
             try:
                 results = self.write_eq(usb, [(c[0], c[1]) for c in changes])
             except (ValueError, PermissionError) as e:

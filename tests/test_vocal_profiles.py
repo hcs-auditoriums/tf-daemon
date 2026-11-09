@@ -13,8 +13,11 @@ def app_for(tmp_path):
     apps = []
 
     def make():
-        cfg = make_config(tf5={"source": "demo"}, vocal={"enabled": True, "profiles_file": str(tmp_path / "p.json")},
-                          channels=[{"index": 0, "label": "Pastor"}, {"index": 1, "label": "Lead Vox"}])
+        cfg = make_config(
+            tf5={"source": "demo"},
+            vocal={"enabled": True, "profiles_file": str(tmp_path / "p.json")},
+            channels=[{"index": 0, "label": "Pastor"}, {"index": 1, "label": "Lead Vox"}],
+        )
         modules = build_modules(cfg)
         app = create_app(cfg, modules)
         apps.append(app)
@@ -34,7 +37,7 @@ def raw(tf5, ch):
 def test_save_recall_onto_another_channel_and_undo(app_for):
     c, tf5 = app_for()
     before = raw(tf5, 1)
-    assert raw(tf5, 0) != before                         # the demo desk: ch1 has a real EQ, ch2 is flat
+    assert raw(tf5, 0) != before  # the demo desk: ch1 has a real EQ, ch2 is flat
     assert c.post("/api/vocal/profiles/save", json={"channel": 0, "name": "  Pastor  Smith "}).get_json()["ok"]
     listed = c.get("/api/vocal/profiles").get_json()["profiles"]
     assert [p["name"] for p in listed] == ["Pastor Smith"] and listed[0]["from"] == "Pastor"
@@ -58,7 +61,7 @@ def test_copy_eq_between_channels(app_for):
 def test_profiles_survive_a_restart_and_can_be_deleted(app_for):
     c, _ = app_for()
     c.post("/api/vocal/profiles/save", json={"channel": 0, "name": "Narrator"})
-    c2, _ = app_for()                                  # a new process reading the same file
+    c2, _ = app_for()  # a new process reading the same file
     assert [p["name"] for p in c2.get("/api/vocal/profiles").get_json()["profiles"]] == ["Narrator"]
     assert c2.post("/api/vocal/profiles/delete", json={"name": "Narrator"}).get_json()["ok"]
     assert c2.get("/api/vocal/profiles").get_json()["profiles"] == []

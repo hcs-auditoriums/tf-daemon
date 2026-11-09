@@ -55,16 +55,33 @@ log = logging.getLogger(__name__)
 class VocalModule:
     name = "vocal"
 
-    def __init__(self, cfg: VocalConfig, audio: AudioInputs, samplerate: int, desk: DeskEQ | None = None,
-                 mains: tuple[int, ...] = ()) -> None:
+    def __init__(
+        self,
+        cfg: VocalConfig,
+        audio: AudioInputs,
+        samplerate: int,
+        desk: DeskEQ | None = None,
+        mains: tuple[int, ...] = (),
+    ) -> None:
         self.engine = audio
-        self.checks = MicChecks(audio, samplerate, inputs=set(cfg.inputs) or None, target_s=cfg.listen_s,
-                                max_cut_db=cfg.max_cut_db, max_boost_db=cfg.max_boost_db, mains=mains,
-                                house_mic=cfg.house_mic if cfg.house_mic >= 0 else None,
-                                tilt_db_oct=cfg.room_tilt_db_oct, eq_curve=self._eq_curve)
+        self.checks = MicChecks(
+            audio,
+            samplerate,
+            inputs=set(cfg.inputs) or None,
+            target_s=cfg.listen_s,
+            max_cut_db=cfg.max_cut_db,
+            max_boost_db=cfg.max_boost_db,
+            mains=mains,
+            house_mic=cfg.house_mic if cfg.house_mic >= 0 else None,
+            tilt_db_oct=cfg.room_tilt_db_oct,
+            eq_curve=self._eq_curve,
+        )
         self.desk = DeskWriter(desk, self.checks.result)
-        self.auto = AutoEQ(self.checks, desk, max_cut_db=cfg.max_cut_db, max_boost_db=cfg.max_boost_db) \
-            if cfg.auto_allowed else None
+        self.auto = (
+            AutoEQ(self.checks, desk, max_cut_db=cfg.max_cut_db, max_boost_db=cfg.max_boost_db)
+            if cfg.auto_allowed
+            else None
+        )
         self.profiles = ProfileStore(cfg.profiles_file)
 
     # ------------------------------------------------------------------ profiles
@@ -82,8 +99,9 @@ class VocalModule:
     def recall_profile(self, index: int, name: Any) -> dict[str, Any]:
         """SET input ``index``'s EQ to a saved profile. Only from a person's confirmed request."""
         values = self.profiles.get(name)
-        return self.desk.write_values(index, changes_to(self._raw_eq(index), values), "recall",
-                                      [f"profile {name!r}: {summary(values)}"])
+        return self.desk.write_values(
+            index, changes_to(self._raw_eq(index), values), "recall", [f"profile {name!r}: {summary(values)}"]
+        )
 
     def copy_eq(self, index: int, source: int) -> dict[str, Any]:
         """SET input ``index``'s EQ to input ``source``'s. Only from a person's confirmed request."""
@@ -93,8 +111,9 @@ class VocalModule:
         if any(not isinstance(values.get(p), int) for p in PATHS):
             raise ValueError("couldn't read that channel's EQ from the desk")
         label = self.engine.inputs[source].label
-        return self.desk.write_values(index, changes_to(self._raw_eq(index), values), "copy",
-                                      [f"from {label}: {summary(values)}"])
+        return self.desk.write_values(
+            index, changes_to(self._raw_eq(index), values), "copy", [f"from {label}: {summary(values)}"]
+        )
 
     def _eq_curve(self, index: int, freqs: np.ndarray) -> np.ndarray | None:
         """The channel EQ on the desk now for ``index``, at ``freqs`` (dB); None if unknown."""
@@ -104,20 +123,32 @@ class VocalModule:
     def snapshot(self) -> dict[str, Any]:
         sessions = {}
         for index, s in self.checks.sessions():
-            entry = {"state": s.state, "live": s.live, "target_s": s.target_s, "started": s.started,
-                     "finished": s.finished, "label": self.engine.inputs[index].label, **s.collector.progress()}
+            entry = {
+                "state": s.state,
+                "live": s.live,
+                "target_s": s.target_s,
+                "started": s.started,
+                "finished": s.finished,
+                "label": self.engine.inputs[index].label,
+                **s.collector.progress(),
+            }
             if s.result is not None:
                 entry["result"] = s.result
                 entry["current_eq"] = self.desk.current_eq(index)
                 entry["apply"] = self.desk.apply_state(index)
             sessions[str(index)] = entry
         inputs = self.checks.inputs
-        return {"enabled": True, "inputs": sorted(inputs) if inputs is not None else None,
-                "house_mic": self.checks.house_mic,
-                "listen_s": self.checks.target_s, "sessions": sessions,
-                "can_write": self.desk.writable() is not None, **self.desk.history(),
-                "auto_allowed": self.auto is not None and self.desk.writable() is not None,
-                "auto": self.auto.states() if self.auto is not None else {}}
+        return {
+            "enabled": True,
+            "inputs": sorted(inputs) if inputs is not None else None,
+            "house_mic": self.checks.house_mic,
+            "listen_s": self.checks.target_s,
+            "sessions": sessions,
+            "can_write": self.desk.writable() is not None,
+            **self.desk.history(),
+            "auto_allowed": self.auto is not None and self.desk.writable() is not None,
+            "auto": self.auto.states() if self.auto is not None else {},
+        }
 
     # ------------------------------------------------------------------ module plumbing
 
@@ -127,7 +158,7 @@ class VocalModule:
         def channel_arg() -> int:
             ch = (request.get_json(silent=True) or {}).get("channel")
             if not isinstance(ch, int) or not 0 <= ch < len(self.engine.inputs):
-                raise ValueError("body must be {\"channel\": <input index>}")
+                raise ValueError('body must be {"channel": <input index>}')
             return ch
 
         @bp.get("/status")
@@ -157,14 +188,14 @@ class VocalModule:
         def desk_write(fn):
             # Changes the desk: only with the page's explicit confirmation in the request.
             if (request.get_json(silent=True) or {}).get("confirm") is not True:
-                return jsonify({"ok": False, "error": "changing the desk needs \"confirm\": true"}), 400
+                return jsonify({"ok": False, "error": 'changing the desk needs "confirm": true'}), 400
             try:
                 return jsonify({"ok": True, **fn(channel_arg())})
             except (ValueError, PermissionError) as e:
                 return jsonify({"ok": False, "error": str(e)}), 400
             except (ConnectionError, OSError) as e:
                 return jsonify({"ok": False, "error": f"desk not reachable: {e}"}), 503
-            except Exception as e:   # e.g. the client refusing a frame: report, don't crash the request
+            except Exception as e:  # e.g. the client refusing a frame: report, don't crash the request
                 log.exception("Writing the vocal EQ to the desk failed")
                 return jsonify({"ok": False, "error": f"not applied: {e}"}), 500
 
@@ -197,7 +228,7 @@ class VocalModule:
         def profile_copy():
             source = (request.get_json(silent=True) or {}).get("from")
             if not isinstance(source, int) or not 0 <= source < len(self.engine.inputs):
-                return jsonify({"ok": False, "error": "body needs \"from\": <input index>"}), 400
+                return jsonify({"ok": False, "error": 'body needs "from": <input index>'}), 400
             return desk_write(lambda ch: self.copy_eq(ch, source))
 
         @bp.post("/profiles/delete")
@@ -213,7 +244,7 @@ class VocalModule:
             if self.auto is None:
                 return jsonify({"ok": False, "error": "auto EQ isn't allowed (vocal.auto_allowed)"}), 400
             body = request.get_json(silent=True) or {}
-            if body.get("on") is False:   # stopping is always allowed
+            if body.get("on") is False:  # stopping is always allowed
                 try:
                     self.auto.disarm(channel_arg())
                 except ValueError as e:
@@ -231,7 +262,7 @@ class VocalModule:
 
     def start(self) -> None:
         if self.auto is not None:
-            self.auto.start()   # idle until a person turns it on for a channel
+            self.auto.start()  # idle until a person turns it on for a channel
 
     def stop(self) -> None:
         if self.auto is not None:

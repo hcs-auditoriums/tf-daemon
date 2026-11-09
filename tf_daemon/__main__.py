@@ -25,8 +25,14 @@ def setup_logging(level: str) -> None:
     logging.basicConfig(level=level.upper(), format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
 
 
-def source_overrides(audio: str | None = None, wav: str | None = None, rf: str | None = None,
-                     qlxd: str | None = None, tf5: str | None = None, demo: bool = False) -> dict[str, Any]:
+def source_overrides(
+    audio: str | None = None,
+    wav: str | None = None,
+    rf: str | None = None,
+    qlxd: str | None = None,
+    tf5: str | None = None,
+    demo: bool = False,
+) -> dict[str, Any]:
     """Config overrides for the sources picked on the command line (or gunicorn's
     environment). ``demo`` simulates everything; None leaves the config's choice."""
     if demo:
@@ -62,20 +68,36 @@ def list_devices() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="tf-daemon", description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        prog="tf-daemon", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--config", default="config.toml", help="path to config.toml (default: ./config.toml)")
-    p.add_argument("--source", nargs="+", metavar="KIND",
-                   help="audio: device | synth | stage | wav PATH (default: audio.source from config)")
-    p.add_argument("--rf-source", choices=["device", "demo", "off"],
-                   help="tinySA RF module: device | demo | off (default: rf.source from config)")
-    p.add_argument("--qlxd-source", choices=["device", "demo", "off"],
-                   help="Shure QLX-D module: device | demo | off (default: qlxd.source from config)")
-    p.add_argument("--tf5-source", choices=["device", "demo", "off"],
-                   help="TF5 network module: device (tf5.host) | demo (simulated console) | off "
-                        "(default: tf5.source from config)")
-    p.add_argument("--demo", action="store_true",
-                   help="simulate all hardware: --source stage --rf-source demo --qlxd-source demo --tf5-source demo")
+    p.add_argument(
+        "--source",
+        nargs="+",
+        metavar="KIND",
+        help="audio: device | synth | stage | wav PATH (default: audio.source from config)",
+    )
+    p.add_argument(
+        "--rf-source",
+        choices=["device", "demo", "off"],
+        help="tinySA RF module: device | demo | off (default: rf.source from config)",
+    )
+    p.add_argument(
+        "--qlxd-source",
+        choices=["device", "demo", "off"],
+        help="Shure QLX-D module: device | demo | off (default: qlxd.source from config)",
+    )
+    p.add_argument(
+        "--tf5-source",
+        choices=["device", "demo", "off"],
+        help="TF5 network module: device (tf5.host) | demo (simulated console) | off (default: tf5.source from config)",
+    )
+    p.add_argument(
+        "--demo",
+        action="store_true",
+        help="simulate all hardware: --source stage --rf-source demo --qlxd-source demo --tf5-source demo",
+    )
     p.add_argument("--host", help="override server.host")
     p.add_argument("--port", type=int, help="override server.port")
     p.add_argument("--log-level", default="INFO")
