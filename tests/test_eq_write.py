@@ -17,7 +17,8 @@ from tf_daemon.console.editor.client import TFEditorClient
 from tf_daemon.console.editor.codec import ORIGIN_SELF, SET_PARAM, T_S32, T_U32, parse_message, set_param_message
 from tf_daemon.console.editor.dump import Dump
 from tf_daemon.console.editor.guard import ReadOnlyViolation, check_outbound
-from tf_daemon.vocal import _Session, eq_plan
+from tf_daemon.vocal.module import _Session
+from tf_daemon.vocal.plan import eq_plan
 
 GAIN_L = "InputChannel:3/PEQ/Bank/BandL/Gain"
 FREQ_2 = "InputChannel:3/PEQ/Bank/Band:1/Frequency"

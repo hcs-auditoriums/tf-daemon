@@ -25,57 +25,57 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Protocol
 
 from flask import Blueprint, Flask, jsonify, request
 from flask_sock import Sock
 
-from .config import VocalConfig
-from .dsp.vocal import VoiceCollector, analyze
+from ..config import VocalConfig
+from ..dsp.vocal import VoiceCollector, analyze
+from .plan import eq_plan
+
+if TYPE_CHECKING:
+    from ..config import Channel
+    from ..dsp.ring import RingLog
 
 log = logging.getLogger(__name__)
 
-
-def _band_path(label: str) -> str:
-    """Suggestion / console band label -> PEQ path relative to the channel."""
-    if label in ("L", "H"):
-        return f"PEQ/Bank/Band{label}"
-    return f"PEQ/Bank/Band:{int(label) - 1}"
+Tap = Callable[[int, Any, float], None]   # (input, samples, stream time), on the analysis thread
 
 
-def eq_plan(result: dict[str, Any], current: dict[str, Any]) -> tuple[list[tuple[str, int]], list[str]]:
-    """The desk changes that make the channel's EQ the suggestion, as (path, raw value), and a
-    line per change for the person confirming. Suggested bands become bells with the
-    suggested settings; the other bands are set flat (0 dB) so the desk matches the
-    suggested curve; a low / high band used as a filter (HPF / LPF) is left alone."""
-    changes: list[tuple[str, int]] = []
-    lines: list[str] = []
-    if not current["on"]:
-        changes.append(("PEQ/On", 1))
-        lines.append("EQ: on")
-    hpf = result.get("hpf")
-    if hpf and current.get("hpf") is not None:
-        changes += [("PEQ/Bank/HPF/On", 1), ("PEQ/Bank/HPF/Frequency", round(hpf["freq"] * 10))]
-        lines.append(f"HPF: on, {hpf['freq']:g} Hz")
-    suggested = {b["band"]: b for b in result.get("bands", [])}
-    labels = {b["label"] for b in current["bands"]}
-    if set(suggested) - labels:
-        raise ValueError(f"the desk channel has no band {', '.join(sorted(set(suggested) - labels))}")
-    for b in current["bands"]:
-        label, base, m = b["label"], _band_path(b["label"]), suggested.get(b["label"])
-        if m is not None:
-            if label in ("L", "H"):
-                changes.append((f"{base}/Type", 0))   # bell
-            q = min(max(float(m["q"]), 0.1), 10.0)
-            changes += [(f"{base}/Frequency", round(m["freq"] * 10)), (f"{base}/Gain", round(m["gain"] * 10) * 10),
-                        (f"{base}/Q", round(q * 1000))]
-            lines.append(f"{label}: bell {m['gain']:+.1f} dB @ {m['freq']:g} Hz, Q {q:g}")
-        elif b["type"] in ("hpf", "lpf"):
-            lines.append(f"{label}: {b['type'].upper()} left as it is")
-        elif b["gain"] != 0:
-            changes.append((f"{base}/Gain", 0))
-            lines.append(f"{label}: flat (was {b['gain']:+.1f} dB)")
-    return changes, lines
+class AudioInputs(Protocol):
+    """What the vocal assist needs from the audio side (audio.engine.AudioEngine)."""
+
+    @property
+    def inputs(self) -> list[Channel]: ...
+
+    @property
+    def rings(self) -> RingLog: ...
+
+    def add_tap(self, tap: Tap) -> None: ...
+
+    def acquire(self, index: int) -> None: ...
+
+    def release(self, index: int) -> None: ...
+
+
+class DeskEQ(Protocol):
+    """The console's EQ, read and (on a person's request) written (console.module.TF5Module)."""
+
+    @property
+    def eq_available(self) -> bool: ...
+
+    @property
+    def eq_writable(self) -> bool: ...
+
+    def eq(self, usb: int) -> dict[str, Any]: ...
+
+    def eq_target(self, usb: int) -> str | None: ...
+
+    def eq_raw(self, usb: int, paths: list[str]) -> dict[str, int | str | None]: ...
+
+    def write_eq(self, usb: int, changes: list[tuple[str, int]]) -> list[dict[str, Any]]: ...
 
 
 class _Session:
@@ -91,8 +91,9 @@ class _Session:
 class VocalModule:
     name = "vocal"
 
-    def __init__(self, cfg: VocalConfig, audio_engine: Any, samplerate: int) -> None:
-        self.engine = audio_engine
+    def __init__(self, cfg: VocalConfig, audio: AudioInputs, samplerate: int, desk: DeskEQ | None = None) -> None:
+        self.engine = audio
+        self.desk = desk  # None: no console (or no EQ): suggestions only
         self.inputs = set(cfg.inputs) or None  # None: any input
         self.target_s = cfg.listen_s
         self.max_cut_db = cfg.max_cut_db
@@ -104,7 +105,7 @@ class VocalModule:
         self._apply_lock = threading.Lock()                    # one desk write at a time
         self._undo: dict[int, list[tuple[str, int]]] = {}      # input -> desk values before the first apply
         self._applied: dict[int, dict[str, Any]] = {}          # input -> outcome of the last apply / undo
-        audio_engine.add_tap(self._tap)
+        audio.add_tap(self._tap)
 
     # ------------------------------------------------------------------ sessions
 
@@ -167,13 +168,13 @@ class VocalModule:
 
     # ------------------------------------------------------------------ apply to the desk (on request only)
 
-    def _console(self) -> Any:
-        return getattr(self.engine, "console", None)
+    def _writable_desk(self) -> DeskEQ | None:
+        return self.desk if self.desk is not None and self.desk.eq_writable else None
 
     def apply_blocker(self, index: int) -> str | None:
         """Why the suggestion can't be applied to the desk now; None if it can."""
-        console = self._console()
-        if console is None or not getattr(console, "eq_writable", False):
+        console = self._writable_desk()
+        if console is None:
             return "writing to the desk is off (tf5.eq_write)"
         with self._lock:
             s = self._sessions.get(index)
@@ -200,13 +201,15 @@ class VocalModule:
 
     def apply_suggestion(self, index: int) -> dict[str, Any]:
         """SET THE DESK EQ to the suggestion. Only from a person's confirmed request."""
-        console = self._console()
         with self._apply_lock:
-            changes, lines = self.plan(index)
+            changes, lines = self.plan(index)   # raises unless the desk is writable
             if not changes:
                 return self._record(index, "apply", [], lines)
-            before = console.eq_raw(index, [p for p, _ in changes])
-            if any(not isinstance(v, int) for v in before.values()):
+            console = self._writable_desk()
+            assert console is not None
+            raw = console.eq_raw(index, [p for p, _ in changes])
+            before = {p: v for p, v in raw.items() if isinstance(v, int)}
+            if len(before) != len(raw):
                 raise ValueError("couldn't read the current desk values to keep for Undo")
             results = console.write_eq(index, changes)
             self._undo.setdefault(index, [(p, before[p]) for p, _ in changes])   # keep the original
@@ -217,12 +220,12 @@ class VocalModule:
 
     def undo(self, index: int) -> dict[str, Any]:
         """Put back the desk values the first apply replaced. Only on a person's request."""
-        console = self._console()
         with self._apply_lock:
             changes = self._undo.get(index)
             if not changes:
                 raise ValueError("nothing to undo")
-            if console is None or not getattr(console, "eq_writable", False):
+            console = self._writable_desk()
+            if console is None:
                 raise PermissionError("writing to the desk is off (tf5.eq_write)")
             results = console.write_eq(index, changes)
             del self._undo[index]
@@ -240,8 +243,8 @@ class VocalModule:
     # ------------------------------------------------------------------ status
 
     def _current_eq(self, index: int) -> dict[str, Any] | None:
-        console = getattr(self.engine, "console", None)
-        if console is None or not getattr(console, "eq_available", False):
+        console = self.desk
+        if console is None or not console.eq_available:
             return None
         try:
             return console.eq(index).get("eq")
@@ -260,10 +263,9 @@ class VocalModule:
                 entry["current_eq"] = self._current_eq(index)
                 entry["apply"] = self._apply_state(index)
             sessions[str(index)] = entry
-        console = self._console()
         return {"enabled": True, "inputs": sorted(self.inputs) if self.inputs is not None else None,
                 "listen_s": self.target_s, "sessions": sessions,
-                "can_write": bool(console is not None and getattr(console, "eq_writable", False)),
+                "can_write": self._writable_desk() is not None,
                 "undo": {str(i): True for i in self._undo}, "applied": {str(i): a for i, a in self._applied.items()}}
 
     def _apply_state(self, index: int) -> dict[str, Any]:

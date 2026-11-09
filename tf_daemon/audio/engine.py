@@ -109,7 +109,6 @@ class AudioEngine:
         # Which input feeds a ring on a bus (Main L/R): see dsp/ring.py. Buses
         # are the pinned inputs until the TF5 patch says otherwise.
         self._bus_inputs: frozenset[int] = self._pinned
-        self.console: Any = None  # TF5Module when tf5.host is set: desk changes for /ws/audio
         self._taps: list[Any] = []  # add_tap(): optional modules that see each analyzed input's samples
         self._console_gains: dict[int, float | None] = {}  # input -> fader dB, None = off / -inf
         self._usb_post_fader = cfg.tf5.usb_post_fader

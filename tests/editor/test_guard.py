@@ -195,11 +195,11 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
                               ("write_eq", r"\.write_eq\("),
                               ("apply_suggestion", r"\.apply_suggestion\("), ("undo", r"\.undo\(")):
             for _ in re.finditer(pattern, code):
-                calls.setdefault(name, []).append(p.name)
-    assert calls.get("write") == ["module.py"]                 # ec.write(...) in TF5Module.write_eq only
+                calls.setdefault(name, []).append(p.relative_to(PKG).as_posix())
+    assert calls.get("write") == ["console/module.py"]        # ec.write(...) in TF5Module.write_eq only
     assert "ec = self.eq_client" in (PKG / "console" / "module.py").read_text(encoding="utf-8")
-    assert sorted(calls.get("write_eq", [])) == ["vocal.py", "vocal.py"]
-    vocal_src = (PKG / "vocal.py").read_text(encoding="utf-8")
+    assert sorted(calls.get("write_eq", [])) == ["vocal/module.py", "vocal/module.py"]
+    vocal_src = (PKG / "vocal" / "module.py").read_text(encoding="utf-8")
     assert re.search(r"desk_write\(self\.apply_suggestion\)", vocal_src)
     assert re.search(r"desk_write\(self\.undo\)", vocal_src)
     assert "apply_suggestion" not in calls and "undo" not in calls   # never called, only handed to desk_write

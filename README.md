@@ -415,7 +415,9 @@ tf_daemon/
   modules.py       Module protocol: register(app, sock) / start / stop / status
   hub.py           FrameHub: latest-value broadcast shared by the modules
   system.py        /config page: config.toml editing, restart, self-update
-  vocal.py         vocal EQ assist: mic-check sessions, Apply to desk / Undo
+  vocal/           ── vocal EQ assist ──
+    module.py      mic-check sessions, /api/vocal routes, Apply to desk / Undo
+    plan.py        the desk changes that make a channel's EQ the suggestion
   audio/           ── the audio analysis module ──
     sources.py     DeviceSource (PortAudio), SynthSource, WavSource
     ringbuffer.py  lock-protected per-channel ring buffers
@@ -473,7 +475,12 @@ Feature areas are **modules** (`tf_daemon/modules.py`). The audio module owns
 its device, threads and routes (`/api/audio/*`, `/ws/audio`); the RF module owns
 the tinySA and `/rf`, `/api/rf/*`, `/ws/rf`; likewise QLX-D, the TF5 console and
 the vocal assist. All of them are built and wired together in one place,
-`app.build_modules`.
+`app.build_modules`. A module that needs another declares what it needs as a
+small `Protocol` next to its own code, and receives it there; nothing reaches
+into another module's objects. The audio page gets the console as a
+`ConsoleFeed` (`audio/module.py`), the vocal assist gets `AudioInputs` and a
+`DeskEQ` (`vocal/module.py`), and the TF5 module reports channel names and
+faders through callbacks. mypy checks that the real objects fit.
 
 RF data flow: the **sweep thread** calls the tinySA's `scan` (blocking, one
 sweep per call), updates peak hold, and publishes a full JSON state snapshot to
