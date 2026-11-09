@@ -308,3 +308,24 @@ def test_mic_type_and_eq_style_pickers_and_ring_out_setup(page):
     assert dialog.locator("select.ro-pick").count() >= 2  # a mic type and an EQ style per mic
     dialog.get_by_role("button", name="Cancel").click()  # read-only: nothing is started
     dialog.wait_for(state="hidden", timeout=4000)
+
+
+def test_vocal_panel_keeps_its_controls_between_polls_and_polls_once(page):
+    # The panel used to be rebuilt every poll (dropdowns closed, presses lost), and every
+    # click or reopen started another poll loop on top of the last.
+    seen = []
+    page.on("request", lambda r: "/api/vocal/status" in r.url and seen.append(r.url))
+    _open(page, "/")
+    page.locator("#mic-check").wait_for(state="visible", timeout=8000)
+    for _ in range(4):  # open / close / open ...: each used to add a loop
+        page.locator("#mic-check").click()
+        page.wait_for_timeout(150)
+    page.locator("#mic-check").click()  # ends open
+    panel = page.locator("#vocal-panel")
+    panel.wait_for(state="visible", timeout=4000)
+    panel.locator("select.ro-pick").first.wait_for(timeout=5000)
+    page.evaluate("window.__pick = document.querySelector('#vocal-panel select.ro-pick')")
+    n = len(seen)
+    page.wait_for_timeout(3000)  # ~6 polls at 500 ms while open
+    assert len(seen) - n <= 9, len(seen) - n  # one loop, not five
+    assert page.evaluate("window.__pick.isConnected")  # the same dropdown: nothing changed, nothing rebuilt
