@@ -8,8 +8,10 @@ write ad-hoc fakes or plan how to test against real devices; this is the recipe:
 1. `docker compose ps`. If `app` isn't `healthy`: `docker compose up -d --build`.
    (`./dev shell | test | logs` are the human shortcuts; `dev.cmd` on Windows.)
 2. `docker compose exec -T app pytest -q` runs the whole suite in parallel (~10 s),
-   including `tests/test_live.py` against the running server. Target with a path
-   or `-k`; `-n 0` for serial.
+   including `tests/test_live.py` against the running server and
+   `tests/test_browser.py` (the pages in headless Chromium). Target with a path
+   or `-k`; `-n 0` for serial. For a change to the pages (`tf_daemon/static/`),
+   add or extend a browser check rather than eyeballing it.
 3. The server reloads on save. Check behaviour with
    `curl -s localhost:8080/api/status` (and `/api/tf5/status`, `/api/qlxd/state`,
    `/api/rf/state`, `/api/audio/meta`, `/api/tf5/eq/<n>`).

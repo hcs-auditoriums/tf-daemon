@@ -91,25 +91,26 @@ def test_eq_route(console):
 def test_page_has_the_eq_toggle():
     static = PKG / "static"
     html = (static / "index.html").read_text(encoding="utf-8")
-    js = (static / "app.js").read_text(encoding="utf-8")
+    # The audio page: app.js and its modules.
+    js = "\n".join(f.read_text(encoding="utf-8") for f in [static / "app.js", *sorted((static / "audio").glob("*.js"))])
     assert 'id="eq-toggle" hidden' in html and 'id="show-eq"' in html
     # The EQ is pushed over /ws/audio ("tf5-eq" messages) and drawn.
     assert '"tf5-eq"' in js and "drawEq()" in js
     # The page only ever reads the EQ.
     assert not re.search(r"fetch\(`/api/tf5/eq[^`]*`\s*,", js)
     assert "--eq:" in (static / "style.css").read_text(encoding="utf-8")
-    draw = re.search(r"function drawEq\(\) \{(.*?)\n  \}\n", js, re.S).group(1)
+    draw = re.search(r"function drawEq\(\) \{(.*?)\n\}\n", js, re.S).group(1)
     # Same dB scale as the spectrum (the View range; shared with the vocal assist
     # through eqHalf / eqY), and the handles sit on the curve.
     assert re.search(r"const eqHalf = \(\) => \(state\.dbMax - state\.dbMin\) / 2", js)
     assert "eqHalf()" in draw and "eqY" in draw
     assert "yEq(eqAt(f))" in draw
     # The console sidebar has its own EQ graph, redrawn on every pushed change.
-    side = re.search(r"function drawPanelEq\(\) \{(.*?)\n  \}\n", js, re.S).group(1)
+    side = re.search(r"function drawPanelEq\(\) \{(.*?)\n\}\n", js, re.S).group(1)
     assert "eqAt(f)" in side and "eqHalf()" in side and "peqRange" not in js   # the spectrum's scale
-    set_range = re.search(r"function setRange\(min, max\) \{(.*?)\n  \}\n", js, re.S).group(1)
+    set_range = re.search(r"function setRange\(min, max\) \{(.*?)\n\}\n", js, re.S).group(1)
     assert "drawPanelEq()" in set_range
-    on_eq = re.search(r"function onConsoleEq\(msg\) \{(.*?)\n  \}\n", js, re.S).group(1)
+    on_eq = re.search(r"function onConsoleEq\(msg\) \{(.*?)\n\}\n", js, re.S).group(1)
     assert "drawPanelEq()" in on_eq
     css = (static / "style.css").read_text(encoding="utf-8")
     assert re.search(r"\.cp-eq \{[^}]*position: static", css)   # not the full-page canvas rule

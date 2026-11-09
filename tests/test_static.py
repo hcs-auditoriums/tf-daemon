@@ -93,10 +93,16 @@ def undefined_constants(js: str) -> set[str]:
         declared |= set(re.findall(r"(?:^|,)\s*([A-Z][A-Z0-9_]{2,})\s*=(?!=)", stmt))
     destructured = re.findall(r"\b(?:const|let|var)\s*\{([^}]*)\}", code)
     declared |= {n for group in destructured for n in re.findall(r"\w+", group)}
+    imported = re.findall(r"\bimport\s*\{([^}]*)\}", js)
+    declared |= {n.split(" as ")[-1].strip() for group in imported for n in group.split(",")}
     return used - declared - BROWSER_GLOBALS
 
 
-@pytest.mark.parametrize("name", ["app.js", "rf.js", "qlxd.js", "config.js", "nav.js"])
+SCRIPTS = ["app.js", "rf.js", "qlxd.js", "config.js", "nav.js",
+           *sorted(f"audio/{p.name}" for p in (STATIC / "audio").glob("*.js"))]
+
+
+@pytest.mark.parametrize("name", SCRIPTS)
 def test_no_undefined_constants(name):
     """A constant renamed in one change but still used by another fails only in the
     browser (a ReferenceError on every frame); catch it here instead."""
@@ -110,6 +116,35 @@ def test_the_check_catches_a_missing_constant():
     assert undefined_constants("const r = /[A-Z]{2}OK/g; const Y = 1 / 2;") == set()
     assert undefined_constants("const AAA = 1, BBB = [1, 2], CCC = 3;\nf(AAA + BBB + CCC + JSON.x);") == set()
     assert undefined_constants("const T = { ALKA: 1, NIMH: 2 };") == set()
+
+
+def _exports(js: str) -> set[str]:
+    code = _code(js)
+    names = set(re.findall(r"\bexport\s+(?:async\s+)?function\s+([\w$]+)", code))
+    for stmt in re.findall(r"\bexport\s+(?:const|let)\s+([^;\n]+)", code):
+        names |= set(re.findall(r"(?:^|,)\s*([\w$]+)\s*=(?!=)", stmt))
+    return names
+
+
+def test_audio_page_imports_resolve():
+    """Every name a module imports is exported by the module it names (a typo there is
+    a SyntaxError that stops the whole page), and every audio module is reachable."""
+    reached = set()
+    for name in ["app.js", *[s for s in SCRIPTS if s.startswith("audio/")]]:
+        path = STATIC / name
+        src = path.read_text(encoding="utf-8")
+        for names, target in re.findall(r"\bimport\s*\{([^}]*)\}\s*from\s*\"([^\"]+)\"", src):
+            dest = (path.parent / target).resolve()
+            assert dest.exists(), f"{name} imports missing {target}"
+            reached.add(dest.name)
+            missing = {n.strip() for n in names.split(",")} - _exports(dest.read_text(encoding="utf-8"))
+            assert not missing, f"{name} imports {sorted(missing)} that {target} doesn't export"
+    assert reached == {p.name for p in (STATIC / "audio").glob("*.js")}
+
+
+def test_audio_page_loads_as_a_module():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert '<script type="module" src="/static/app.js"></script>' in html
 
 
 @pytest.mark.parametrize("page", ["index.html", "rf.html", "qlxd.html", "config.html"])

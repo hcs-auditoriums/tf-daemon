@@ -110,9 +110,12 @@ The full `docker compose` commands they run:
 Inside the container, `pytest` runs on every core (`PYTEST_ADDOPTS` in
 `compose.yaml`) and includes `tests/test_live.py`, which checks the running
 server end to end: every simulated device up, the pages, the console's names
-and EQ, and the WebSockets. Outside the container those tests skip, unless you
-point `TF_DAEMON_URL` at a server started with `--demo`. If you've just saved a
-file, they wait for the server to come back.
+and EQ, and the WebSockets. `tests/test_browser.py` loads the pages in headless
+Chromium (Playwright, in the dev image) and fails on any script error, a plot
+that stops drawing, or a control that no longer works. Outside the container
+these tests skip, unless you point `TF_DAEMON_URL` at a server started with
+`--demo` (and, for the browser ones, `pip install playwright && playwright install
+chromium`). If you've just saved a file, they wait for the server to come back.
 
 CI (`.github/workflows/ci.yml`) runs `ruff`, `mypy` and the tests in this same
 container on every pull request and push to `main`. `./dev lint` and `./dev test`
@@ -451,8 +454,13 @@ tf_daemon/
     engine.py      persisted settings, discovery, receiver set, JSON state hub
     sim.py         simulated QLXD4 receivers (demo mode, tests)
     module.py      /qlxd page, HTTP + WebSocket routes
-  static/          index.html + app.js (audio), rf.html + rf.js (RF),
-                   qlxd.html + qlxd.js (wireless), style.css
+  static/          rf.html + rf.js (RF), qlxd.html + qlxd.js (wireless),
+                   config.html + config.js, nav.js (all pages), style.css
+    index.html     the audio page; app.js draws it and starts everything
+    audio/         its ES modules (no build step): shared.js (canvas, state),
+                   plot.js (geometry, grid, traces, hover), socket.js (/ws/audio),
+                   controls.js, console.js (sidebar), eq.js (EQ overlay),
+                   range.js, rings.js, vocal.js, waterfall.js
 ```
 
 Data flow:
