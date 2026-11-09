@@ -35,6 +35,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..config import QLXDConfig
 from ..hub import FrameHub
 from . import protocol
 from .network import Interface, SLPListener, find_interface, list_interfaces, source_ip
@@ -62,14 +63,13 @@ def parse_host(entry: str) -> tuple[str, int]:
 
 
 class QLXDEngine:
-    def __init__(self, cfg: dict[str, Any], demo: bool = False) -> None:
-        q = cfg["qlxd"]
-        self.demo = demo
-        self.meter_poll_s = float(q["meter_poll_s"])
-        self.full_poll_s = float(q["full_poll_s"])
-        self.state_path = Path(q["state_file"])
+    def __init__(self, cfg: QLXDConfig) -> None:
+        self.demo = cfg.source == "demo"
+        self.meter_poll_s = cfg.meter_poll_s
+        self.full_poll_s = cfg.full_poll_s
+        self.state_path = Path(cfg.state_file)
         data = self._read_state()
-        self.settings = self._settings_from(data, {"interface": str(q["interface"]), "hosts": list(q["hosts"])})
+        self.settings = self._settings_from(data, {"interface": cfg.interface, "hosts": list(cfg.hosts)})
         self._known: dict[str, dict[str, Any]] = self._known_from(data)
         self._known_dirty = False
         self._known_saved_at = 0.0

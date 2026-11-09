@@ -1,11 +1,11 @@
 """The simulated TF5 (tf_daemon.tf5sim) and demo mode (--tf5-source demo / --demo)."""
 
 import pytest
+from helpers import make_config
 from tfeditor_fakes import wait_until
 
 from tf_daemon.app import build_modules, create_app
-from tf_daemon.audio.sources import SourceError
-from tf_daemon.config import load_config
+from tf_daemon.config import ConfigError
 from tf_daemon.tf5 import TF5Client, default_usb_patch, parse_patch_entry
 from tf_daemon.tf5sim import DEMO_INPUTS, RCP_PREFIX, SimConsole, SimRCP
 
@@ -13,11 +13,11 @@ PATCH = [parse_patch_entry(e) for e in default_usb_patch()]
 
 
 def test_demo_mode_runs_the_tf5_module_against_the_simulator():
-    cfg = load_config(None)
-    assert cfg["tf5"]["host"] == ""   # demo needs no console address, and turns EQ read / write on
-    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="off", tf5_source="demo")
+    cfg = make_config(tf5={"source": "demo"})
+    assert cfg.tf5.host == ""   # demo needs no console address, and turns EQ read / write on
+    modules = build_modules(cfg)
     by_name = {m.name: m for m in modules}
-    assert list(by_name) == ["audio", "tf5sim", "tf5"]
+    assert list(by_name) == ["audio", "tf5"]   # the simulator belongs to the tf5 module
     app = create_app(cfg, modules)
     try:
         tf5 = by_name["tf5"]
@@ -30,19 +30,19 @@ def test_demo_mode_runs_the_tf5_module_against_the_simulator():
 
         results = tf5.write_eq(0, [("PEQ/Bank/Band:0/Gain", -300)])
         assert results == [{"path": "PEQ/Bank/Band:0/Gain", "value": -300, "confirmed": True, "actual": -300}]
-        assert by_name["tf5sim"].editor.writes == [("InputChannel:0/PEQ/Bank/Band:0/Gain", -300)]
+        assert tf5.simulator.editor.writes == [("InputChannel:0/PEQ/Bank/Band:0/Gain", -300)]
         assert tf5.eq(0)["eq"]["bands"][1]["gain"] == -3.0
     finally:
         app.extensions["tf_stop"]()
 
 
 def test_tf5_source_choices():
-    cfg = load_config(None)
-    assert [m.name for m in build_modules(cfg, "synth", rf_source="off", qlxd_source="off")] == ["audio"]
-    with pytest.raises(SourceError, match="tf5.host"):
-        build_modules(cfg, "synth", rf_source="off", qlxd_source="off", tf5_source="device")
-    with pytest.raises(SourceError, match="unknown tf5 source"):
-        build_modules(cfg, "synth", rf_source="off", qlxd_source="off", tf5_source="console")
+    assert [m.name for m in build_modules(make_config())] == ["audio"]
+    # A real console needs its address; without one the module stays off.
+    assert [m.name for m in build_modules(make_config(tf5={"source": "device"}))] == ["audio"]
+    assert [m.name for m in build_modules(make_config(tf5={"source": "off", "host": "10.0.0.5"}))] == ["audio"]
+    with pytest.raises(ConfigError, match="tf5.source"):
+        make_config(tf5={"source": "console"})
 
 
 def test_desk_changes_are_pushed():

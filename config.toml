@@ -1,13 +1,15 @@
 # tf-daemon configuration.
 # Every key is optional; anything missing falls back to the defaults in
-# tf_daemon/config.py.
+# tf_daemon/config.py. Unknown keys are logged and ignored. Each device has a
+# `source`: the real hardware ("device"), a simulation, or "off".
 
 [server]
 host = "0.0.0.0"
 port = 8080
 
 [audio]
-# Case-insensitive substring of the capture device name (DeviceSource only).
+source = "device"           # device (capture) | synth (test signal) | wav (loop a file, set wav = "path")
+# Case-insensitive substring of the capture device name (source = "device").
 device = "TF"
 # Capture channels (TF5: 32 inputs + St L/R). A device with fewer is zero-padded.
 channels = 34
@@ -40,8 +42,7 @@ seed = 1
 
 [rf]
 # tinySA RF spectrum page (/rf).
-enabled = true
-source = "device"           # device (tinySA over USB, needs: pip install -e '.[rf]') | demo
+source = "device"           # device (tinySA over USB, needs: pip install -e '.[rf]') | demo | off
 # Keep the tinySA connected and sweeping from startup, reconnecting if it is
 # unplugged, whether or not anyone has the page open. The range defaults to the
 # span of the QLX-D receivers (Wireless page) when any are known, else the
@@ -56,8 +57,7 @@ interval_s = 0.5            # pause between sweeps
 
 [qlxd]
 # Read-only monitoring of Shure QLXD4 receivers (/qlxd): battery and RF.
-enabled = true
-source = "device"           # device | demo (simulated receivers)
+source = "device"           # device | demo (simulated receivers) | off
 # NIC the receivers are on. "" = first interface with a 169.254.x.x address.
 # The interface and host list are editable on the /qlxd page; those edits are
 # saved to state_file and take precedence over the two values here.
@@ -89,6 +89,7 @@ max_boost_db = 3.0
 # Read channel names and settings (fader, on, pan, colour) from the TF5 over the
 # network, using Yamaha's remote control protocol on TCP 49280. The server must
 # reach the console's network port. Leave host empty to turn this off.
+source = "device"           # device (the console at host) | demo (simulated console) | off
 host = ""                   # console IP address, e.g. "192.168.0.128"
 port = 49280
 # The protocol has no login; these are accepted but not sent to the console.

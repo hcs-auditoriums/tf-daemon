@@ -3,6 +3,7 @@ import threading
 import time
 
 import pytest
+from helpers import make_config
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.audio.engine import AudioEngine
@@ -127,18 +128,18 @@ def test_parse_line_handles_quoted_names():
 
 
 def test_config_validation(tmp_path):
-    cfg = load_config(None)
-    assert cfg["tf5"]["host"] == "" and cfg["tf5"]["port"] == 49280
-    assert [m.name for m in build_modules(cfg, "synth", rf_source="off", qlxd_source="off")] == ["audio"]
+    cfg = make_config()
+    assert cfg.tf5.host == "" and cfg.tf5.port == 49280
+    assert [m.name for m in build_modules(cfg)] == ["audio"]
     p = tmp_path / "c.toml"
     for bad in ('[tf5]\nport = 0\n', '[tf5]\nusb_patch = ["Aux 3"]\n', '[tf5]\npassword = 1234\n'):
         p.write_text(bad)
         with pytest.raises(ConfigError, match="tf5"):
             load_config(p)
     p.write_text('[tf5]\nhost = "192.168.1.50"\nusername = "admin"\npassword = "secret"\nusb_patch = ["St L", ""]\n')
-    t = load_config(p)["tf5"]
-    assert (t["host"], t["username"], t["password"]) == ("192.168.1.50", "admin", "secret")
-    assert t["usb_patch"] == ["St L", ""]
+    t = load_config(p).tf5
+    assert (t.host, t.username, t.password) == ("192.168.1.50", "admin", "secret")
+    assert t.usb_patch == ("St L", "")
 
 
 @pytest.fixture
@@ -165,8 +166,7 @@ def console():
 
 
 def test_names_and_settings_flow_into_the_engine(console):
-    cfg = load_config(None)
-    cfg["channels"] = [{"index": 0, "label": "Main"}]  # an explicit label beats the console's name
+    cfg = make_config(channels=[{"index": 0, "label": "Main"}])  # an explicit label beats the console's name
     src = SynthSource(channels=4, active=[0, 1, 2, 3], blocksize=1200, speech_db=-20, noise_db=-50,
                       tone_hz=2500, tone_db=-15)
     engine = AudioEngine(cfg, src)
@@ -243,10 +243,8 @@ def test_unreachable_console_is_reported(tmp_path):
 
 
 def test_tf5_routes(console):
-    cfg = load_config(None)
-    cfg["tf5"]["host"] = "127.0.0.1"
-    cfg["tf5"]["port"] = console.port
-    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="off")
+    cfg = make_config(tf5={"host": "127.0.0.1", "port": console.port})
+    modules = build_modules(cfg)
     assert [m.name for m in modules] == ["audio", "tf5"]
     app = create_app(cfg, modules)
     try:
@@ -301,9 +299,8 @@ def test_desk_changes_reach_the_page_over_the_websocket(console):
     from simple_websocket import Client
     from werkzeug.serving import make_server
 
-    cfg = load_config(None)
-    cfg["tf5"]["host"], cfg["tf5"]["port"] = "127.0.0.1", console.port
-    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="off")
+    cfg = make_config(tf5={"host": "127.0.0.1", "port": console.port})
+    modules = build_modules(cfg)
     app = create_app(cfg, modules)
     srv = make_server("127.0.0.1", 0, app, threaded=True)
     threading.Thread(target=srv.serve_forever, daemon=True).start()

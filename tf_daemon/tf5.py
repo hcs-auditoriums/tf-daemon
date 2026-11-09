@@ -42,6 +42,7 @@ from typing import Any
 from flask import Blueprint, Flask, jsonify
 from flask_sock import Sock
 
+from .config import TF5Config
 from .tfeditor import CURVE_FREQS, TFEditorClient, eq_curve
 
 log = logging.getLogger(__name__)
@@ -102,9 +103,9 @@ def parse_patch_entry(entry: str) -> tuple[str, int] | None:
     return "St", "LR".index(m.group(2).upper())
 
 
-def patch_from(cfg: dict[str, Any]) -> list[tuple[str, int] | None]:
+def patch_from(cfg: TF5Config) -> list[tuple[str, int] | None]:
     """USB capture channel i -> the console source it carries."""
-    entries = cfg["tf5"]["usb_patch"] or default_usb_patch()
+    entries = cfg.usb_patch or default_usb_patch()
     return [parse_patch_entry(e) for e in entries]
 
 
@@ -468,6 +469,9 @@ class TF5Module:
     (tfeditor.py) for the spectrum overlay. With ``tf5.eq_write`` as well, an input
     channel's EQ can be set (``write_eq``), only on a person's request.
 
+    ``simulator``: a simulated console (tf5sim.SimConsole, demo mode) that this
+    module owns: closed when it stops, its counters reported in its status.
+
     Routes:
       GET /api/tf5/status     connection state, discovered parameters
       GET /api/tf5/channels   per USB input: console source and its settings; mix names
@@ -477,20 +481,20 @@ class TF5Module:
 
     name = "tf5"
 
-    def __init__(self, cfg: dict[str, Any], audio_engine: Any) -> None:
-        t = cfg["tf5"]
-        if t["username"] or t["password"]:
+    def __init__(self, cfg: TF5Config, audio_engine: Any, simulator: Any = None) -> None:
+        t = cfg
+        self.simulator = simulator
+        if t.username or t.password:
             log.info("tf5.username/password are set, but the TF5's remote protocol has no login; not sent")
         self.patch = patch = patch_from(cfg)
-        self.client = TF5Client(str(t["host"]), int(t["port"]), patch, float(t["poll_s"]),
+        self.client = TF5Client(t.host, t.port, patch, t.poll_s,
                                 audio_engine.set_console_names, audio_engine.set_console_gains)
         # USB channels carrying the stereo bus are mixes, not sources (for ring attribution).
         audio_engine.set_bus_inputs([i for i, src in enumerate(patch) if src is not None and src[0] == "St"])
         self.eq_client: TFEditorClient | None = None
         self.eq_version = 0  # bumped whenever the console's mixing data (EQ included) changes
-        if t["eq"]:
-            self.eq_client = TFEditorClient(str(t["host"]), int(t["eq_port"]), on_change=self._eq_changed,
-                                            writes=bool(t["eq_write"]))
+        if t.eq:
+            self.eq_client = TFEditorClient(t.host, t.eq_port, on_change=self._eq_changed, writes=t.eq_write)
         # Open audio pages get desk changes pushed over their /ws/audio connection.
         audio_engine.console = self
 
@@ -583,8 +587,11 @@ class TF5Module:
         self.client.stop()
         if self.eq_client is not None:
             self.eq_client.stop()
+        if self.simulator is not None:
+            self.simulator.close()
 
     def status(self) -> dict[str, Any]:
         st = self.client.status()
         st["eq"] = self.eq_client.status() if self.eq_client is not None else None
+        st["simulator"] = self.simulator.status() if self.simulator is not None else None
         return st

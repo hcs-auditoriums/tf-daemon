@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import tf_editor_reference as ref
+from helpers import make_config
 from tfeditor_fakes import (
     PASSWORD,
     C,
@@ -1046,21 +1047,21 @@ def test_parse_channels():
 # ====================================================================== config, module, routes
 
 def test_eq_config(tmp_path):
-    t = load_config(None)["tf5"]
-    assert t["eq"] is False and t["eq_port"] == 50368
+    t = load_config(None).tf5
+    assert t.eq is False and t.eq_port == 50368
     p = tmp_path / "c.toml"
     for bad in ('[tf5]\neq = "yes"\n', '[tf5]\neq = 1\n', '[tf5]\neq_port = 0\n', '[tf5]\neq_port = 70000\n'):
         p.write_text(bad)
         with pytest.raises(ConfigError, match="tf5.eq"):
             load_config(p)
     p.write_text('[tf5]\nhost = "10.0.0.5"\neq = true\neq_port = 50369\n')
-    t = load_config(p)["tf5"]
-    assert t["eq"] is True and t["eq_port"] == 50369
+    t = load_config(p).tf5
+    assert t.eq is True and t.eq_port == 50369
 
 
 def test_shipped_config_keeps_eq_off():
     cfg = load_config(Path(__file__).parent.parent / "config.toml")
-    assert cfg["tf5"]["eq"] is False
+    assert cfg.tf5.eq is False
 
 
 def _closed_port():
@@ -1069,13 +1070,13 @@ def _closed_port():
 
 
 def _app(eq, eq_port=None, usb_patch=None):
-    cfg = load_config(None)
-    cfg["tf5"].update(host="127.0.0.1", port=_closed_port(), eq=eq)   # no RCP console: EQ is independent
+    tf5 = {"host": "127.0.0.1", "port": _closed_port(), "eq": eq}   # no RCP console: EQ is independent
     if eq_port:
-        cfg["tf5"]["eq_port"] = eq_port
+        tf5["eq_port"] = eq_port
     if usb_patch is not None:
-        cfg["tf5"]["usb_patch"] = usb_patch
-    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="off")
+        tf5["usb_patch"] = usb_patch
+    cfg = make_config(tf5=tf5)
+    modules = build_modules(cfg)
     return create_app(cfg, modules), modules
 
 

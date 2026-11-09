@@ -30,6 +30,7 @@ from typing import Any
 from flask import Blueprint, Flask, jsonify, request
 from flask_sock import Sock
 
+from .config import VocalConfig
 from .dsp.vocal import VoiceCollector, analyze
 
 log = logging.getLogger(__name__)
@@ -90,14 +91,13 @@ class _Session:
 class VocalModule:
     name = "vocal"
 
-    def __init__(self, cfg: dict[str, Any], audio_engine: Any) -> None:
-        v = cfg["vocal"]
+    def __init__(self, cfg: VocalConfig, audio_engine: Any, samplerate: int) -> None:
         self.engine = audio_engine
-        self.inputs = set(int(i) for i in v["inputs"]) or None  # None: any input
-        self.target_s = float(v["listen_s"])
-        self.max_cut_db = float(v["max_cut_db"])
-        self.max_boost_db = float(v["max_boost_db"])
-        self._fs = int(cfg["audio"]["samplerate"])
+        self.inputs = set(cfg.inputs) or None  # None: any input
+        self.target_s = cfg.listen_s
+        self.max_cut_db = cfg.max_cut_db
+        self.max_boost_db = cfg.max_boost_db
+        self._fs = samplerate
         self._lock = threading.Lock()
         self._sessions: dict[int, _Session] = {}
         self._held: set[int] = set()  # inputs we asked the engine to analyze

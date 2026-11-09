@@ -4,12 +4,13 @@ import wave
 
 import numpy as np
 import pytest
+from helpers import make_config
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.audio.engine import MAGIC
 from tf_daemon.audio.ringbuffer import RingBuffer
 from tf_daemon.audio.sources import SourceError, SynthSource, WavSource
-from tf_daemon.config import DEFAULTS, ConfigError, load_config
+from tf_daemon.config import Channel, ConfigError, DspConfig, load_config
 from tf_daemon.dsp.spectrum import SpectrumAnalyzer
 
 
@@ -28,10 +29,10 @@ def test_config_defaults_and_partial(tmp_path):
     p = tmp_path / "c.toml"
     p.write_text('[dsp]\nfft_size = 16384\n[[channels]]\nindex = 5\nlabel = "Vox"\n')
     cfg = load_config(p)
-    assert cfg["dsp"]["fft_size"] == 16384
-    assert cfg["dsp"]["hop"] == DEFAULTS["dsp"]["hop"]
-    assert cfg["channels"] == [{"index": 5, "label": "Vox"}]
-    assert load_config(tmp_path / "missing.toml")["audio"]["samplerate"] == 48000
+    assert cfg.dsp.fft_size == 16384
+    assert cfg.dsp.hop == DspConfig().hop
+    assert cfg.channels == (Channel(5, "Vox"),)
+    assert load_config(tmp_path / "missing.toml").audio.samplerate == 48000
 
 
 def test_config_rejects_other_samplerates(tmp_path):
@@ -92,8 +93,8 @@ def test_wav_source_reads_and_rejects_rate(tmp_path):
 
 
 def test_engine_end_to_end_with_synth():
-    cfg = load_config(None)
-    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="off")
+    cfg = make_config()
+    modules = build_modules(cfg)
     app = create_app(cfg, modules)
     try:
         engine = modules[0].engine
@@ -137,8 +138,7 @@ def _next_frame(engine, seq, timeout=5.0):
 
 def test_unlisted_inputs_are_analyzed_only_while_viewed():
     from tf_daemon.audio.engine import AudioEngine
-    cfg = load_config(None)
-    cfg["channels"] = [{"index": 1, "label": "Vox"}]
+    cfg = make_config(channels=[{"index": 1, "label": "Vox"}])
     src = SynthSource(channels=4, active=[0, 1, 2, 3], blocksize=1200, speech_db=-20, noise_db=-50,
                       tone_hz=2500, tone_db=-15)
     engine = AudioEngine(cfg, src)
@@ -172,11 +172,9 @@ def test_unlisted_inputs_are_analyzed_only_while_viewed():
 
 
 def test_engine_rejects_missing_channel():
-    cfg = load_config(None)
-    cfg["channels"] = [{"index": 0, "label": "A"}]
+    cfg = make_config(channels=[{"index": 0, "label": "A"}, {"index": 3, "label": "B"}])
     from tf_daemon.audio.engine import AudioEngine
     src = SynthSource(channels=1, active=[0], blocksize=1200, speech_db=-20, noise_db=-50, tone_hz=2500, tone_db=-15)
     src.channels = 1
-    cfg["channels"].append({"index": 3, "label": "B"})
     with pytest.raises(SourceError, match="3 \\(B\\)"):
         AudioEngine(cfg, src)

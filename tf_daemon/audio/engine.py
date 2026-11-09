@@ -35,7 +35,7 @@ from typing import Any
 
 import numpy as np
 
-from ..config import Channel, channels_from
+from ..config import Channel, Config
 from ..dsp.ring import RingDetector, RingLog, RingSettings, narrowband_levels
 from ..dsp.spectrum import SpectrumAnalyzer, blackman_harris
 from ..hub import FrameHub
@@ -51,12 +51,12 @@ _RECORD = struct.Struct("<HH")
 
 
 class AudioEngine:
-    def __init__(self, cfg: dict[str, Any], source: Source) -> None:
+    def __init__(self, cfg: Config, source: Source) -> None:
         self.cfg = cfg
         self.source = source
-        self.channels: list[Channel] = channels_from(cfg)  # the listed ("pinned") inputs
-        dsp = cfg["dsp"]
-        fs = int(cfg["audio"]["samplerate"])
+        self.channels: list[Channel] = list(cfg.channels)  # the listed ("pinned") inputs
+        dsp = cfg.dsp
+        fs = cfg.audio.samplerate
         if source.samplerate != fs:
             raise SourceError(f"source runs at {source.samplerate} Hz, expected {fs}")
 
@@ -64,30 +64,30 @@ class AudioEngine:
         if bad:
             raise SourceError(
                 f"{source.name} source provides {source.channels} channels (0..{source.channels - 1}) but config "
-                f"asks for {', '.join(f'{c.index} ({c.label})' for c in bad)}"
+                f"asks for {', '.join(f'{c.index} ({c.name})' for c in bad)}"
             )
         self._pinned = frozenset(c.index for c in self.channels)
         # Label precedence: an explicit [[channels]] label, then the console's
         # channel name (set_console_names), then "Ch N".
-        self._config_labels = {int(c["index"]): str(c["label"]) for c in cfg["channels"] if "label" in c}
+        self._config_labels = {c.index: c.label for c in cfg.channels if c.label}
         self._console_names: dict[int, str] = {}
         self._meta_version = 0
         self.inputs = self._build_inputs(source.channels)
 
-        self.n_fft = int(dsp["fft_size"])
-        self.hop = int(dsp["hop"])
-        capacity = int(float(cfg["audio"]["buffer_seconds"]) * fs)
+        self.n_fft = dsp.fft_size
+        self.hop = dsp.hop
+        capacity = int(cfg.audio.buffer_seconds * fs)
         self.ring = RingBuffer(range(source.channels), capacity)
         self._analyzer_args: dict[str, Any] = dict(
             channels=1,
             samplerate=fs,
             n_fft=self.n_fft,
             hop=self.hop,
-            average_tau=float(dsp["average_tau"]),
-            fmin=float(dsp["display_fmin"]),
-            fmax=float(dsp["display_fmax"]),
-            bands_per_octave=int(dsp["display_bands_per_octave"]),
-            db_floor=float(dsp["db_floor"]),
+            average_tau=dsp.average_tau,
+            fmin=dsp.display_fmin,
+            fmax=dsp.display_fmax,
+            bands_per_octave=dsp.display_bands_per_octave,
+            db_floor=dsp.db_floor,
         )
         # Reference analyzer for metadata (bins, update rate); not run.
         self.analyzer = SpectrumAnalyzer(**self._analyzer_args)
@@ -101,8 +101,8 @@ class AudioEngine:
         # Ring detection runs on every analyzed input (see dsp/ring.py).
         self.rings = RingLog()
         self._ring_settings: RingSettings | None = None
-        if cfg["ring"]["enabled"]:
-            rs = RingSettings.from_config(cfg)
+        if cfg.ring.enabled:
+            rs = RingSettings.from_config(cfg.ring)
             self._ring_settings = RingSettings(**{**rs.__dict__, "n_fft": min(rs.n_fft, self.n_fft)})
         self._detectors: dict[int, RingDetector] = {i: d for i in self._analyzers if (d := self._new_detector())}
 
@@ -112,7 +112,7 @@ class AudioEngine:
         self.console: Any = None  # TF5Module when tf5.host is set: desk changes for /ws/audio
         self._taps: list[Any] = []  # add_tap(): optional modules that see each analyzed input's samples
         self._console_gains: dict[int, float | None] = {}  # input -> fader dB, None = off / -inf
-        self._usb_post_fader = bool(cfg["tf5"]["usb_post_fader"])
+        self._usb_post_fader = cfg.tf5.usb_post_fader
         self._attr_n = self._ring_settings.n_fft if self._ring_settings else 0
         self._attr_window = blackman_harris(self._attr_n) if self._attr_n else None
         self._attr_buf = np.zeros((source.channels, self._attr_n), dtype=np.float32)
@@ -135,7 +135,7 @@ class AudioEngine:
         if self._thread is not None:
             return
         log.info("%d input(s); always analyzing %s, others on demand", len(self.inputs),
-                 ", ".join(f"{c.index}={c.label}" for c in self.channels))
+                 ", ".join(f"{c.index}={c.name}" for c in self.channels))
         log.info("FFT %d (%.2f Hz/bin), hop %d (%.1f updates/s), %d display bins",
                  self.n_fft, self.analyzer.samplerate / self.n_fft, self.hop,
                  self.analyzer.update_rate, self.analyzer.bins.count)
@@ -224,7 +224,7 @@ class AudioEngine:
                         continue  # channel off: not in the loop
                     if not self._usb_post_fader:
                         db += g
-                contributions.append((i, self.inputs[i].label, db))
+                contributions.append((i, self.inputs[i].name, db))
             self.rings.set_sources(channel, f, contributions, basis)
 
     @property
@@ -290,8 +290,8 @@ class AudioEngine:
             "fft_size": self.n_fft,
             "hop": self.hop,
             "update_rate": a.update_rate,
-            "average_tau": float(self.cfg["dsp"]["average_tau"]),
-            "db_floor": float(self.cfg["dsp"]["db_floor"]),
+            "average_tau": self.cfg.dsp.average_tau,
+            "db_floor": self.cfg.dsp.db_floor,
             "source": self.source.name,
             "channels": [{"index": c.index, "label": c.label, "pinned": c.index in self._pinned}
                          for c in self.inputs],
@@ -333,7 +333,7 @@ class AudioEngine:
                     det = detectors.get(index)
                     if det is not None:
                         rings = det.process(frame[row], stream_t)
-                        self.rings.update(index, self.inputs[index].label, rings, wall_t)
+                        self.rings.update(index, self.inputs[index].name, rings, wall_t)
                     for tap in self._taps:
                         tap(index, frame[row], stream_t)
                 self._publish(active)

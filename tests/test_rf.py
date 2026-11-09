@@ -3,6 +3,7 @@ import time
 
 import numpy as np
 import pytest
+from helpers import make_config
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError, load_config
@@ -45,10 +46,9 @@ def _wait_state(engine, pred, timeout=5.0):
 
 
 def test_rf_module_end_to_end_with_demo():
-    cfg = load_config(None)
-    cfg["rf"]["interval_s"] = 0.1
-    cfg["rf"]["auto_connect"] = False  # manual: nothing happens until Connect
-    modules = build_modules(cfg, "synth", rf_source="demo", qlxd_source="off")
+    cfg = make_config(rf={"source": "demo", "interval_s": 0.1,
+                          "auto_connect": False})  # manual: nothing happens until Connect
+    modules = build_modules(cfg)
     app = create_app(cfg, modules)
     try:
         engine = next(m for m in modules if m.name == "rf").engine
@@ -81,7 +81,7 @@ def test_points_limited_to_device_maximum():
     cfg = load_config(None)
     dev = DemoDevice()
     dev.max_points = 290  # what an original (non-Ultra) tinySA reports
-    engine = RFEngine(cfg, dev)
+    engine = RFEngine(cfg.rf, dev)
     engine.connect()
     try:
         with pytest.raises(ValueError, match="at most 290"):
@@ -97,14 +97,14 @@ def test_parse_scan_none_is_empty():
 
 
 def test_rf_off_and_sweep_failure():
-    cfg = load_config(None)
-    assert [m.name for m in build_modules(cfg, "synth", rf_source="off", qlxd_source="off")] == ["audio"]
+    cfg = make_config()
+    assert [m.name for m in build_modules(cfg)] == ["audio"]
 
     class Flaky(DemoDevice):
         def sweep(self, *a):
             raise RFDeviceError("USB unplugged")
 
-    engine = RFEngine(cfg, Flaky())
+    engine = RFEngine(cfg.rf, Flaky())
     engine.connect()
     engine.start_scan()
     s = _wait_state(engine, lambda s: s["error"] is not None)
@@ -147,7 +147,7 @@ def test_engine_selects_input_on_every_start():
 
     cfg = load_config(None)
     dev = TwoInput()
-    engine = RFEngine(cfg, dev)
+    engine = RFEngine(cfg.rf, dev)
     engine.connect()
     try:
         engine.start_scan({"start_hz": 480_000_000, "stop_hz": 610_000_000})
@@ -172,9 +172,7 @@ def test_fit_span():
 @pytest.fixture
 def auto_cfg(monkeypatch):
     monkeypatch.setattr(engine_mod, "SUPERVISE_INTERVAL_S", 0.05)
-    cfg = load_config(None)
-    cfg["rf"].update(auto_connect=True, interval_s=0.1)
-    return cfg
+    return make_config(rf={"auto_connect": True, "interval_s": 0.1}).rf
 
 
 def _until(pred, timeout=5.0):
@@ -246,7 +244,7 @@ def test_auto_mode_waits_for_and_recovers_the_device(auto_cfg):
 
         dev.present = True
         _until(lambda: engine.status()["sweeps"] >= 1)
-        assert engine.status()["settings"]["start_hz"] == auto_cfg["rf"]["start_hz"]
+        assert engine.status()["settings"]["start_hz"] == auto_cfg.start_hz
 
         n = engine.status()["sweeps"]
         dev.fail_next = True  # yanked mid-sweep: closed, reopened, sweeping again

@@ -66,6 +66,7 @@ from typing import Any
 
 import numpy as np
 
+from ..config import RingConfig
 from .spectrum import blackman_harris
 
 # ISO 1/3-octave centres (the TF's GEQ bands).
@@ -107,11 +108,9 @@ class RingSettings:
     tail_margin_db: float = 8.0     # how much less than that the ring must have fallen
 
     @classmethod
-    def from_config(cls, cfg: dict[str, Any]) -> RingSettings:
-        r = cfg["ring"]
-        prom, sustain = SENSITIVITY[str(r["sensitivity"]).lower()]
-        return cls(fmin=float(r["fmin"]), fmax=float(r["fmax"]), min_prominence_db=prom, sustain_s=sustain,
-                   mains_hz=float(r["mains_hz"]))
+    def from_config(cls, r: RingConfig) -> RingSettings:
+        prom, sustain = SENSITIVITY[r.sensitivity]
+        return cls(fmin=r.fmin, fmax=r.fmax, min_prominence_db=prom, sustain_s=sustain, mains_hz=r.mains_hz)
 
 
 @dataclass

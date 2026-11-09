@@ -7,6 +7,7 @@ import time
 
 import numpy as np
 import pytest
+from helpers import make_config
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.audio.sources import SynthSource, _PacedSource, make_pink_noise
@@ -193,7 +194,7 @@ def test_geq_band():
 
 def test_config(tmp_path):
     cfg = load_config(None)
-    assert cfg["ring"]["enabled"] and cfg["ring"]["sensitivity"] == "normal"
+    assert cfg.ring.enabled and cfg.ring.sensitivity == "normal"
     p = tmp_path / "c.toml"
     for bad in ('[ring]\nsensitivity = "max"\n', '[ring]\nfmin = 5000\nfmax = 100\n', '[ring]\nmains_hz = 55\n'):
         p.write_text(bad)
@@ -204,8 +205,8 @@ def test_config(tmp_path):
 # ---------------------------------------------------------------- in the app
 
 def test_engine_detects_the_synth_ring_and_routes_work():
-    cfg = load_config(None)  # the synth carries a steady 2.5 kHz tone 15 dB under its voice
-    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="off")
+    cfg = make_config()  # the synth carries a steady 2.5 kHz tone 15 dB under its voice
+    modules = build_modules(cfg)
     app = create_app(cfg, modules)
     try:
         client = app.test_client()
@@ -230,9 +231,8 @@ def test_engine_detects_the_synth_ring_and_routes_work():
 
 
 def test_ring_detection_can_be_turned_off():
-    cfg = load_config(None)
-    cfg["ring"]["enabled"] = False
-    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="off")
+    cfg = make_config(ring={"enabled": False})
+    modules = build_modules(cfg)
     app = create_app(cfg, modules)
     try:
         time.sleep(2.5)
@@ -284,8 +284,7 @@ def _wait_sources(engine, pred, timeout=8.0):
 
 def test_ring_on_the_mains_is_traced_to_its_inputs():
     from tf_daemon.audio.engine import AudioEngine
-    cfg = load_config(None)
-    cfg["channels"] = [{"index": 3, "label": "Main"}]  # the bus: always analyzed, rings there get attributed
+    cfg = make_config(channels=[{"index": 3, "label": "Main"}])  # the bus: always analyzed, rings get attributed
     engine = AudioEngine(cfg, _StageSource())
     engine.set_console_names({0: "Mic A", 1: "Mic B", 2: "Spare"})
     engine.start()

@@ -5,6 +5,7 @@ import time
 
 import numpy as np
 import pytest
+from helpers import make_config
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.audio.engine import AudioEngine
@@ -162,8 +163,8 @@ def test_app_starts_without_the_audio_device(fast, monkeypatch):
     sd = FakeSD(plugged=False)
     real = app_mod.DeviceSource
     monkeypatch.setattr(app_mod, "DeviceSource", lambda *a, **kw: real(*a, sd_module=sd, **kw))
-    cfg = load_config(None)
-    modules = build_modules(cfg, "device", rf_source="off", qlxd_source="off")
+    cfg = make_config(audio={"source": "device"})
+    modules = build_modules(cfg)
     app = create_app(cfg, modules)
     try:
         client = app.test_client()
@@ -176,8 +177,8 @@ def test_app_starts_without_the_audio_device(fast, monkeypatch):
 
 
 def test_analysis_survives_an_exception():
-    cfg = load_config(None)
-    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="off")
+    cfg = make_config()
+    modules = build_modules(cfg)
     engine = modules[0].engine
     calls = {"n": 0}
     real = engine._publish

@@ -8,6 +8,7 @@ import socket
 import time
 
 import pytest
+from helpers import make_config
 from tfeditor_fakes import FakeEditorConsole, build_dump, default_mixing_values, mixing_tree, set_param, wait_until
 
 from tf_daemon.app import build_modules, create_app
@@ -167,14 +168,14 @@ def test_write_needs_a_connection():
 # ====================================================================== config
 
 def test_config(tmp_path):
-    assert load_config(None)["tf5"]["eq_write"] is False
+    assert load_config(None).tf5.eq_write is False
     p = tmp_path / "c.toml"
     for bad in ('[tf5]\neq_write = 1\n', '[tf5]\neq_write = true\n'):   # not a bool / without eq
         p.write_text(bad)
         with pytest.raises(ConfigError, match="eq_write"):
             load_config(p)
     p.write_text('[tf5]\neq = true\neq_write = true\n')
-    assert load_config(p)["tf5"]["eq_write"] is True
+    assert load_config(p).tf5.eq_write is True
 
 
 # ====================================================================== vocal assist: plan
@@ -218,10 +219,9 @@ def _closed_port():
 
 
 def _vocal_app(fake, eq_write=True):
-    cfg = load_config(None)
-    cfg["tf5"].update(host="127.0.0.1", port=_closed_port(), eq=True, eq_port=fake.port, eq_write=eq_write)
-    cfg["vocal"].update(enabled=True)
-    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="off")
+    cfg = make_config(tf5={"host": "127.0.0.1", "port": _closed_port(), "eq": True, "eq_port": fake.port,
+                           "eq_write": eq_write}, vocal={"enabled": True})
+    modules = build_modules(cfg)
     app = create_app(cfg, modules)
     vm = next(m for m in modules if m.name == "vocal")
     tf5 = next(m for m in modules if m.name == "tf5")
