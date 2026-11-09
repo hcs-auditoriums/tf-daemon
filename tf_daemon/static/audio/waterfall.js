@@ -9,7 +9,7 @@ import { $, C, loadInt, loadStr, save, state } from "./shared.js";
 // so a frame costs one 400-pixel row; the levels are kept too, to recolour the
 // history when the range changes and for the hover readout.
 const LAYOUTS = ["spectrum", "both", "waterfall"];
-state.layout = loadStr("tf.layout", "both", LAYOUTS);
+state.layout = loadStr("tf.layout", "spectrum", LAYOUTS);
 state.wfSpan = loadInt("tf.wfSpan", 30);
 state.wfSource = loadStr("tf.wfSource", "live", ["live", "avg"]);
 
