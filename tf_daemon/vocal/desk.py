@@ -1,9 +1,9 @@
 """Putting a suggestion on the desk, and taking it back: ONLY on a person's confirmed request.
 
-Nothing here writes on its own. ``apply_suggestion`` and ``undo`` are called
-from the /api/vocal/apply and /undo routes, which require ``"confirm": true``
-(the page sends it after a confirmation dialog). tests/editor/test_guard.py
-pins that these are the only ways the desk's EQ gets written.
+Nothing here writes on its own. ``apply_suggestion``, ``write_values`` (profile
+recall, copy between channels) and ``undo`` are called from routes that require
+``"confirm": true`` (the page sends it after a confirmation dialog).
+tests/editor/test_guard.py pins the ways the desk's EQ gets written.
 """
 
 from __future__ import annotations
@@ -84,20 +84,41 @@ class DeskWriter:
         """SET THE DESK EQ to the suggestion. Only from a person's confirmed request."""
         with self._apply_lock:
             changes, lines = self.plan(index)   # raises unless the desk is writable
-            if not changes:
-                return self._record(index, "apply", [], lines)
-            console = self.writable()
-            assert console is not None
-            raw = console.eq_raw(index, [p for p, _ in changes])
-            before = {p: v for p, v in raw.items() if isinstance(v, int)}
-            if len(before) != len(raw):
-                raise ValueError("couldn't read the current desk values to keep for Undo")
-            results = console.write_eq(index, changes)
-            self._undo.setdefault(index, [(p, before[p]) for p, _ in changes])   # keep the original
-            out = self._record(index, "apply", results, lines)
+            out = self._write_locked(index, changes, "apply", lines)
         log.info("Vocal assist: applied the suggested EQ to input %d on request (%d/%d confirmed by the desk)",
                  index + 1, out["confirmed"], out["sent"])
         return out
+
+    def write_values(self, index: int, changes: list[tuple[str, int]], action: str,
+                     lines: list[str]) -> dict[str, Any]:
+        """SET channel EQ values (raw, paths relative to the channel), keeping what they replace
+        for Undo. Only from a person's confirmed request (a profile recall, a copy)."""
+        with self._apply_lock:
+            out = self._write_locked(index, changes, action, lines)
+        log.info("Vocal assist: %s on input %d on request (%d/%d confirmed by the desk)", action, index + 1,
+                 out["confirmed"], out["sent"])
+        return out
+
+    def _write_locked(self, index: int, changes: list[tuple[str, int]], action: str,
+                      lines: list[str]) -> dict[str, Any]:
+        console = self.writable()
+        if console is None:
+            raise PermissionError("writing to the desk is off (tf5.eq_write)")
+        if console.eq_target(index) is None:
+            raise ValueError("this input isn't an input channel on the desk")
+        if not changes:
+            return self._record(index, action, [], lines)
+        raw = console.eq_raw(index, [p for p, _ in changes])
+        before = {p: v for p, v in raw.items() if isinstance(v, int)}
+        if len(before) != len(raw):
+            raise ValueError("couldn't read the current desk values to keep for Undo")
+        results = console.write_eq(index, changes)
+        # Undo goes back to before the first change since the last undo, for every value touched.
+        originals = dict(self._undo.get(index, []))
+        for p, _ in changes:
+            originals.setdefault(p, before[p])
+        self._undo[index] = list(originals.items())
+        return self._record(index, action, results, lines)
 
     def undo(self, index: int) -> dict[str, Any]:
         """Put back the desk values the first apply replaced. Only on a person's request."""

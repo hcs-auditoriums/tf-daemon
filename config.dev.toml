@@ -15,6 +15,7 @@ enabled = true
 inputs = [0, 1]
 house_mic = 31        # the simulated stage's house mic (see [[channels]] below)
 auto_allowed = true   # the auto EQ toggle shows up (still off until turned on per channel)
+profiles_file = ".dev/eq_profiles.json"   # keep dev profiles out of the real file
 
 # --demo: the named inputs are talkers on the simulated stage (they take turns).
 [[channels]]

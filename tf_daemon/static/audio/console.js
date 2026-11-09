@@ -1,6 +1,7 @@
 // The console sidebar: the TF5 channel on the shown input, and its EQ graph.
 
 import { eqAt, eqAvailable, eqHalf } from "./eq.js";
+import { profileBar } from "./profiles.js";
 import { $, C, el, loadInt, save, state } from "./shared.js";
 
 // Sidebar with the TF5 channel feeding the shown input: name, on, fader,
@@ -181,7 +182,7 @@ export function renderPanel() {
       refs.eqCanvas = el("canvas", "cp-eq");
       refs.eqCanvas.setAttribute("aria-label", "Console EQ curve");
       refs.eqInfo = el("div", "cp-eqinfo");
-      eqSec.append(refs.eqCanvas, refs.eqInfo);
+      eqSec.append(refs.eqCanvas, refs.eqInfo, profileBar());
       items.push(eqSec);
     }
 

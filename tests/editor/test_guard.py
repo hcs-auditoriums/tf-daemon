@@ -179,6 +179,8 @@ def test_editor_has_a_single_send_path_and_one_guarded_write_builder():
 def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
     """write() <- TF5Module.write_eq <- either
       * vocal DeskWriter.apply_suggestion / undo <- POST /api/vocal/apply|undo ("confirm": true), or
+      * vocal DeskWriter.write_values <- profile recall / copy <- POST /api/vocal/profiles/recall|copy
+        ("confirm": true), or
       * vocal AutoEQ: its tick (only channels a person turned on: POST /api/vocal/auto with
         "confirm": true, and only when vocal.auto_allowed is set) and its undo (confirmed).
     Nothing else in tf-daemon calls them."""
@@ -198,6 +200,14 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
     assert re.search(r"desk_write\(self\.desk\.undo\)", vocal_src)
     assert "apply_suggestion" not in calls and "undo" not in calls   # never called, only handed to desk_write
     assert '.get("confirm") is not True' in vocal_src
+    # Profile recall / copy: write_values, only from those two methods, only handed to desk_write.
+    assert sorted(re.findall(r"desk_write\(lambda ch: self\.(recall_profile|copy_eq)\(", vocal_src)) == \
+        ["copy_eq", "recall_profile"]
+    assert len(re.findall(r"\.(recall_profile|copy_eq)\(", vocal_src)) == 2
+    defs = {m.group(1): m.start() for m in re.finditer(r"\n    def (\w+)\(", vocal_src)}
+    writes = [m.start() for m in re.finditer(r"\.write_values\(", vocal_src)]
+    assert sorted(max((n for n, at in defs.items() if at < w), key=lambda n: defs[n]) for w in writes) == \
+        ["copy_eq", "recall_profile"]
     # Auto EQ: exists only with vocal.auto_allowed; turning it on and its undo need the confirmation.
     assert re.search(r"self\.auto = AutoEQ\(.*?\)\s*\\?\s*if cfg\.auto_allowed else None", vocal_src, re.S)
     assert re.search(r"desk_write\(self\.auto\.arm\)", vocal_src)

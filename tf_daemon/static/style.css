@@ -417,6 +417,11 @@ main.page {
 .vp-bar span { display: block; height: 100%; background: var(--vocal); transition: width 0.4s linear; }
 .vp-note { color: var(--muted); }
 .vp-live { color: var(--vocal); font-weight: 600; }
+.cp-profiles { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.cp-profiles[hidden] { display: none; }
+.cp-prow { display: flex; gap: 6px; align-items: center; }
+.cp-pick { flex: 1; min-width: 0; font: inherit; font-size: 12px; padding: 3px 4px; }
+.cp-btn { font: inherit; font-size: 12px; padding: 3px 8px; }
 .vp-sub { margin: 10px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .vp-error { color: var(--bad); }
 .vp-foot { color: var(--muted); font-size: 11px; border-top: 1px solid var(--border); padding-top: 6px; }

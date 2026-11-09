@@ -274,6 +274,9 @@ class SimEditor:
                     self._respond(conn, tag, msg)
         except OSError:
             pass
+        except (ValueError, KeyError) as e:   # a malformed frame or unknown parameter: drop the client
+            log.debug("Simulated editor console dropped a client: %s", e)
+            conn.close()
 
     def _send(self, conn: socket.socket, tag: str, payload: bytes) -> None:
         conn.sendall(frame(tag, payload))

@@ -203,3 +203,19 @@ def test_auto_eq_control_is_offered(page):
     page.locator("#mic-check").click()
     panel = page.locator("#vocal-panel")
     panel.get_by_role("button", name="Turn auto on…").wait_for(timeout=5000)
+
+
+def test_eq_profiles_save_and_delete_from_the_sidebar(page):
+    _open(page, "/")
+    bar = page.locator("#console-panel .cp-profiles")
+    bar.wait_for(state="visible", timeout=10000)   # the EQ section's profile bar
+    name = "Browser test profile"
+    page.once("dialog", lambda d: d.accept(name))   # the "Save as" prompt
+    bar.get_by_role("button", name="Save as…").click()
+    pick = bar.get_by_label("EQ profile")
+    listed = f"[...document.querySelectorAll('#console-panel .cp-pick option')].some(o => o.value === {name!r})"
+    page.wait_for_function(listed, timeout=5000)
+    pick.select_option(name)
+    page.once("dialog", lambda d: d.accept())       # "Delete profile …?"
+    bar.get_by_role("button", name="Delete").click()
+    page.wait_for_function(f"!{listed}", timeout=5000)

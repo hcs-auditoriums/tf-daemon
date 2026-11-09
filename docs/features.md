@@ -170,10 +170,18 @@ writable or the EQ is turned off. **Undo auto changes** puts back the EQ from
 before it was turned on, and the panel lists what it did and why. It needs
 `tf5.eq_write` too.
 
+**EQ profiles** (in the console sidebar's EQ section): **Save as…** stores the
+shown channel's whole EQ (EQ on, the high-pass, every band's type, frequency, gain
+and Q) under a name, e.g. the actor's; pick a profile and **Recall** to put it on
+the channel you're looking at, on any channel; **Copy from…** copies another
+channel's EQ straight across. Recall and copy ask first and can be undone (Undo
+puts back the EQ from before the first change). Profiles are saved in
+`profiles_file` and survive restarts.
+
 `[vocal]`: `enabled`, `inputs` (0-based inputs that are vocal mics; `[]` = any),
 `listen_s` (20), `max_cut_db` (6), `max_boost_db` (3), `house_mic` (-1 = none),
 `room_tilt_db_oct` (0: the in-room target is the reference speech spectrum; tilt
-it for taste), `auto_allowed` (false). API: `GET /api/vocal/status`,
+it for taste), `auto_allowed` (false), `profiles_file` (`eq_profiles.json`). API: `GET /api/vocal/status`,
 `POST /api/vocal/start|stop|clear` `{"channel": n}` (start also takes `"live": true`),
 `POST /api/vocal/apply|undo` `{"channel": n, "confirm": true}`,
 `POST /api/vocal/auto` `{"channel": n, "on": true, "confirm": true}` (or `"on": false`),
