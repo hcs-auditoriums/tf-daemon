@@ -10,9 +10,9 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore: ["**.md", "guides/**"]
+    paths-ignore: ["**.md", "docs/**", "guides/**"]
   pull_request:
-    paths-ignore: ["**.md", "guides/**"]
+    paths-ignore: ["**.md", "docs/**", "guides/**"]
   workflow_dispatch:
 
 # A new push to a PR cancels its run in progress.
