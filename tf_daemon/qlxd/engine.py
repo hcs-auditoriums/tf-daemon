@@ -40,7 +40,7 @@ from ..hub import FrameHub
 from . import protocol
 from .network import Interface, SLPListener, find_interface, list_interfaces, source_ip
 from .receiver import Receiver
-from .simulator import SimReceiver, demo_receivers
+from .sim import SimReceiver, demo_receivers
 
 log = logging.getLogger(__name__)
 

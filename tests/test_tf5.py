@@ -3,7 +3,7 @@ import threading
 import time
 
 import pytest
-from helpers import make_config
+from helpers import make_config, wait_until
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.audio.engine import AudioEngine
@@ -25,15 +25,6 @@ PRMINFO = [
     f'"{INCH}ToMix/Level" 40 20 -32768 1000 -32768 "dB" integer any rw 100',
     f'"{INCH}PEQ/Band/Gain" 40 4 -1800 1800 0 "dB" integer any rw 100',  # has a y dimension: not an extra
 ]
-
-
-def wait_until(pred, timeout=5.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if pred():
-            return True
-        time.sleep(0.05)
-    raise AssertionError("condition not reached in time")
 
 
 def wait_settled(client, quiet=0.3, timeout=5.0):

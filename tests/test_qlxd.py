@@ -1,16 +1,15 @@
 import json
-import time
 from dataclasses import replace
 
 import pytest
-from helpers import make_config
+from helpers import make_config, wait_until
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError, load_config
 from tf_daemon.qlxd import engine as engine_mod
 from tf_daemon.qlxd import protocol as p
 from tf_daemon.qlxd.engine import QLXDEngine
-from tf_daemon.qlxd.simulator import SimReceiver
+from tf_daemon.qlxd.sim import SimReceiver
 
 
 def test_reader_splits_stream_across_chunks():
@@ -48,15 +47,6 @@ def _demo(cfg):
     return replace(cfg, qlxd=replace(cfg.qlxd, source="demo"))
 
 
-def _wait(pred, timeout=6.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if pred():
-            return
-        time.sleep(0.05)
-    raise AssertionError("condition not met in time")
-
-
 def test_manual_host_monitoring_persistence_and_offline(cfg):
     sim = SimReceiver("Lead Vox", 578350, "1,2", run_min=185, seed=1)
     sim.start()
@@ -70,7 +60,7 @@ def test_manual_host_monitoring_persistence_and_offline(cfg):
 
         def rx():
             return eng.snapshot()["receivers"]
-        _wait(lambda: rx() and rx()[0]["online"] and rx()[0]["rf_dbm"] is not None)
+        wait_until(lambda: rx() and rx()[0]["online"] and rx()[0]["rf_dbm"] is not None)
         r = rx()[0]
         assert r["source"] == "manual" and r["name"] == "Lead Vox" and r["model"] == "QLXD4"
         assert r["frequency_mhz"] == 578.35 and r["group_chan"] == "1 / 2"
@@ -82,7 +72,7 @@ def test_manual_host_monitoring_persistence_and_offline(cfg):
         assert QLXDEngine(cfg.qlxd).settings["hosts"] == saved["hosts"]
 
         sim.stop()
-        _wait(lambda: not rx()[0]["online"])
+        wait_until(lambda: not rx()[0]["online"])
         assert rx()[0]["error"]  # still listed (manual), with the reason
     finally:
         eng.stop()
@@ -98,7 +88,7 @@ def test_found_host_that_never_answers_is_dropped(cfg, monkeypatch):
         eng._on_announce("127.0.0.1", eng._generation)
         assert eng.snapshot()["network"]["probing"] == 1
         assert eng.snapshot()["receivers"] == []  # never shown while unproven
-        _wait(lambda: eng.snapshot()["network"]["probing"] == 0)
+        wait_until(lambda: eng.snapshot()["network"]["probing"] == 0)
         assert "127.0.0.1:1" in eng._rejected
         eng._on_announce("127.0.0.1", eng._generation)  # ignored while rejected
         assert eng.snapshot()["network"]["probing"] == 0
@@ -113,7 +103,7 @@ def test_demo_module_routes(cfg):
     try:
         client = app.test_client()
         assert client.get("/qlxd").status_code == 200
-        _wait(lambda: client.get("/api/qlxd/status").get_json()["online"] == 4)
+        wait_until(lambda: client.get("/api/qlxd/status").get_json()["online"] == 4)
         state = client.get("/api/qlxd/state").get_json()
         spare = next(r for r in state["receivers"] if r["name"] == "Spare")
         assert spare["tx_type"] is None and spare["batt_bars"] is None
@@ -140,14 +130,14 @@ def test_known_receivers_persist_for_the_rf_page(cfg, monkeypatch):
     eng.start()
     try:
         eng.update_settings({"hosts": [f"127.0.0.1:{sim.port}"]})
-        _wait(lambda: eng.frequencies() and eng.frequencies()[0]["online"])
+        wait_until(lambda: eng.frequencies() and eng.frequencies()[0]["online"])
         f = eng.frequencies()[0]
         assert f == {"key": "00:0E:DD:00:00:BB", "name": "Lee", "device_id": "Lee", "frequency_mhz": 492.025,
                      "online": True, "last_seen": f["last_seen"]}
-        _wait(lambda: "00:0E:DD:00:00:BB" in json.loads(open(cfg.qlxd.state_file).read())["known_receivers"])
+        wait_until(lambda: "00:0E:DD:00:00:BB" in json.loads(open(cfg.qlxd.state_file).read())["known_receivers"])
 
         sim.stop()
-        _wait(lambda: not eng.frequencies()[0]["online"])  # offline, but still known
+        wait_until(lambda: not eng.frequencies()[0]["online"])  # offline, but still known
         assert eng.frequencies()[0]["frequency_mhz"] == 492.025
     finally:
         eng.stop()
@@ -167,12 +157,12 @@ def test_frequencies_endpoint(cfg):
     app = create_app(cfg, modules)
     try:
         client = app.test_client()
-        _wait(lambda: len(client.get("/api/qlxd/frequencies").get_json()["receivers"]) == 4)
+        wait_until(lambda: len(client.get("/api/qlxd/frequencies").get_json()["receivers"]) == 4)
         rx = client.get("/api/qlxd/frequencies").get_json()["receivers"]
         assert [r["frequency_mhz"] for r in rx] == sorted(r["frequency_mhz"] for r in rx)
         assert {r["name"] for r in rx} == {"Lead Vox", "BGV 1", "Pastor HH", "Spare"}
         engine = next(m for m in modules if m.name == "qlxd").engine
-        _wait(lambda: len(engine._known) == 4)  # catalog fills on the next publish tick
+        wait_until(lambda: len(engine._known) == 4)  # catalog fills on the next publish tick
         assert client.post("/api/qlxd/known/forget", json={"key": 5}).status_code == 400
         assert client.post("/api/qlxd/known/forget", json={}).get_json()["removed"] == 4
     finally:

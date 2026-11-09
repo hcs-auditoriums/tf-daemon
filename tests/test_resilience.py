@@ -5,7 +5,7 @@ import time
 
 import numpy as np
 import pytest
-from helpers import make_config
+from helpers import make_config, wait_until
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.audio.engine import AudioEngine
@@ -79,15 +79,6 @@ def fast(monkeypatch):
     monkeypatch.setattr(DeviceSource, "RETRY_S", 0.1)
     monkeypatch.setattr(DeviceSource, "STALL_S", 0.4)
     monkeypatch.setattr(DeviceSource, "CHECK_S", 0.05)
-
-
-def wait_until(pred, timeout=5.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if pred():
-            return
-        time.sleep(0.05)
-    raise AssertionError("condition not reached in time")
 
 
 def frames_flowing(engine, timeout=4.0):

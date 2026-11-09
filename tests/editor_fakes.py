@@ -3,8 +3,9 @@ which is also the demo console), assert_read_only, and where the captures are.""
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
+
+from helpers import wait_until
 
 import tf_daemon
 from tf_daemon.console.editor.codec import DUMP, EVENT, EVENT_REPLY, SET_PARAM, SUBSCRIBE, parse_message
@@ -12,7 +13,7 @@ from tf_daemon.console.editor.guard import ALLOWED_PARAM_CMDS, check_outbound
 from tf_daemon.console.sim import (
     PASSWORD,
     C,
-    FakeEditorConsole,
+    SimEditor,
     build_dump,
     console_hash,
     default_mixing_values,
@@ -22,16 +23,6 @@ from tf_daemon.console.sim import (
     set_param,
     wire_address,
 )
-
-
-def wait_until(pred, timeout: float = 5.0) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if pred():
-            return True
-        time.sleep(0.02)
-    raise AssertionError("condition not reached in time")
-
 
 PKG = Path(tf_daemon.__file__).parent
 EDITOR = PKG / "console" / "editor"
@@ -66,7 +57,7 @@ def assert_read_only(fake):
 
 
 __all__ = [
-    "C", "FakeEditorConsole", "PASSWORD", "build_dump", "console_hash", "default_mixing_values", "dump_message",
+    "C", "SimEditor", "PASSWORD", "build_dump", "console_hash", "default_mixing_values", "dump_message",
     "mixing_tree", "property_tree", "set_param", "wait_until", "wire_address", "assert_read_only", "PKG", "EDITOR",
     "RE_DIR", "REAL_DUMP", "REAL_CSV", "EDITOR_IP", "PUSHES", "CAPTURED_NAMES", "SUBSCRIBE", "EVENT_REPLY",
 ]

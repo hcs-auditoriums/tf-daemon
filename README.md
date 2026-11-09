@@ -440,7 +440,7 @@ tf_daemon/
       client.py    TFEditorClient: session, sync, keepalive, confirmed writes
       __main__.py  read-only probe CLI
   rf/              ── the RF (tinySA) module ──
-    devices.py     TinySADevice (tsapython, USB serial), DemoDevice
+    devices.py     TinySADevice (tsapython, USB serial), SimTinySA
     engine.py      connect/disconnect, sweep thread, peak hold, JSON state hub
     settings.py    SweepSettings (validated sweep range; also used by config.py)
     module.py      /rf page, HTTP + WebSocket routes for RF
@@ -449,7 +449,7 @@ tf_daemon/
     network.py     interface listing, NIC-bound sockets, SLP announcement listener
     receiver.py    one thread per receiver: GET polling, reconnect with backoff
     engine.py      persisted settings, discovery, receiver set, JSON state hub
-    simulator.py   fake QLXD4 TCP servers (demo mode, tests)
+    sim.py         simulated QLXD4 receivers (demo mode, tests)
     module.py      /qlxd page, HTTP + WebSocket routes
   static/          index.html + app.js (audio), rf.html + rf.js (RF),
                    qlxd.html + qlxd.js (wireless), style.css

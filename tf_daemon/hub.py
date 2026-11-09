@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from typing import Any
 
 
@@ -30,6 +31,15 @@ class FrameHub:
             if self._seq == last_seq or self._closed:
                 return last_seq, None
             return self._seq, self._payload
+
+    def stream(self, send: Callable[[Any], None], timeout: float = 1.0) -> None:
+        """Send each new payload, starting with the current one, until the hub closes or
+        ``send`` raises (the client went away: the caller catches that)."""
+        seq = 0
+        while not self._closed:
+            seq, payload = self.wait(seq, timeout)
+            if payload is not None:
+                send(payload)
 
     def close(self) -> None:
         with self._cond:
