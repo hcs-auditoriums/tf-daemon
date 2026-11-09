@@ -417,6 +417,7 @@ main.page {
 .vp-bar span { display: block; height: 100%; background: var(--vocal); transition: width 0.4s linear; }
 .vp-note { color: var(--muted); }
 .vp-live { color: var(--vocal); font-weight: 600; }
+.vp-sub { margin: 10px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .vp-error { color: var(--bad); }
 .vp-foot { color: var(--muted); font-size: 11px; border-top: 1px solid var(--border); padding-top: 6px; }
 .vp-check { display: flex; align-items: center; gap: 6px; color: var(--muted); }

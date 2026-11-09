@@ -195,3 +195,11 @@ def test_live_listening_starts_and_clears(page):
                          headers: {'Content-Type': 'application/json'},
                          body: JSON.stringify({channel: ch})})""", channel)
     panel.get_by_role("button", name="Listen live").wait_for(timeout=5000)
+
+
+def test_auto_eq_control_is_offered(page):
+    _open(page, "/")   # config.dev.toml allows auto EQ; it's off until a person turns it on
+    page.locator("#mic-check").wait_for(state="visible", timeout=8000)
+    page.locator("#mic-check").click()
+    panel = page.locator("#vocal-panel")
+    panel.get_by_role("button", name="Turn auto on…").wait_for(timeout=5000)

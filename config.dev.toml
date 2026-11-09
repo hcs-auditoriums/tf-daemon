@@ -14,6 +14,7 @@ state_file = ".dev/qlxd_state.json"   # keep dev edits out of the real state fil
 enabled = true
 inputs = [0, 1]
 house_mic = 31        # the simulated stage's house mic (see [[channels]] below)
+auto_allowed = true   # the auto EQ toggle shows up (still off until turned on per channel)
 
 # --demo: the named inputs are talkers on the simulated stage (they take turns).
 [[channels]]

@@ -67,6 +67,7 @@ class _Session:
         self.mains = Transfer(samplerate, max_delay_s=0.1, memory_s=memory) if live else None
         self.feedback = Feedback(samplerate) if live else None
         self.last_speech_t = float("-inf")
+        self.last_t = float("-inf")       # stream time of the latest hop heard
         self.house = Transfer(samplerate, max_delay_s=0.25, memory_s=memory) if house else None
         self.target_s = target_s
         self.state = "live" if live else "listening"   # listening | live | done | error
@@ -104,6 +105,10 @@ class _Session:
             "off_now_db": rms(dev),           # how far the voice is from the target with the desk EQ now
             "off_after_db": rms(after),       # ... and with the suggestion instead
         }
+
+    def talking(self, within_s: float) -> bool:
+        """Has the person talked within the last ``within_s`` seconds (stream time)?"""
+        return self.last_t - self.last_speech_t <= within_s
 
     @property
     def running(self) -> bool:
@@ -194,6 +199,7 @@ class MicChecks:
             if x is None or not s.running:
                 continue
             speech = self.tap(index, x, stream_t)
+            s.last_t = stream_t
             s.hops += 1
             if s.hops % EQ_CHECK_HOPS == 1 and (s.mains is not None or s.house is not None):
                 self._follow_eq(index, s)
@@ -240,12 +246,12 @@ class MicChecks:
                     t.restart()
         s.eq_seen = eq
 
-    def rings_for(self, index: int) -> list[dict[str, Any]]:
-        """Recurring or live rings this input causes: on the input itself, or with it as the
-        strongest source of a ring on the mains."""
+    def rings_for(self, index: int, live_only: bool = False) -> list[dict[str, Any]]:
+        """Recurring or live (``live_only``: live) rings this input causes: on the input
+        itself, or with it as the strongest source of a ring on the mains."""
         out = []
         for e in self.engine.rings.snapshot()["events"]:
-            if not (e["active"] or e["count"] >= 2):
+            if not (e["active"] or (e["count"] >= 2 and not live_only)):
                 continue
             src = e.get("sources") or []
             if e["channel"] == index or (src and src[0]["channel"] == index):

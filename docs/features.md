@@ -157,9 +157,24 @@ closest to feedback; suggested boosts are held to what keeps 6 dB of headroom.
 Until both halves have been heard, the headroom is unknown and only the usual
 boost limit applies.
 
+**Auto EQ** (optional, off by default): with `auto_allowed = true` in the config,
+the panel offers **Turn auto on…** for a channel (with a confirmation). From then
+on, while the person talks and the live suggestion has settled, it moves the
+channel's EQ towards the suggestion one small step at a time (at most 1 dB per
+band every few seconds; a band that has to move is faded out, moved and faded back
+in, so nothing jumps). Boosts only where the feedback headroom is measured (and
+keep 6 dB of it). A ring this mic causes gets a narrow notch within a second,
+deeper if it persists, and any boost near it is taken out. It **stops itself the
+moment anyone changes that channel's EQ on the desk**, or if the desk stops being
+writable or the EQ is turned off. **Undo auto changes** puts back the EQ from
+before it was turned on, and the panel lists what it did and why. It needs
+`tf5.eq_write` too.
+
 `[vocal]`: `enabled`, `inputs` (0-based inputs that are vocal mics; `[]` = any),
 `listen_s` (20), `max_cut_db` (6), `max_boost_db` (3), `house_mic` (-1 = none),
 `room_tilt_db_oct` (0: the in-room target is the reference speech spectrum; tilt
-it for taste). API: `GET /api/vocal/status`,
+it for taste), `auto_allowed` (false). API: `GET /api/vocal/status`,
 `POST /api/vocal/start|stop|clear` `{"channel": n}` (start also takes `"live": true`),
-`POST /api/vocal/apply|undo` `{"channel": n, "confirm": true}`.
+`POST /api/vocal/apply|undo` `{"channel": n, "confirm": true}`,
+`POST /api/vocal/auto` `{"channel": n, "on": true, "confirm": true}` (or `"on": false`),
+`POST /api/vocal/auto/undo` `{"channel": n, "confirm": true}`.

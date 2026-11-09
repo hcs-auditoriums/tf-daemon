@@ -242,3 +242,24 @@ def test_live_route_starts_a_live_session():
         assert client.get("/api/vocal/status").get_json()["sessions"]["0"]["state"] in ("done", "error")
     finally:
         app.extensions["tf_stop"]()
+
+
+def test_auto_routes_need_the_config_and_a_confirmation():
+    cfg, modules, _, vm = _engine_and_module()
+    app = create_app(cfg, modules)
+    try:
+        r = app.test_client().post("/api/vocal/auto", json={"channel": 0, "on": True, "confirm": True})
+        assert r.status_code == 400 and "auto_allowed" in r.get_json()["error"]
+    finally:
+        app.extensions["tf_stop"]()
+    cfg, modules, _, vm = _engine_and_module(auto_allowed=True)
+    app = create_app(cfg, modules)
+    try:
+        c = app.test_client()
+        assert c.post("/api/vocal/auto", json={"channel": 0, "on": True}).status_code == 400   # no confirm
+        r = c.post("/api/vocal/auto", json={"channel": 0, "on": True, "confirm": True})
+        assert r.status_code == 400 and "eq_write" in r.get_json()["error"]   # no writable desk here
+        assert c.post("/api/vocal/auto", json={"channel": 0, "on": False}).get_json()["ok"]   # off: always
+        assert c.get("/api/vocal/status").get_json()["auto_allowed"] is False   # nothing to write to
+    finally:
+        app.extensions["tf_stop"]()

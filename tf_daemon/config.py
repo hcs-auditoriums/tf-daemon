@@ -282,6 +282,7 @@ class VocalConfig(Section):
     max_cut_db: float = 6.0
     max_boost_db: float = 3.0
     house_mic: int = -1           # input of a measurement mic in the house; -1 = none
+    auto_allowed: bool = False    # allow auto EQ (still off until a person turns it on per channel)
     room_tilt_db_oct: float = 0.0  # in-room target: reference speech tilted by this (dB / octave re 1 kHz)
 
     def validate(self) -> None:

@@ -117,6 +117,7 @@ export function renderVocal() {
                    button("Listen live", () => vocalPost("start", { live: true })), button("Clear", () => vocalPost("clear"))));
   }
   const key = String(state.input);
+  if (vocal.auto_allowed) items.push(...autoItems(label, key, row, button));
   const done = vocal.applied && vocal.applied[key];
   if (done) {
     const when = new Date(done.at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -187,6 +188,46 @@ function vocalDesk(action, label, lines) {
     body: JSON.stringify({ channel: state.input, confirm: true }),
   }).then((r) => r.json()).catch(() => ({ ok: false, error: "server unreachable" }))
     .then((d) => { if (!d.ok) alert(d.error || "Not applied."); setTimeout(pollVocal, 50); });
+}
+
+// Auto EQ: on / off, undo, and what it did. Turning it on needs a confirmation; off never does.
+function autoItems(label, key, row, button) {
+  const a = (vocal.auto || {})[key] || { on: false, log: [] };
+  const items = [el("h4", "vp-sub", "Auto EQ")];
+  if (a.on) {
+    items.push(el("p", "vp-live", "● Auto EQ is adjusting this channel while they talk"));
+    items.push(row(button("Turn auto off", () => autoPost({ on: false }), true)));
+  } else {
+    if (a.stopped) items.push(el("p", a.stopped.startsWith("stopped") ? "vp-error" : "vp-note", `Auto EQ ${a.stopped}.`));
+    items.push(row(button("Turn auto on…", () => {
+      const msg = `Let auto EQ adjust ${label}'s EQ on the desk while they talk?\n\n`
+        + "It moves at most 1 dB per band every few seconds, notches feedback, boosts only with "
+        + "measured headroom, and stops the moment anyone changes this EQ on the desk. Undo puts back "
+        + "the EQ from now.";
+      if (window.confirm(msg)) autoPost({ on: true, confirm: true });
+    })));
+  }
+  if (a.log.some((e) => e.action === "eq")) {
+    items.push(row(button("Undo auto changes", () => {
+      if (window.confirm(`Put ${label}'s EQ back to how it was before auto EQ was turned on?`)) {
+        autoPost({ confirm: true }, "auto/undo");
+      }
+    })));
+  }
+  const recent = a.log.filter((e) => e.action === "eq").slice(-4).reverse();
+  for (const e of recent) {
+    const when = new Date(e.at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    items.push(el("p", "vp-note", `${when} · ${e.why}: ${e.changes.join(", ")}`));
+  }
+  return items;
+}
+
+function autoPost(extra, path = "auto") {
+  fetch(`/api/vocal/${path}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ channel: state.input, ...extra }),
+  }).then((r) => r.json()).catch(() => ({ ok: false, error: "server unreachable" }))
+    .then((d) => { if (!d.ok) alert(d.error || "Not done."); setTimeout(pollVocal, 50); });
 }
 
 // The suggested EQ (violet, dashed) and, faintly, why: the voice vs reference speech.

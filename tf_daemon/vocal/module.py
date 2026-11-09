@@ -9,7 +9,10 @@ shown alongside for comparison.
 Nothing is changed on the console unless a person asks: with ``tf5.eq_write`` on,
 "Apply to desk" (POST /api/vocal/apply with ``confirm: true``, sent by the page
 after a confirmation dialog) sets the input channel's EQ to the suggestion, and
-"Undo" puts back the values it replaced (desk.py). Nothing here writes on its own.
+"Undo" puts back the values it replaced (desk.py). The one exception is auto EQ
+(auto.py): only with ``vocal.auto_allowed`` in the config AND a person turning it
+on for a channel (``confirm: true``); it stops itself the moment anyone changes
+that EQ on the desk.
 
 Routes:
   GET  /api/vocal/status        sessions per input: state, progress, result
@@ -19,6 +22,9 @@ Routes:
   POST /api/vocal/clear         {"channel": n}: forget the session
   POST /api/vocal/apply         {"channel": n, "confirm": true}: set the desk EQ to the suggestion
   POST /api/vocal/undo          {"channel": n, "confirm": true}: put back what apply replaced
+  POST /api/vocal/auto          {"channel": n, "on": true, "confirm": true}: turn auto EQ on (needs
+                                vocal.auto_allowed); {"channel": n, "on": false}: off (no confirm needed)
+  POST /api/vocal/auto/undo     {"channel": n, "confirm": true}: off, and the EQ from before it was on
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ from flask_sock import Sock
 
 from ..config import VocalConfig
 from ..dsp.eq import eq_curve
+from .auto import AutoEQ
 from .desk import DeskWriter
 from .ports import AudioInputs, DeskEQ
 from .session import MicChecks
@@ -50,6 +57,8 @@ class VocalModule:
                                 house_mic=cfg.house_mic if cfg.house_mic >= 0 else None,
                                 tilt_db_oct=cfg.room_tilt_db_oct, eq_curve=self._eq_curve)
         self.desk = DeskWriter(desk, self.checks.result)
+        self.auto = AutoEQ(self.checks, desk, max_cut_db=cfg.max_cut_db, max_boost_db=cfg.max_boost_db) \
+            if cfg.auto_allowed else None
 
     def _eq_curve(self, index: int, freqs: np.ndarray) -> np.ndarray | None:
         """The channel EQ on the desk now for ``index``, at ``freqs`` (dB); None if unknown."""
@@ -70,7 +79,9 @@ class VocalModule:
         return {"enabled": True, "inputs": sorted(inputs) if inputs is not None else None,
                 "house_mic": self.checks.house_mic,
                 "listen_s": self.checks.target_s, "sessions": sessions,
-                "can_write": self.desk.writable() is not None, **self.desk.history()}
+                "can_write": self.desk.writable() is not None, **self.desk.history(),
+                "auto_allowed": self.auto is not None and self.desk.writable() is not None,
+                "auto": self.auto.states() if self.auto is not None else {}}
 
     # ------------------------------------------------------------------ module plumbing
 
@@ -129,12 +140,34 @@ class VocalModule:
         def undo():
             return desk_write(self.desk.undo)
 
+        @bp.post("/auto")
+        def auto():
+            if self.auto is None:
+                return jsonify({"ok": False, "error": "auto EQ isn't allowed (vocal.auto_allowed)"}), 400
+            body = request.get_json(silent=True) or {}
+            if body.get("on") is False:   # stopping is always allowed
+                try:
+                    self.auto.disarm(channel_arg())
+                except ValueError as e:
+                    return jsonify({"ok": False, "error": str(e)}), 400
+                return jsonify({"ok": True})
+            return desk_write(self.auto.arm)
+
+        @bp.post("/auto/undo")
+        def auto_undo():
+            if self.auto is None:
+                return jsonify({"ok": False, "error": "auto EQ isn't allowed (vocal.auto_allowed)"}), 400
+            return desk_write(self.auto.undo)
+
         app.register_blueprint(bp)
 
     def start(self) -> None:
-        pass  # nothing runs until a mic check begins
+        if self.auto is not None:
+            self.auto.start()   # idle until a person turns it on for a channel
 
     def stop(self) -> None:
+        if self.auto is not None:
+            self.auto.stop()
         self.checks.close()
 
     def status(self) -> dict[str, Any]:

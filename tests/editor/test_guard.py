@@ -177,8 +177,11 @@ def test_editor_has_a_single_send_path_and_one_guarded_write_builder():
 
 
 def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
-    """write() <- TF5Module.write_eq <- vocal DeskWriter.apply_suggestion / undo <- POST /api/vocal/apply|undo
-    (which need "confirm": true). Nothing else in tf-daemon calls them, so nothing writes on its own."""
+    """write() <- TF5Module.write_eq <- either
+      * vocal DeskWriter.apply_suggestion / undo <- POST /api/vocal/apply|undo ("confirm": true), or
+      * vocal AutoEQ: its tick (only channels a person turned on: POST /api/vocal/auto with
+        "confirm": true, and only when vocal.auto_allowed is set) and its undo (confirmed).
+    Nothing else in tf-daemon calls them."""
     calls: dict[str, list[str]] = {}
     for p in PKG.rglob("*.py"):
         code = "\n".join(line.split("#", 1)[0] for line in p.read_text(encoding="utf-8").splitlines())
@@ -189,10 +192,23 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
                 calls.setdefault(name, []).append(p.relative_to(PKG).as_posix())
     assert calls.get("write") == ["console/module.py"]        # ec.write(...) in TF5Module.write_eq only
     assert "ec = self.eq_client" in (PKG / "console" / "module.py").read_text(encoding="utf-8")
-    assert sorted(calls.get("write_eq", [])) == ["vocal/desk.py", "vocal/desk.py"]   # apply_suggestion, undo
+    assert sorted(calls.get("write_eq", [])) == ["vocal/auto.py", "vocal/auto.py", "vocal/desk.py", "vocal/desk.py"]
     vocal_src = (PKG / "vocal" / "module.py").read_text(encoding="utf-8")
     assert re.search(r"desk_write\(self\.desk\.apply_suggestion\)", vocal_src)
     assert re.search(r"desk_write\(self\.desk\.undo\)", vocal_src)
     assert "apply_suggestion" not in calls and "undo" not in calls   # never called, only handed to desk_write
     assert '.get("confirm") is not True' in vocal_src
+    # Auto EQ: exists only with vocal.auto_allowed; turning it on and its undo need the confirmation.
+    assert re.search(r"self\.auto = AutoEQ\(.*?\)\s*\\?\s*if cfg\.auto_allowed else None", vocal_src, re.S)
+    assert re.search(r"desk_write\(self\.auto\.arm\)", vocal_src)
+    assert re.search(r"desk_write\(self\.auto\.undo\)", vocal_src)
+    auto_src = (PKG / "vocal" / "auto.py").read_text(encoding="utf-8")
+    tick = re.search(r"    def tick\(self.*?(?=\n    def )", auto_src, re.S).group(0)
+    assert "list(self._channels.items())" in tick                  # only channels a person turned on
+    writers = [m.start() for m in re.finditer(r"\.write_eq\(", auto_src)]
+    defs = {m.group(1): m.start() for m in re.finditer(r"\n    def (\w+)\(", auto_src)}
+    owner = lambda pos: max((n for n, at in defs.items() if at < pos), key=lambda n: defs[n])   # noqa: E731
+    assert sorted(owner(w) for w in writers) == ["_tick_channel", "undo"]
+    assert "the EQ was changed on the desk" in auto_src            # it stops when someone else touches it
+
 
