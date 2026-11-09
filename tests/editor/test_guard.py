@@ -204,7 +204,12 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
       * vocal DeskWriter.write_values <- profile recall / copy <- POST /api/vocal/profiles/recall|copy
         ("confirm": true), or
       * vocal AutoEQ: its tick (only channels a person turned on: POST /api/vocal/auto with
-        "confirm": true, and only when vocal.auto_allowed is set) and its undo (confirmed).
+        "confirm": true, and only when vocal.auto_allowed is set) and its undo (confirmed), or
+      * vocal RingOut (notches, and putting the EQ back on Mute & cancel).
+    write() <- TF5Module.write_fader (input faders; needs tf5.fader_write) <- vocal RingOut only:
+    its loop (started only by start() <- POST /api/vocal/ringout/start with "confirm": true, and
+    RingOut exists only when the desk's faders are writable), abort (Mute & cancel: mutes, never
+    needs a confirmation) and unmute.
     Nothing else in tf-daemon calls them."""
     calls: dict[str, list[str]] = {}
     for p in PKG.rglob("*.py"):
@@ -212,21 +217,30 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
         for name, pattern in (
             ("write", r"(\beq_client|\bec|TFEditorClient\b.*)\.write\("),
             ("write_eq", r"\.write_eq\("),
+            ("write_fader", r"\.write_fader\("),
             ("apply_suggestion", r"\.apply_suggestion\("),
             ("undo", r"\.undo\("),
         ):
             for _ in re.finditer(pattern, code):
                 calls.setdefault(name, []).append(p.relative_to(PKG).as_posix())
-    assert calls.get("write") == ["console/module.py"]  # ec.write(...) in TF5Module.write_eq only
+    assert calls.get("write") == ["console/module.py", "console/module.py"]  # in write_eq and write_fader
     console_src = (PKG / "console" / "module.py").read_text(encoding="utf-8")
     assert "ec = self.eq_client" in console_src
+    console_defs = {m.group(1): m.start() for m in re.finditer(r"\n    def (\w+)\(", console_src)}
+    ec_writes = [m.start() for m in re.finditer(r"\bec\.write\(", console_src)]
+    assert sorted(
+        max((n for n, at in console_defs.items() if at < w), key=lambda n: console_defs[n]) for w in ec_writes
+    ) == ["write_eq", "write_fader"]
     assert sorted(calls.get("write_eq", [])) == [
         "console/module.py",
         "vocal/auto.py",
         "vocal/auto.py",
         "vocal/desk.py",
         "vocal/desk.py",
+        "vocal/ringout.py",
+        "vocal/ringout.py",
     ]
+    assert calls.get("write_fader") == ["vocal/ringout.py"] * 4
     # The page's EQ editing: PUT /api/tf5/eq/<usb>, refused without "confirm": true before any write.
     eq_set = console_src[console_src.index("def eq_set(usb: int):") :]
     assert eq_set.index('.get("confirm") is not True') < eq_set.index("self.write_eq(")
@@ -258,4 +272,21 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
     defs = {m.group(1): m.start() for m in re.finditer(r"\n    def (\w+)\(", auto_src)}
     owner = lambda pos: max((n for n, at in defs.items() if at < pos), key=lambda n: defs[n])  # noqa: E731
     assert sorted(owner(w) for w in writers) == ["_tick_channel", "undo"]
+    # Ring-out: exists only with writable faders; starting it needs the confirmation; its loop
+    # thread is started only by start(); Mute & cancel (abort) and unmute need none.
+    assert re.search(r"getattr\(desk, \"fader_writable\", False\)", vocal_src)
+    assert re.search(r"self\.ringout = \(\s*RingOut\(.*?\)\s*if faders is not None\s+else None", vocal_src, re.S)
+    ro_route = vocal_src[vocal_src.index("def ringout_start():") :]
+    assert ro_route.index('.get("confirm") is not True') < ro_route.index("r.start(")
+    assert len(re.findall(r"\br\.start\(", vocal_src)) == 1
+    ro_src = (PKG / "vocal" / "ringout.py").read_text(encoding="utf-8")
+    ro_defs = {m.group(1): m.start() for m in re.finditer(r"\n    def (\w+)\(", ro_src)}
+    ro_owner = lambda pos: max((n for n, at in ro_defs.items() if at < pos), key=lambda n: ro_defs[n])  # noqa: E731
+    assert sorted(ro_owner(m.start()) for m in re.finditer(r"\.write_fader\(", ro_src)) == [
+        "_fader",
+        "_restore",
+        "abort",
+        "unmute",
+    ]
+    assert [ro_owner(m.start()) for m in re.finditer(r"threading\.Thread\(target=self\._run", ro_src)] == ["start"]
     assert "the EQ was changed on the desk" in auto_src  # it stops when someone else touches it

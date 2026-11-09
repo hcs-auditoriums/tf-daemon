@@ -116,7 +116,8 @@ input channel's EQ on the TF5 to the suggestion. A confirmation lists every
 change first: the EQ switched on if it was off, the HPF on at the suggested
 frequency, suggested bands as bells, and the remaining bands set flat (0 dB) so
 the desk matches the suggested curve. A low or high band used as an HPF / LPF is
-left alone. The panel then reports how many changes the desk confirmed (it echoes
+left alone, and so is a narrow cut (Q 5 or more: almost always a feedback notch
+someone rang out) and every band a ring-out reserved. The panel then reports how many changes the desk confirmed (it echoes
 each one back). **Undo apply** puts back exactly the values it replaced. Only an
 input channel's PEQ can be written, not with 1-knob EQ on, and nothing in
 tf-daemon writes on its own. The analyzer taps the mic before the EQ, so the
@@ -170,6 +171,67 @@ writable or the EQ is turned off. **Undo auto changes** puts back the EQ from
 before it was turned on, and the panel lists what it did and why. It needs
 `tf5.eq_write` too.
 
+**Mic type and EQ style** (pickers in the panel, remembered per input in the
+browser; defaults from `mic_type` / `eq_style`). The reference speech spectrum is
+measured 1 m in front of a mouth, which no mic on a person hears, so:
+
+- *Mic*: **Generic** (aims straight at the reference), **Wig / hairline** (accepts a
+  slightly softer top and boosts at most 1 dB: head-worn mics feed back first at
+  2–8 kHz), **Lavalier (chest)** (cuts the chest resonance, puts back only part of the
+  upper mids lost under the chin, boosts at most 2 dB), **Headset / boom**,
+  **Handheld / podium** (proximity bass is cut like any build-up). The head-worn
+  types also get a higher HPF floor and narrower ring-out notches (Q 10).
+- *EQ for*: **Speech** (clarity first), **Projected speech** (keeps the upper mids a
+  projected stage voice has), **Speech & singing** (a little more warmth and ring,
+  cuts at most 4 dB), **Singing** (keeps the body and the 2.5–3.5 kHz singer's ring,
+  cuts at most 3 dB, lower HPF).
+
+These are starting points from common placement guidance, not measurements of a
+particular microphone.
+
+**Ring-out** (needs `tf5.fader_write`; offered as **Ring out…** in the panel). The
+software takes over the chosen mics' faders and EQ and does what an engineer does
+by hand. A popup stays on top the whole time with **Mute & cancel** (or Esc): it
+mutes every ring-out channel at once, then puts their faders and EQ back as they
+were; they stay muted until you press **Unmute**.
+
+1. One mic at a time, the others in the ring-out muted: the fader starts 10 dB
+   under its level and rises 1 dB a second, never above `ringout_ceiling_db`. When it
+   starts to ring, the fader drops 6 dB at once. If the ring then falls clearly
+   further than the fader did (and further than everything else), it was feedback:
+   a narrow notch (−3 dB, the mic type's Q) goes on a free PEQ band, and the ramp
+   carries on from just under where it rang. A ring right beside an existing notch is
+   the same resonance (the loop's delay makes it ring at one of several frequencies)
+   and widens and deepens that notch instead, to at most −9 dB. A steady tone (hum,
+   a held note) falls only as far as the fader and is ignored. Each mic is done at the
+   ceiling, after 3 notches (one band stays for tone), or when new frequencies ring
+   as soon as the last was notched: the system's limit.
+2. All of them together at their safe levels, raised together up to the margin:
+   more open mics feed back sooner (about 3 dB per doubling). A ring here is notched
+   on the mic the ring detector names as its source.
+3. Each fader ends at least `ringout_margin_db` under where it rang (alone and
+   together) and never above where you had it; a fader that was down stays down,
+   and on / off is as before. The popup lists, per mic, where it first rang, where
+   it rings now (the gain the notches bought) and the notches. A frequency that rang
+   on two or more mics is named: the system rings there (PA, room, or the capsules'
+   shared peak), and one narrow cut on the stereo bus PEQ would serve them all.
+4. Optionally (on by default), **live tone EQ**: auto EQ on each mic with its mic
+   type and EQ style, the notches reserved (never moved), while each person talks or
+   sings, until you press **Done**.
+
+It stops on its own and hands back the desk: when anyone moves one of those faders
+or changes their EQ on the desk (it leaves everything as it is), when no page has
+been watching for 10 s while it is raising faders (faders back to where they were),
+and when the desk can't be written or a fader move isn't confirmed (faders back).
+Before it starts, the fader the TF Editor protocol reports must match the one RCP
+reports, and after every move RCP must follow; if not, it doesn't move faders.
+It listens to the mains for 2 s first and stops without changing anything if they
+are silent (main bus muted, PA off): with no PA there is no loop to ring.
+
+Ring the mics out where they are used: on the actor, including downstage near the
+speakers. Mute other open mics first. Notches typically buy 3–6 dB; distance to the
+speakers and the number of open mics matter more.
+
 **EQ profiles** (in the console sidebar's EQ section): **Save as…** stores the
 shown channel's whole EQ (EQ on, the high-pass, every band's type, frequency, gain
 and Q) under a name, e.g. the actor's; pick a profile and **Recall** to put it on
@@ -181,8 +243,14 @@ puts back the EQ from before the first change). Profiles are saved in
 `[vocal]`: `enabled`, `inputs` (0-based inputs that are vocal mics; `[]` = any),
 `listen_s` (20), `max_cut_db` (6), `max_boost_db` (3), `house_mic` (-1 = none),
 `room_tilt_db_oct` (0: the in-room target is the reference speech spectrum; tilt
-it for taste), `auto_allowed` (false), `profiles_file` (`eq_profiles.json`). API: `GET /api/vocal/status`,
-`POST /api/vocal/start|stop|clear` `{"channel": n}` (start also takes `"live": true`),
+it for taste), `auto_allowed` (false), `profiles_file` (`eq_profiles.json`),
+`mic_type` (`generic`), `eq_style` (`speech`), `ringout_ceiling_db` (6),
+`ringout_margin_db` (6). API: `GET /api/vocal/status`,
+`POST /api/vocal/start|stop|clear` `{"channel": n}` (start also takes `"live": true`,
+`"mic"` and `"style"`),
 `POST /api/vocal/apply|undo` `{"channel": n, "confirm": true}`,
 `POST /api/vocal/auto` `{"channel": n, "on": true, "confirm": true}` (or `"on": false`),
-`POST /api/vocal/auto/undo` `{"channel": n, "confirm": true}`.
+`POST /api/vocal/auto/undo` `{"channel": n, "confirm": true}`,
+`GET /api/vocal/ringout` (the page's poll is the "someone is watching" heartbeat),
+`POST /api/vocal/ringout/start` `{"mics": [{"channel": n, "mic": id, "style": id}], "tone": true,
+"confirm": true}`, `POST /api/vocal/ringout/abort` (Mute & cancel), `.../unmute`, `.../finish`.

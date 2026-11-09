@@ -12,6 +12,7 @@ from flask_sock import Sock
 from ..config import TF5Config
 from ..dsp.eq import CURVE_FREQS, eq_curve
 from .editor.client import TFEditorClient
+from .editor.guard import WRITABLE
 from .patch import patch_from, source_label
 from .rcp import TF5Client
 
@@ -28,7 +29,9 @@ class TF5Module:
 
     With ``tf5.eq`` it also reads every channel's EQ over the TF Editor protocol
     (console/editor) for the spectrum overlay. With ``tf5.eq_write`` as well, an input
-    channel's EQ can be set (``write_eq``), only on a person's request.
+    channel's EQ can be set (``write_eq``), only on a person's request; with
+    ``tf5.fader_write`` too, its fader level and on switch (``write_fader``, for the
+    vocal assist's ring-out session).
 
     ``simulator``: a simulated console (console.sim.SimConsole, demo mode) that this
     module owns: closed when it stops, its counters reported in its status.
@@ -61,7 +64,9 @@ class TF5Module:
         self.eq_client: TFEditorClient | None = None
         self.eq_version = 0  # bumped whenever the console's mixing data (EQ included) changes
         if t.eq:
-            self.eq_client = TFEditorClient(t.host, t.eq_port, on_change=self._eq_changed, writes=t.eq_write)
+            self.eq_client = TFEditorClient(
+                t.host, t.eq_port, on_change=self._eq_changed, writes=t.eq_write, fader_writes=t.fader_write
+            )
 
     def bus_inputs(self) -> list[int]:
         """USB inputs carrying the stereo bus: mixes, not sources (for ring attribution)."""
@@ -105,7 +110,47 @@ class TF5Module:
             raise PermissionError("writing to the console is off (tf5.eq_write = false)")
         if target is None:
             raise ValueError(f"USB {usb + 1} doesn't carry an input channel; only input channel EQ can be set")
+        for p, _ in changes:  # EQ only: faders go through write_fader (ring-out), never through here
+            if not WRITABLE.fullmatch(f"{target}/{p}"):
+                raise ValueError(f"{p}: not a writable EQ parameter")
         results = ec.write([(f"{target}/{p}", v) for p, v in changes])
+        for r in results:
+            r["path"] = r["path"].split("/", 1)[1]
+        return results
+
+    @property
+    def fader_writable(self) -> bool:
+        return self.eq_client is not None and self.eq_client.fader_writes
+
+    def fader(self, usb: int) -> dict[str, Any]:
+        """The fader of the input channel on USB input ``usb``, raw (dB x 100, -32768 = -inf;
+        on 0/1), as the editor protocol and as RCP report it. Each is None when unknown."""
+        target, ec = self.eq_target(usb), self.eq_client
+        level = ec.get(f"{target}/Fader/Level") if target and ec else None
+        on = ec.get(f"{target}/Fader/On") if target and ec else None
+        rcp = self.client.fader(usb) if target else None
+        return {
+            "level": level if isinstance(level, int) else None,
+            "on": on if isinstance(on, int) else None,
+            "rcp_level": rcp[0] if rcp else None,
+            "rcp_on": rcp[1] if rcp else None,
+        }
+
+    def write_fader(self, usb: int, level: int | None = None, on: int | None = None) -> list[dict[str, Any]]:
+        """SET the fader level (raw) and / or on switch of the input channel on USB input
+        ``usb``. Only for a ring-out a person started (see TFEditorClient.write)."""
+        target, ec = self.eq_target(usb), self.eq_client
+        if ec is None or not ec.fader_writes:
+            raise PermissionError("moving faders is off (tf5.fader_write = false)")
+        if target is None:
+            raise ValueError(f"USB {usb + 1} doesn't carry an input channel; only input faders can be set")
+        # Off before the level (muting must not wait); on only after it (unmute at the new level).
+        changes = [(f"{target}/Fader/On", on)] if on == 0 else []
+        if level is not None:
+            changes.append((f"{target}/Fader/Level", level))
+        if on is not None and on != 0:
+            changes.append((f"{target}/Fader/On", on))
+        results = ec.write(changes)
         for r in results:
             r["path"] = r["path"].split("/", 1)[1]
         return results

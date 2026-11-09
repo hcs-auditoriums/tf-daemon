@@ -38,7 +38,7 @@ from .codec import (
     sync,
 )
 from .dump import Dump, channel_eq, dump_blob
-from .guard import ALLOWED_EVENT_REPLIES, WRITABLE, ReadOnlyViolation, check_outbound, write_limits
+from .guard import ALLOWED_EVENT_REPLIES, FADER_WRITABLE, WRITABLE, ReadOnlyViolation, check_outbound, write_limits
 
 log = logging.getLogger(__name__)
 
@@ -57,14 +57,21 @@ class TFEditorClient:
     ``on_change`` (optional) is called with no arguments after the Mixing data
     changed (dump received or a parameter pushed). With ``writes`` False (the
     default) the client is read-only; with True, ``write()`` may change EQ
-    parameters when a person asks for it.
+    parameters when a person asks for it, and with ``fader_writes`` as well, input
+    channels' fader level and on switch.
     """
 
     def __init__(
-        self, host: str, port: int = DEFAULT_PORT, on_change: Callable[[], None] | None = None, writes: bool = False
+        self,
+        host: str,
+        port: int = DEFAULT_PORT,
+        on_change: Callable[[], None] | None = None,
+        writes: bool = False,
+        fader_writes: bool = False,
     ) -> None:
         self.host, self.port = host, port
         self.writes = writes
+        self.fader_writes = writes and fader_writes
         self._write_lock = threading.Lock()  # one write() at a time
         self._authorized: dict[tuple[tuple[int, ...], tuple[int, ...]], tuple[int, int]] = {}  # addr -> (type, value)
         self._echo = threading.Condition()
@@ -126,6 +133,7 @@ class TFEditorClient:
             "descriptor_md5": self.desc_md5,
             "descriptor_known": self.desc_md5 in (None, DESC_MD5["Mixing"]),
             "read_only": not self.writes,
+            "fader_writes": self.fader_writes,
         }
 
     def eq(self, kind: str, x: int) -> dict[str, Any] | None:
@@ -159,7 +167,7 @@ class TFEditorClient:
             if not self.synced or sock is None or dump is None:
                 raise ConnectionError("not connected to the console's editor protocol")
             for path, value in changes:
-                if not WRITABLE.fullmatch(path):
+                if not (WRITABLE.fullmatch(path) or (self.fader_writes and FADER_WRITABLE.fullmatch(path))):
                     raise ValueError(f"{path}: not a writable EQ parameter")
                 lo, hi = write_limits(path)
                 if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
@@ -185,7 +193,7 @@ class TFEditorClient:
                 finally:
                     self._authorized = {}
                 log.info(
-                    "TF5 editor protocol: wrote %d EQ parameter(s) on user request: %s",
+                    "TF5 editor protocol: wrote %d parameter(s) on user request: %s",
                     len(plan),
                     ", ".join(f"{p}={v}" for p, _, _, v in plan),
                 )

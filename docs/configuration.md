@@ -86,7 +86,11 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   input-channel PEQ parameters (switch, HPF, bands) with values in range.
   `GET /api/tf5/eq/<usb>` returns the settings and curve (`writable`: editing is
   allowed for it), `PUT /api/tf5/eq/<usb>` `{"changes": [[path, raw], ...],
-  "confirm": true}` sets them. One-off read-only probe from a shell:
+  "confirm": true}` sets them. `tf5.fader_write` (default `false`, needs
+  `eq_write`) also lets the vocal assist's **ring-out** move input channels' fader
+  level and on switch, only while a ring-out a person started runs (and its Mute &
+  cancel mute them); never the stereo bus, mixes, sends or DCAs. One-off read-only
+  probe from a shell:
   `python -m tf_daemon.console.editor <console-ip> --channels 1-8 [--watch]`.
 
 Levels are dBFS with AES17 convention: a full-scale sine reads 0 dBFS.

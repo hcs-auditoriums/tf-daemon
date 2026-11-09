@@ -276,3 +276,88 @@ def test_auto_routes_need_the_config_and_a_confirmation():
         assert c.get("/api/vocal/status").get_json()["auto_allowed"] is False  # nothing to write to
     finally:
         app.extensions["tf_stop"]()
+
+
+# ---------------------------------------------------------------- mic types, EQ styles, reserved bands
+
+
+def run_with(x, **kw):
+    from tf_daemon.vocal.targets import tone_options
+    from tf_daemon.vocal.tone import POINTS
+
+    c = VoiceCollector(FS)
+    for end in range(N, len(x) + 1, HOP):
+        c.process(x[end - N : end], end / FS)
+    mic, style = kw.pop("mic", "generic"), kw.pop("style", "speech")
+    return analyze(c, **tone_options(mic, style, POINTS, max_cut_db=6.0, max_boost_db=3.0), **kw)
+
+
+def test_head_worn_mics_get_no_presence_boost(voice):
+    dull = shape(voice, lambda f: -6 / (1 + (3000 / f) ** 2))
+    generic = only_move(run_with(dull))
+    assert generic["kind"] == "boost" and generic["gain"] > 1
+    wig = run_with(dull, mic="wig")
+    assert all(b["kind"] != "boost" or b["gain"] <= 1.0 for b in wig["bands"]), wig["bands"]
+    assert wig["hpf"]["freq"] >= 100  # and a higher high-pass than a handheld's floor
+
+
+def test_singing_cuts_more_gently_than_speech(voice):
+    boxy = shape(voice, lambda f: bell_db(f, 350, 8, 1.4))
+    speech, singing = only_move(run_with(boxy)), only_move(run_with(boxy, style="singing"))
+    assert singing["kind"] == speech["kind"] == "cut"
+    assert -3.0 <= singing["gain"] < 0 and singing["gain"] > speech["gain"]
+
+
+def test_reserved_bands_are_left_alone_and_counted(voice):
+    boxy = shape(voice, lambda f: bell_db(f, 350, 6, 1.4))
+    notch = {"band": "L", "freq": 2480.0, "gain": -6.0, "q": 10.0}
+    r = run_with(boxy, reserved=[notch], rings=[{"freq": 2490.0, "count": 4}])
+    assert all(b["band"] != "L" for b in r["bands"])  # the boxiness goes on another band
+    assert any(b["kind"] == "cut" and abs(np.log2(b["freq"] / 350)) < 0.3 for b in r["bands"])
+    assert not any(b["kind"] == "notch" for b in r["bands"])  # the ring is notched already
+    assert r["reserved"] == [notch]
+    i = int(np.argmin(np.abs(np.array(r["curve_freqs"]) - 2480)))
+    assert r["curve"][i] < -3  # the curve shows the notch that stays
+
+
+def test_plan_keeps_notches():
+    from tf_daemon.vocal.plan import eq_plan
+
+    cur = {
+        "on": True,
+        "hpf": None,
+        "bands": [
+            {"label": "L", "type": "bell", "on": True, "freq": 300.0, "gain": 2.0, "q": 1.0},
+            {"label": "LM", "type": "bell", "on": True, "freq": 820.0, "gain": -6.0, "q": 8.0},  # rung out
+            {"label": "HM", "type": "bell", "on": True, "freq": 2480.0, "gain": -4.0, "q": 9.0},  # reserved
+            {"label": "H", "type": "bell", "on": True, "freq": 8000.0, "gain": 0.0, "q": 1.0},
+        ],
+    }
+    result = {"bands": [], "reserved": [{"band": "HM", "freq": 2480.0, "gain": -4.0, "q": 9.0}]}
+    changes, lines = eq_plan(result, cur)
+    assert changes == [("PEQ/Bank/BandL/Gain", 0)]
+    assert "LM: narrow cut (-6.0 dB @ 820 Hz) left as it is" in lines and "HM: ring-out notch left as it is" in lines
+
+
+def test_mic_type_and_style_routes(tmp_path):
+    cfg, modules, _, _ = _engine_and_module()
+    app = create_app(cfg, modules)
+    try:
+        c = app.test_client()
+        st = c.get("/api/vocal/status").get_json()
+        assert {m["id"] for m in st["mic_types"]} >= {"wig", "lav", "handheld"}
+        assert {s["id"] for s in st["eq_styles"]} >= {"speech", "singing", "speech_singing"}
+        assert st["ringout_allowed"] is False  # no console here
+        assert c.post("/api/vocal/start", json={"channel": 1, "mic": "kazoo"}).status_code == 400
+        assert c.post("/api/vocal/start", json={"channel": 1, "mic": "lav", "style": "singing"}).get_json()["ok"]
+        (session,) = [s for i, s in modules[-1].checks.sessions() if i == 1]
+        assert (session.mic, session.style) == ("lav", "singing")
+        assert c.get("/api/vocal/ringout").get_json() == {"allowed": False}
+        assert c.post("/api/vocal/ringout/start", json={"mics": [{"channel": 1}], "confirm": True}).status_code == 400
+    finally:
+        app.extensions["tf_stop"]()
+    p = tmp_path / "c.toml"
+    for bad in ('[vocal]\nmic_type = "kazoo"\n', '[vocal]\neq_style = "opera"\n', "[vocal]\nringout_margin_db = 1\n"):
+        p.write_text(bad)
+        with pytest.raises(ConfigError, match="vocal"):
+            load_config(p)

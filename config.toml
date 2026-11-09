@@ -84,6 +84,13 @@ inputs = []                 # 0-based inputs that are vocal mics; [] = any input
 listen_s = 20.0             # seconds of speech to collect
 max_cut_db = 6.0            # largest cut / boost it will suggest
 max_boost_db = 3.0
+mic_type = "generic"        # default mic: generic | wig | lav | headset | handheld (the page picks per channel)
+eq_style = "speech"         # default EQ target: speech | speech_singing | singing | projected
+# Ring-out (needs tf5.fader_write): raises a mic's fader until it starts to ring,
+# notches the ring, and repeats. It never pushes a fader above this, and leaves
+# it at least margin dB below where it rang.
+ringout_ceiling_db = 6.0
+ringout_margin_db = 6.0
 
 [tf5]
 # Read channel names and settings (fader, on, pan, colour) from the TF5 over the
@@ -114,6 +121,10 @@ eq_port = 50368
 # suggestion (with Undo). Only ever on a person's click and confirmation; nothing
 # is written automatically. Input channels' PEQ only. Needs eq = true.
 eq_write = false
+# Also let the vocal assist's ring-out session move input channels' faders and
+# on switches (it raises gain to find feedback, and its Mute & cancel button
+# mutes the channels). Only while a person runs a ring-out. Needs eq_write.
+fader_write = false
 
 # Named inputs. index is the 0-based capture channel on the device. Every input
 # can be viewed in the browser; these get buttons and are always analyzed, the

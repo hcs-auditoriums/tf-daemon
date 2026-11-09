@@ -128,7 +128,9 @@ def _tf5_module(
         return TF5Module(cfg.tf5, on_names, on_gains)
     # Demo: the simulated console on free local ports, with EQ read and write on.
     assert sim is not None
-    demo = replace(cfg.tf5, host=sim.host, port=sim.rcp_port, eq_port=sim.eq_port, eq=True, eq_write=True)
+    demo = replace(
+        cfg.tf5, host=sim.host, port=sim.rcp_port, eq_port=sim.eq_port, eq=True, eq_write=True, fader_write=True
+    )
     return TF5Module(demo, on_names, on_gains, simulator=sim)
 
 

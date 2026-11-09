@@ -12,8 +12,11 @@ below and raises ReadOnlyViolation for anything else, notably:
 
 The one exception: with ``writes=True`` (config ``tf5.eq_write``), ``write()``
 sends set-params for input-channel PEQ parameters (WRITABLE, values within
-WRITE_LIMITS). It is called only from an explicit user request (the vocal
-assist's "Apply to desk"); nothing in tf-daemon writes on its own. While a
+WRITE_LIMITS). With ``fader_writes=True`` as well (config ``tf5.fader_write``),
+also an input channel's fader level and on switch (FADER_WRITABLE, within
+FADER_LIMITS), for the vocal assist's ring-out session. It is called only from an
+explicit user request (the vocal assist's "Apply to desk", or a ring-out a person
+started and can stop at any time); nothing in tf-daemon writes on its own. While a
 ``write()`` runs, ``check_outbound`` lets through exactly the frames of that
 request and nothing else; at any other time a set-param is refused as before.
 
@@ -68,13 +71,24 @@ WRITE_LIMITS = {
 }
 
 
+# With fader writes on as well: an input channel's fader level (raw dB x 100; -32768 = -inf, as
+# over RCP) and on switch. Nothing else: not the stereo bus, mixes, sends or DCAs.
+FADER_WRITABLE = re.compile(r"InputChannel:\d+/Fader/(Level|On)")
+FADER_LIMITS = {
+    "Level": (-32768, 1000),  # -inf .. +10 dB
+    "On": (0, 1),
+}
+
+
 class ReadOnlyViolation(RuntimeError):
     """An outgoing frame could change console state; it was not sent."""
 
 
 def write_limits(path: str) -> tuple[int, int]:
-    """Raw (min, max) for a WRITABLE parameter path."""
+    """Raw (min, max) for a WRITABLE or FADER_WRITABLE parameter path."""
     name = path.rsplit("/", 1)[-1]
+    if FADER_WRITABLE.fullmatch(path):
+        return FADER_LIMITS[name]
     return WRITE_LIMITS["HPF/Frequency"] if path.endswith("HPF/Frequency") else WRITE_LIMITS[name]
 
 
