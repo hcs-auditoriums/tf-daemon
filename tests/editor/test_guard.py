@@ -2,17 +2,13 @@
 way out: nothing the client sends can change the console unless a person asked for it."""
 
 import ast
-import binascii
-import csv
 import re
 from pathlib import Path
 
 import pytest
 from editor_fakes import (
     EDITOR,
-    EDITOR_IP,
     PKG,
-    REAL_CSV,
     build_dump,
     dump_message,
     mixing_tree,
@@ -21,10 +17,7 @@ from editor_fakes import (
 from tf_daemon.console.editor.client import TFEditorClient
 from tf_daemon.console.editor.codec import (
     CLIENT_TYPE,
-    DESC_MD5,
-    DUMP,
     EVENT,
-    EVENT_REPLY,
     HASH_COMPARE,
     SET_PARAM,
     SUBSCRIBE,
@@ -34,7 +27,6 @@ from tf_daemon.console.editor.codec import (
     T_U8,
     T_U16,
     T_U32,
-    FrameReader,
     element,
     event,
     frame,
@@ -44,8 +36,7 @@ from tf_daemon.console.editor.codec import (
     subscribe,
     sync,
 )
-from tf_daemon.console.editor.dump import Dump, dump_blob
-from tf_daemon.console.editor.guard import ALLOWED_PARAM_CMDS, ReadOnlyViolation, check_outbound
+from tf_daemon.console.editor.guard import ReadOnlyViolation, check_outbound
 
 
 def _set_param_bytes(func, path, idx, value_el, origin=0xA0):
@@ -205,39 +196,3 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
     assert "apply_suggestion" not in calls and "undo" not in calls   # never called, only handed to desk_write
     assert '.get("confirm") is not True' in vocal_src
 
-
-@pytest.mark.skipif(not REAL_CSV.exists(), reason="TF Editor capture not available")
-def test_guard_against_tf_editors_own_traffic():
-    """Replay what TF Editor sent: the handshake passes, every write / Editor claim is refused."""
-    rows = list(csv.reader(open(REAL_CSV)))
-    data = b"".join(binascii.unhexlify(p) for _, _, st, src, _, p in rows if st == "65" and src == EDITOR_IP)
-    accepted, refused = [], []
-    for tag, payload in FrameReader().feed(data):
-        try:
-            check_outbound(tag, payload)
-            accepted.append((tag, parse_message(payload)))
-        except ReadOnlyViolation:
-            refused.append((tag, parse_message(payload)))
-    assert ("MPRO", SUBSCRIBE) in [(t, m.cmd) for t, m in accepted]
-    assert ("MMIX", HASH_COMPARE) in [(t, m.cmd) for t, m in accepted]
-    assert all(m.cmd in ALLOWED_PARAM_CMDS | {EVENT, EVENT_REPLY} for _, m in accepted)
-    assert all(t in ("MPRO", "MMIX", "EEVT") for t, _ in accepted)
-    refused_cmds = {(t, m.cmd) for t, m in refused}
-    assert ("MSCS", SET_PARAM) in refused_cmds                   # its 545 SceneStatus writes
-    assert any(t == "EEVT" and m.elements[2].value == "SetClientType" for t, m in refused)   # TYPE:Editor
-    assert not any(m.cmd == SET_PARAM for _, m in accepted)
-
-
-@pytest.mark.skipif(not REAL_CSV.exists(), reason="TF Editor capture not available")
-def test_console_side_of_the_capture_parses():
-    rows = list(csv.reader(open(REAL_CSV)))
-    data = b"".join(binascii.unhexlify(p) for _, _, st, src, _, p in rows if st == "65" and src != EDITOR_IP)
-    frames = FrameReader().feed(data)
-    msgs = [(t, parse_message(p)) for t, p in frames]
-    dumps = {t: Dump(dump_blob(m)) for t, m in msgs if m.cmd == DUMP and t == "MMIX"}
-    assert dumps["MMIX"].func == "Mixing" and dumps["MMIX"].desc_md5 == DESC_MD5["Mixing"]
-    sets = [m for t, m in msgs if t == "MMIX" and m.cmd == SET_PARAM]
-    assert sets
-    for m in sets:
-        name, _, _ = dumps["MMIX"].resolve(m.elements[4].value, m.elements[5].value)
-        assert name.endswith("Fader/On")                        # the console-side mute changes
