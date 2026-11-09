@@ -19,7 +19,8 @@ export function onConsoleEq(msg) {
   const first = !eqAvailable;
   eqAvailable = true;
   if (msg.index === state.input) {
-    if (state.eqEditing) state.eqPushed = msg;   // a drag is showing its own preview: apply when it ends
+    // A drag is showing its own preview (or its last writes are still coming back): apply when it's done.
+    if (state.eqEditing || state.eqSettling) state.eqPushed = msg;
     else state.eq = msg;
   }
   $("eq-toggle").hidden = false;

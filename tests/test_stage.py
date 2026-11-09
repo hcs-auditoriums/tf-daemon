@@ -106,10 +106,13 @@ def test_cheap_enough_to_run_live():
     st = StageSettings(talkers=[0, 1], mains=(32, 33), house_mic=31)
     src = StageSource(34, N, st, Desk(0.0))
     b = np.zeros((N, 34), np.float32)
-    t0 = time.perf_counter()
-    for _ in range(40):  # one second of audio
-        src._fill(b)
-    assert time.perf_counter() - t0 < 0.5
+    best = float("inf")
+    for _ in range(3):  # the best of three: a busy machine (the suite runs in parallel) isn't a slow stage
+        t0 = time.perf_counter()
+        for _ in range(40):  # one second of audio
+            src._fill(b)
+        best = min(best, time.perf_counter() - t0)
+    assert best < 0.5, best
 
 
 def test_config_builds_the_stage_from_the_patch():

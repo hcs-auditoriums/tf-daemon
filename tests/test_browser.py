@@ -269,6 +269,15 @@ def test_eq_bands_can_be_dragged_and_typed_on_the_spectrum(page):
             page.wait_for_timeout(100)
             wait += 1
         assert desk_band("HM")["gain"] > before["gain"]  # dragged up: more gain on the desk
+        # The click must land where the handle is now: wait until it has stopped moving (the
+        # desk's echoes of the drag arrive for a moment after the release).
+        page.wait_for_function(
+            """() => new Promise((ok) => {
+                const at = () => JSON.stringify(window.tfEqHandles().find((h) => h.key === 'HM'));
+                const a = at(); setTimeout(() => ok(at() === a), 400);
+            })""",
+            timeout=8000,
+        )
         h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
         page.mouse.click(box["x"] + h["x"], box["y"] + h["y"])  # a click: its settings
         pop = page.get_by_role("dialog", name="EQ HM")
