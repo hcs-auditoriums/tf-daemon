@@ -19,6 +19,12 @@ print("\n".join(p["dependencies"] + p["optional-dependencies"]["dev"] + p["optio
 EOF
 RUN pip install --no-cache-dir -r /tmp/requirements.txt watchfiles
 
+# Headless Chromium for tests/test_browser.py (the pages in a real browser).
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+RUN python -m playwright install --with-deps --only-shell chromium \
+ && chmod -R a+rX /opt/playwright \
+ && rm -rf /var/lib/apt/lists/*
+
 ARG USERNAME=dev
 ARG USER_UID=1000
 RUN useradd --create-home --uid ${USER_UID} --shell /bin/bash ${USERNAME}

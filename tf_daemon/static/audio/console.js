@@ -1,0 +1,359 @@
+// The console sidebar: the TF5 channel on the shown input, and its EQ graph.
+
+import { eqAt, eqAvailable, eqHalf } from "./eq.js";
+import { $, C, el, loadInt, save, state } from "./shared.js";
+
+// Sidebar with the TF5 channel feeding the shown input: name, on, fader,
+// pan and its sends. The desk's state arrives over /ws/audio: a snapshot on
+// connect ("tf5"), then each change as it happens on the desk ("tf5-changes");
+// nothing arrives when tf5.host isn't set, and the sidebar stays hidden.
+let tf5 = null;   // null = no TF5 module; {connected, channels, mixes} otherwise
+state.showConsole = loadInt("tf.console", 1) === 1;
+state.allSends = loadInt("tf.allSends", 0) === 1;
+
+export function onConsoleSnapshot(msg) {
+  tf5 = msg;
+  panelSig = null;  // rebuild
+  schedulePanel();
+}
+
+export function onConsoleChanges(msg) {
+  if (!tf5) return;
+  tf5.connected = msg.connected;
+  for (const [m, name] of Object.entries(msg.mixes || {})) tf5.mixes[Number(m)] = name;
+  for (const c of msg.changes) {
+    const ch = tf5.channels[c.i];
+    if (!ch) continue;
+    let p = ch.params[c.p];
+    if (c.y === null) {
+      ch.params[c.p] = { value: c.v, unit: c.u };
+    } else {
+      if (!p || !Array.isArray(p.value)) p = ch.params[c.p] = { value: [], unit: c.u };
+      p.value[c.y] = c.v;
+    }
+  }
+  schedulePanel();
+}
+
+// Many changes can arrive per frame while a fader moves: render once per frame.
+let panelQueued = false;
+function schedulePanel() {
+  if (panelQueued) return;
+  panelQueued = true;
+  requestAnimationFrame(() => { panelQueued = false; renderPanel(); });
+}
+
+const TF_COLORS = {
+  blue: "#3f7fff", skyblue: "#4fc3f7", green: "#4cd07d", yellow: "#f2d14e", orange: "#ff9f43",
+  red: "#ff5d5d", pink: "#ff7ac6", purple: "#a77bff", white: "#e6e6e6",
+};
+
+// Fader position 0..1 for a level in dB (null = -inf), roughly following a
+// console fader's scale so the cap sits where it does on the desk.
+const LAW = [[10, 1], [5, 0.92], [0, 0.8], [-5, 0.69], [-10, 0.58], [-20, 0.43], [-30, 0.31],
+             [-40, 0.21], [-50, 0.13], [-60, 0.07], [-138, 0]];
+function faderPos(db) {
+  if (db === null || db === undefined) return 0;
+  if (db >= LAW[0][0]) return 1;
+  for (let i = 1; i < LAW.length; i++) {
+    const [d1, p1] = LAW[i - 1], [d0, p0] = LAW[i];
+    if (db >= d0) return p0 + (db - d0) / (d1 - d0) * (p1 - p0);
+  }
+  return 0;
+}
+const fmtDb = (db) => (db === null || db === undefined ? "−∞" : `${db > 0 ? "+" : ""}${db.toFixed(1)}`);
+const fmtPan = (v) => (v === 0 ? "C" : v < 0 ? `L${-v}` : `R${v}`);
+
+
+
+// Sends to the mixes (consecutive mixes with the same name are a stereo pair
+// and shown once), the two FX and mono.
+function sendRows(p, mixes) {
+  const rows = [];
+  const lv = p["ToMix/Level"]?.value || [], on = p["ToMix/On"]?.value || [];
+  for (let m = 0; m < lv.length; m++) {
+    const name = mixes[m] || `Mix ${m + 1}`;
+    const pair = m + 1 < lv.length && mixes[m] && mixes[m + 1] === mixes[m];
+    rows.push({ name, db: lv[m], on: on[m] !== 0 });
+    if (pair) m++;
+  }
+  const fl = p["ToFx/Level"]?.value || [], fo = p["ToFx/On"]?.value || [];
+  fl.forEach((db, i) => rows.push({ name: `FX ${i + 1}`, db, on: fo[i] !== 0 }));
+  if (p["ToMono/Level"]) rows.push({ name: "Mono", db: p["ToMono/Level"].value, on: p["ToMono/On"]?.value !== 0 });
+  return rows;
+}
+
+// The sidebar is rebuilt only when its structure changes (another input, a
+// send appearing, ...); otherwise values are updated in place, so a fader
+// moving on the desk moves smoothly here (with a short CSS transition).
+let panelSig = null, refs = null;
+
+// Rebuild the sidebar from scratch on the next frame (e.g. the EQ section appeared).
+export function rebuildPanel() {
+  panelSig = null;
+  schedulePanel();
+}
+
+function panelStructure(ch) {
+  if (!tf5.connected || !ch || !ch.source) return JSON.stringify([state.input, tf5.connected, ch && ch.source]);
+  const p = ch.params, rows = p["ToMix/Level"] ? sendRows(p, tf5.mixes || []) : [];
+  const shown = (state.allSends ? rows : rows.filter((r) => r.on && r.db !== null)).map((r) => r.name);
+  return JSON.stringify([state.input, ch.source, !!eqAvailable, p["Label/Name"]?.value, p["Label/Color"]?.value,
+                         !!p["ToStereo/Pan"], !!p["Out/Balance"], !!p["ToMix/Level"], state.allSends, shown,
+                         Object.keys(p).sort()]);
+}
+
+function updatePanel(ch) {
+  const p = ch.params, v = (k) => p[k]?.value;
+  const isOn = v("Fader/On") !== 0;
+  refs.on.className = `cp-on ${isOn ? "on" : "off"}`;
+  refs.on.textContent = isOn ? "ON" : "OFF";
+  const level = v("Fader/Level"), pos = `${faderPos(level) * 100}%`;
+  refs.level.textContent = `${fmtDb(level)} dB`;
+  refs.fill.style.height = pos;
+  refs.cap.style.bottom = pos;
+  if (refs.panKey && p[refs.panKey]) {
+    const pan = v(refs.panKey);
+    refs.panVal.textContent = fmtPan(pan);
+    refs.panDot.style.left = `${(pan + 63) / 126 * 100}%`;
+  }
+  if (refs.sends.size) {
+    for (const r of sendRows(p, tf5.mixes || [])) {
+      const s = refs.sends.get(r.name);
+      if (!s) continue;
+      s.row.className = `cp-send${r.on && r.db !== null ? "" : " off"}`;
+      s.fill.style.width = `${faderPos(r.db) * 100}%`;
+      s.val.textContent = r.on ? fmtDb(r.db) : "off";
+    }
+  }
+  for (const [k, dd] of refs.extra) {
+    const x = p[k];
+    if (x) dd.textContent = `${x.value ?? "−∞"}${x.unit ? " " + x.unit : ""}`;
+  }
+}
+
+export function renderPanel() {
+  const panel = $("console-panel"), toggle = $("console-toggle");
+  toggle.hidden = tf5 === null;
+  panel.hidden = tf5 === null || !state.showConsole;
+  if (panel.hidden) return;
+
+  const ch = tf5.channels && tf5.channels.find((c) => c.index === state.input);
+  const sig = panelStructure(ch);
+  if (sig === panelSig && refs) {
+    updatePanel(ch);
+    return;
+  }
+  panelSig = sig;
+  refs = { sends: new Map(), extra: new Map() };
+  const items = [];
+  if (!tf5.connected) {
+    items.push(el("p", "cp-note", "TF5 not connected"));
+  } else if (!ch || !ch.source) {
+    items.push(el("p", "cp-note", `USB ${state.input + 1} is not on the console patch (tf5.usb_patch)`));
+  } else {
+    const p = ch.params, v = (k) => p[k]?.value;
+    const head = el("div", "cp-head");
+    const sw = el("span", "cp-swatch");
+    sw.style.background = TF_COLORS[String(v("Label/Color") || "").toLowerCase()] || "var(--border)";
+    const title = el("div");
+    title.append(el("div", "cp-name", v("Label/Name") || ch.source), el("div", "cp-src", `${ch.source} · USB ${ch.index + 1}`));
+    head.append(sw, title);
+    items.push(head);
+
+    refs.on = el("div", "cp-on");
+    items.push(refs.on);
+
+    const section = (title) => {
+      const sec = el("div", "cp-section");
+      const hd = el("div", "cp-sechead");
+      const value = el("span", "cp-value");
+      hd.append(el("span", "cp-label", title), value);
+      sec.append(hd);
+      return [sec, value];
+    };
+
+    // EQ (only with tf5.eq): the console's curve for this channel, like the TF5's
+    // channel screen; redrawn whenever the desk pushes a change.
+    if (eqAvailable) {
+      const [eqSec, eqVal] = section("EQ");
+      refs.eqVal = eqVal;
+      refs.eqCanvas = el("canvas", "cp-eq");
+      refs.eqCanvas.setAttribute("aria-label", "Console EQ curve");
+      refs.eqInfo = el("div", "cp-eqinfo");
+      eqSec.append(refs.eqCanvas, refs.eqInfo);
+      items.push(eqSec);
+    }
+
+    // Fader: heading with the level, then a tall fader (scale, track, cap).
+    const [faderSec, levelEl] = section("Fader");
+    refs.level = levelEl;
+    const fader = el("div", "cp-fader");
+    const scale = el("div", "cp-scale");
+    const track = el("div", "cp-track");
+    for (const d of [10, 5, 0, -5, -10, -20, -30, -40, -60, null]) {
+      const pos = `${faderPos(d) * 100}%`;
+      const labelled = d === null || [10, 0, -10, -20, -30, -40, -60].includes(d);
+      if (labelled) {
+        const t = el("span", d === 0 ? "zero" : "", d === null ? "−∞" : d > 0 ? `+${d}` : String(d));
+        t.style.bottom = pos;
+        scale.append(t);
+      }
+      const tick = el("i", d === 0 ? "zero" : labelled ? "" : "minor");
+      tick.style.bottom = pos;
+      track.append(tick);
+    }
+    refs.fill = el("div", "cp-fill");
+    refs.cap = el("div", "cp-cap");
+    track.append(refs.fill, refs.cap);
+    fader.append(scale, track);
+    faderSec.append(fader);
+    items.push(faderSec);
+
+    // Pan (balance for ST) below the fader: a full-width, centre-detented bar.
+    const panKey = p["ToStereo/Pan"] ? "ToStereo/Pan" : "Out/Balance";
+    if (p[panKey]) {
+      const [panSec, panVal] = section(panKey === "Out/Balance" ? "Balance" : "Pan");
+      const bar = el("div", "cp-pan");
+      const dot = el("span");
+      bar.append(dot);
+      Object.assign(refs, { panKey, panVal, panDot: dot });
+      const marks = el("div", "cp-panmarks");
+      marks.append(el("span", "", "L"), el("span", "", "C"), el("span", "", "R"));
+      panSec.append(bar, marks);
+      items.push(panSec);
+    }
+
+    // Sends: by default only those that are on and above -inf.
+    if (p["ToMix/Level"]) {
+      const rows = sendRows(p, tf5.mixes || []);
+      const shown = state.allSends ? rows : rows.filter((r) => r.on && r.db !== null);
+      const sends = el("div", "cp-sends");
+      const hdr = el("div", "cp-sendhdr");
+      const lbl = el("label");
+      const cb = el("input"); cb.type = "checkbox"; cb.checked = state.allSends;
+      cb.onchange = () => { state.allSends = cb.checked; save("tf.allSends", cb.checked ? 1 : 0); panelSig = null; renderPanel(); };
+      lbl.append(cb, " all");
+      hdr.append(el("h3", "", "Sends"), lbl);
+      sends.append(hdr);
+      if (!shown.length) sends.append(el("p", "cp-note", "No active sends"));
+      for (const r of shown) {
+        const row = el("div", "cp-send");
+        const bar = el("div", "cp-sendbar");
+        const f = el("span");
+        bar.append(f);
+        const val = el("span", "cp-sendval");
+        row.append(el("span", "cp-sendname", r.name), bar, val);
+        refs.sends.set(r.name, { row, fill: f, val });
+        sends.append(row);
+      }
+      items.push(sends);
+    }
+    // Anything else the console offers (gain, EQ, ... if its firmware lists them).
+    const known = new Set(["Label/Name", "Label/Color", "Fader/Level", "Fader/On", "ToStereo/Pan", "Out/Balance",
+                           "ToMix/Level", "ToMix/On", "ToFx/Level", "ToFx/On", "ToMono/Level", "ToMono/On"]);
+    const extra = Object.entries(p).filter(([k]) => !known.has(k));
+    if (extra.length) {
+      const dl = el("dl", "cp-extra");
+      for (const [k] of extra) {
+        const dd = el("dd");
+        refs.extra.set(k, dd);
+        dl.append(el("dt", "", k), dd);
+      }
+      items.push(dl);
+    }
+  }
+  panel.replaceChildren(...items);
+  if (refs.on) updatePanel(ch);
+  drawPanelEq();
+}
+
+// ------------------------------------------------------------------ sidebar EQ
+
+// Same scale as the EQ on the spectrum: ±eqHalf() dB (half the View range, so it
+// follows Auto too) over the spectrum's frequency span.
+const PEQ_GRID_F = [100, 1000, 10000];
+const fmtF0 = (f) => (f >= 1000 ? `${+(f / 1000).toFixed(f >= 10000 ? 0 : 1)}k` : `${Math.round(f)}`);
+const BAND_SHAPE = { bell: "bell", low_shelf: "shelf", high_shelf: "shelf", hpf: "HPF", lpf: "LPF" };
+
+export function drawPanelEq() {
+  const cv = refs && refs.eqCanvas;
+  if (!cv || !cv.isConnected) return;
+  const d = state.eq && state.eq.index === state.input ? state.eq : null;
+  const eq = d && d.eq;
+  refs.eqVal.textContent = !d ? "…" : !eq ? "—" : !eq.on ? "OFF" : eq.one_knob ? "1-knob" : "ON";
+  refs.eqVal.className = `cp-value${eq && !eq.on ? " cp-off" : ""}`;
+  refs.eqInfo.textContent = !d ? "Reading console…" : !eq ? (d.source ? `No EQ for ${d.source}` : "Not on the console patch") :
+    [eq.hpf && eq.hpf.on ? `HPF ${fmtF0(eq.hpf.freq)}` : "HPF off",
+     ...eq.bands.filter((b) => b.label === "L" || b.label === "H")
+       .map((b) => `${b.label} ${BAND_SHAPE[b.type] || b.type}${b.on === false ? " off" : ""}`)].join(" · ");
+
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  }
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const lo = state.logMin ?? Math.log10(20), hi = state.logMax ?? Math.log10(20000);
+  const x = (f) => (Math.log10(f) - lo) / (hi - lo) * w;
+  const range = eqHalf();
+  const y = (db) => h / 2 - db / range * (h / 2);
+
+  // Grid: 0 dB, the spectrum's EQ steps (6 dB, 12 above ±40), 100 Hz / 1k / 10k.
+  g.lineWidth = 1;
+  g.strokeStyle = C.grid;
+  g.beginPath();
+  const step = range > 40 ? 12 : 6;
+  for (let db = step; db < range; db += step) {
+    for (const yy of [Math.round(y(db)) + 0.5, Math.round(y(-db)) + 0.5]) { g.moveTo(0, yy); g.lineTo(w, yy); }
+  }
+  for (const f of PEQ_GRID_F) { const xx = Math.round(x(f)) + 0.5; g.moveTo(xx, 0); g.lineTo(xx, h); }
+  g.stroke();
+  g.strokeStyle = C.gridStrong;
+  g.beginPath(); g.moveTo(0, Math.round(y(0)) + 0.5); g.lineTo(w, Math.round(y(0)) + 0.5); g.stroke();
+  g.fillStyle = C.muted;
+  g.font = "9px system-ui, sans-serif";
+  g.textBaseline = "bottom"; g.textAlign = "left";
+  for (const f of PEQ_GRID_F) if (x(f) > 0 && x(f) < w - 14) g.fillText(fmtF0(f), x(f) + 2, h - 1);
+  g.textBaseline = "top";
+  g.fillText(`±${range} dB`, 2, 1);
+  if (!eq || !d.freqs.length) return;
+
+  // Curve (clipped by the canvas), shaded to 0 dB when the EQ is on, dashed when off.
+  const path = () => { g.beginPath(); d.freqs.forEach((f, i) => (i ? g.lineTo : g.moveTo).call(g, x(f), y(d.curve[i]))); };
+  if (eq.on) {
+    path();
+    g.lineTo(x(d.freqs[d.freqs.length - 1]), y(0)); g.lineTo(x(d.freqs[0]), y(0)); g.closePath();
+    g.fillStyle = C.eqFill; g.fill();
+  }
+  g.globalAlpha = eq.on ? 1 : 0.45;
+  g.strokeStyle = C.eq; g.fillStyle = C.eq;
+  g.lineWidth = 1.5;
+  if (!eq.on) g.setLineDash([4, 3]);
+  path(); g.stroke();
+  g.setLineDash([]);
+
+  // Band handles on the curve: filled when the band does something.
+  const dot = (f, active) => {
+    const yy = Math.min(h - 3, Math.max(3, y(eqAt(f))));
+    g.beginPath(); g.arc(x(f), yy, 2.5, 0, 2 * Math.PI);
+    if (active) g.fill(); else g.stroke();
+  };
+  if (eq.hpf && eq.hpf.on) dot(eq.hpf.freq, true);
+  for (const b of eq.bands) {
+    const filter = b.type === "hpf" || b.type === "lpf";
+    dot(b.freq, filter ? b.on !== false : b.gain !== 0);
+  }
+  g.globalAlpha = 1;
+}
+
+new ResizeObserver(() => drawPanelEq()).observe($("console-panel"));
+
+$("show-console").checked = state.showConsole;
+$("show-console").onchange = (e) => {
+  state.showConsole = e.target.checked;
+  save("tf.console", state.showConsole ? 1 : 0);
+  renderPanel();
+};
