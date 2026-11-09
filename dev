@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Dev container shortcuts (macOS / Linux; dev.cmd is the Windows twin). Each starts it if needed.
+#   ./dev shell            bash in the container
+#   ./dev test [ARGS]      all tests in parallel; ARGS go to pytest (./dev test -k reconnects)
+#   ./dev logs             follow the server log
+#   ./dev up | down        start (rebuilding if needed) / stop
+#   ./dev open [PAGE]      open the running app in the browser (./dev open rf)
+#   ./dev help             list these commands
+set -e
+cd "$(dirname "$0")"
+URL=http://localhost:8080
+
+open_app() {
+  docker compose up -d
+  printf 'waiting for the server'
+  for _ in $(seq 60); do
+    curl -fsS -o /dev/null "$URL/api/status" 2>/dev/null && break
+    printf '.'; sleep 0.5
+  done
+  echo
+  url="$URL/${1#/}"
+  echo "$url"
+  if command -v open >/dev/null; then open "$url"                         # macOS
+  elif command -v wslview >/dev/null; then wslview "$url"                 # WSL
+  elif command -v xdg-open >/dev/null; then xdg-open "$url" >/dev/null 2>&1   # Linux desktop
+  else echo "(no browser opener found: open the address above)"
+  fi
+}
+
+usage() {
+  cat <<'EOF'
+Dev container shortcuts (each starts the container if it isn't running):
+
+  ./dev shell            bash in the container
+  ./dev test [ARGS]      all tests, in parallel; ARGS go to pytest
+                         e.g. ./dev test tests/test_tf5.py -k reconnects
+                              ./dev test -n 0 --pdb     (serial, debugger)
+  ./dev logs             follow the server log (Ctrl+C to stop following)
+  ./dev open [PAGE]      open the running app in the browser
+                         PAGE: rf | qlxd | config (default: the audio page)
+  ./dev up               start, rebuilding the image if pyproject.toml changed
+  ./dev down             stop
+  ./dev help             this list
+
+Server: http://localhost:8080. It reloads when you save a file.
+EOF
+}
+
+cmd="${1:-}"
+shift || true
+case "$cmd" in
+  up)    docker compose up -d --build ;;
+  down)  docker compose down ;;
+  shell) docker compose up -d && docker compose exec app bash ;;
+  test)  docker compose up -d && docker compose exec app pytest "$@" ;;
+  logs)  docker compose up -d && docker compose logs -f app ;;
+  open)  open_app "${1:-}" ;;
+  help|-h|--help|"") usage ;;
+  *)     echo "unknown command: $cmd" >&2; echo >&2; usage >&2; exit 2 ;;
+esac

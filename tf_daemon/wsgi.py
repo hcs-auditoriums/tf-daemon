@@ -6,6 +6,7 @@ Configured through environment variables (CLI flags don't reach gunicorn):
     TF_DAEMON_WAV      WAV path when SOURCE=wav
     TF_DAEMON_RF_SOURCE  device | demo | off        (default: rf.source from config)
     TF_DAEMON_QLXD_SOURCE  device | demo | off      (default: qlxd.source from config)
+    TF_DAEMON_TF5_SOURCE   device | demo | off      (default: device if tf5.host is set)
     TF_DAEMON_LOG      log level                    (default: INFO)
 
 Must be served by exactly ONE worker process: the audio device is opened when
@@ -25,6 +26,7 @@ setup_logging(os.environ.get("TF_DAEMON_LOG", "INFO"))
 _cfg_path = os.environ.get("TF_DAEMON_CONFIG", "config.toml")
 _cfg = load_config(_cfg_path)
 _modules = build_modules(_cfg, os.environ.get("TF_DAEMON_SOURCE", "device").lower(), os.environ.get("TF_DAEMON_WAV"),
-                         os.environ.get("TF_DAEMON_RF_SOURCE"), os.environ.get("TF_DAEMON_QLXD_SOURCE"))
+                         os.environ.get("TF_DAEMON_RF_SOURCE"), os.environ.get("TF_DAEMON_QLXD_SOURCE"),
+                         os.environ.get("TF_DAEMON_TF5_SOURCE"))
 app = create_app(_cfg, _modules, config_path=_cfg_path)
 logging.getLogger(__name__).info("tf-daemon WSGI app ready")

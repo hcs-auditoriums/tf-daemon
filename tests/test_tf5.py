@@ -74,6 +74,10 @@ class FakeTF5:
 
     def drop_connections(self):
         for c in self.conns:
+            try:
+                c.shutdown(socket.SHUT_RDWR)   # close() alone may not send a FIN on Linux while _serve is in recv
+            except OSError:
+                pass
             c.close()
         self.conns.clear()
 
@@ -89,6 +93,20 @@ def wait_until(pred, timeout=5.0):
             return True
         time.sleep(0.05)
     raise AssertionError("condition not reached in time")
+
+
+def wait_settled(client, quiet=0.3, timeout=5.0):
+    """Wait until the initial read is all in: no new values for ``quiet`` s. Under load
+    replies keep arriving after the first names do, and would mix into a test's changes."""
+    deadline = time.time() + timeout
+    seq = client.snapshot()[0]
+    while time.time() < deadline:
+        time.sleep(quiet)
+        new = client.snapshot()[0]
+        if new == seq:
+            return
+        seq = new
+    raise AssertionError("client never settled")
 
 
 def test_patch_entries():
@@ -252,6 +270,8 @@ def test_change_feed(console):
     client.start()
     try:
         wait_until(lambda: client.names().get(1) == "Lead Vox")
+        wait_until(lambda: client.mixes()[7] == "DRUM")
+        wait_settled(client)
         seq, snap = client.snapshot()
         assert snap["type"] == "tf5" and snap["channels"][1]["params"]["Label/Name"]["value"] == "Lead Vox"
         assert client.changes_since(seq) == (seq, {})  # nothing new
@@ -288,6 +308,7 @@ def test_desk_changes_reach_the_page_over_the_websocket(console):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         wait_until(lambda: modules[1].client.names().get(1) == "Lead Vox")
+        wait_settled(modules[1].client)
         ws = Client.connect(f"ws://127.0.0.1:{srv.server_port}/ws/audio")
         msgs = []
 

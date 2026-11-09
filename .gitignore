@@ -22,3 +22,5 @@ config.toml.keep
 .update.env
 .update.tmp
 .update.json.tmp
+# dev-container / demo-mode scratch state
+.dev/

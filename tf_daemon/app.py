@@ -23,6 +23,7 @@ from .rf.engine import RangeHint, RFEngine, fit_span
 from .rf.module import RFModule
 from .system import register_system
 from .tf5 import TF5Module
+from .tf5sim import SimConsole
 from .vocal import VocalModule
 
 log = logging.getLogger(__name__)
@@ -60,8 +61,13 @@ def build_rf_device(kind: str) -> RFDevice:
 
 
 def build_modules(cfg: dict[str, Any], source_kind: str, wav_path: str | None = None,
-                  rf_source: str | None = None, qlxd_source: str | None = None) -> list[Module]:
-    """``rf_source`` / ``qlxd_source`` override ``rf.source`` / ``qlxd.source``; ``"off"`` disables."""
+                  rf_source: str | None = None, qlxd_source: str | None = None,
+                  tf5_source: str | None = None) -> list[Module]:
+    """``rf_source`` / ``qlxd_source`` override ``rf.source`` / ``qlxd.source``; ``"off"`` disables.
+
+    ``tf5_source``: ``"device"`` (the console at ``tf5.host``; the default when it is
+    set), ``"demo"`` (a simulated TF5 in-process, EQ read and write on) or ``"off"``.
+    """
     source = build_source(cfg, source_kind, wav_path)
     modules: list[Module] = [AudioModule(AudioEngine(cfg, source))]
 
@@ -75,7 +81,18 @@ def build_modules(cfg: dict[str, Any], source_kind: str, wav_path: str | None = 
         modules.append(RFModule(RFEngine(cfg, build_rf_device(rf_kind), range_hint=receiver_range(qlxd))))
     if qlxd is not None:
         modules.append(QLXDModule(qlxd))
-    if str(cfg["tf5"]["host"]).strip():
+    tf5_kind = (tf5_source or ("device" if str(cfg["tf5"]["host"]).strip() else "off")).lower()
+    if tf5_kind not in ("device", "demo", "off"):
+        raise SourceError(f"unknown tf5 source {tf5_kind!r} (expected device, demo or off)")
+    if tf5_kind == "device" and not str(cfg["tf5"]["host"]).strip():
+        raise SourceError("tf5 source 'device' needs tf5.host")
+    if tf5_kind == "demo":
+        sim = SimConsole()
+        modules.append(sim)
+        demo = {**cfg["tf5"], "host": sim.host, "port": sim.rcp_port, "eq_port": sim.eq_port,
+                "eq": True, "eq_write": True}
+        modules.append(TF5Module({**cfg, "tf5": demo}, modules[0].engine))
+    elif tf5_kind == "device":
         modules.append(TF5Module(cfg, modules[0].engine))
     if cfg["vocal"]["enabled"]:
         modules.append(VocalModule(cfg, modules[0].engine))

@@ -1,0 +1,3 @@
+# The dev image only needs pyproject.toml; the code is bind-mounted (compose.yaml).
+*
+!pyproject.toml
