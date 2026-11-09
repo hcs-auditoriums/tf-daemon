@@ -8,7 +8,7 @@ import socket
 import time
 
 import pytest
-from editor_fakes import FakeEditorConsole, build_dump, default_mixing_values, mixing_tree, set_param, wait_until
+from editor_fakes import SimEditor, build_dump, default_mixing_values, mixing_tree, set_param, wait_until
 from helpers import make_config
 
 from tf_daemon.app import build_modules, create_app
@@ -26,7 +26,7 @@ FREQ_2 = "InputChannel:3/PEQ/Bank/Band:1/Frequency"
 
 @pytest.fixture
 def console():
-    fake = FakeEditorConsole()
+    fake = SimEditor()
     yield fake
     fake.close()
 
@@ -117,7 +117,7 @@ def test_write_refuses_anything_else(console, client_for, path, value):
 
 
 def test_unconfirmed_write_is_reported():
-    fake = FakeEditorConsole(echo_writes=False)
+    fake = SimEditor(echo_writes=False)
     c = TFEditorClient("127.0.0.1", fake.port, writes=True)
     c.start()
     try:
@@ -270,7 +270,7 @@ def test_no_writes_when_eq_write_is_off(console):
 
 
 def test_not_applied_with_one_knob_on_or_to_a_bus():
-    fake = FakeEditorConsole({**default_mixing_values(), "InputChannel:3/PEQ/Bank/OneKnob/On": 1})
+    fake = SimEditor({**default_mixing_values(), "InputChannel:3/PEQ/Bank/OneKnob/On": 1})
     app, vm, _ = _vocal_app(fake)
     try:
         assert "1-knob" in vm.apply_blocker(3)

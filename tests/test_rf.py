@@ -3,12 +3,12 @@ import time
 
 import numpy as np
 import pytest
-from helpers import make_config
+from helpers import make_config, wait_until
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError, load_config
 from tf_daemon.rf import engine as engine_mod
-from tf_daemon.rf.devices import DemoDevice, RFDeviceError, TinySADevice, basic_input_for, parse_scan
+from tf_daemon.rf.devices import RFDeviceError, SimTinySA, TinySADevice, basic_input_for, parse_scan
 from tf_daemon.rf.engine import RFEngine, SweepSettings, fit_span
 
 
@@ -79,7 +79,7 @@ def test_rf_module_end_to_end_with_demo():
 
 def test_points_limited_to_device_maximum():
     cfg = load_config(None)
-    dev = DemoDevice()
+    dev = SimTinySA()
     dev.max_points = 290  # what an original (non-Ultra) tinySA reports
     engine = RFEngine(cfg.rf, dev)
     engine.connect()
@@ -100,7 +100,7 @@ def test_rf_off_and_sweep_failure():
     cfg = make_config()
     assert [m.name for m in build_modules(cfg)] == ["audio"]
 
-    class Flaky(DemoDevice):
+    class Flaky(SimTinySA):
         def sweep(self, *a):
             raise RFDeviceError("USB unplugged")
 
@@ -135,7 +135,7 @@ def test_original_tinysa_input_follows_the_range():
 
 
 def test_engine_selects_input_on_every_start():
-    class TwoInput(DemoDevice):
+    class TwoInput(SimTinySA):
         name = "tinysa"
         inputs: list = []
 
@@ -175,30 +175,21 @@ def auto_cfg(monkeypatch):
     return make_config(rf={"auto_connect": True, "interval_s": 0.1}).rf
 
 
-def _until(pred, timeout=5.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if pred():
-            return
-        time.sleep(0.02)
-    raise AssertionError("condition not met in time")
-
-
 def test_auto_mode_connects_and_sweeps_the_receiver_range(auto_cfg):
     hint = [(480_000_000, 610_000_000)]
-    dev = DemoDevice()
+    dev = SimTinySA()
     dev.max_points = 290
     engine = RFEngine(auto_cfg, dev, range_hint=lambda: hint[0])
     engine.start()
     try:
-        _until(lambda: engine.status()["sweeps"] >= 2)
+        wait_until(lambda: engine.status()["sweeps"] >= 2)
         st = engine.status()
         assert st["connected"] and st["scanning"] and st["auto"]
         assert (st["settings"]["start_hz"], st["settings"]["stop_hz"], st["settings"]["points"]) == \
             (480_000_000, 610_000_000, 290)
 
         hint[0] = (470_000_000, 610_000_000)  # a receiver was added: auto range follows
-        _until(lambda: engine.status()["settings"]["start_hz"] == 470_000_000)
+        wait_until(lambda: engine.status()["settings"]["start_hz"] == 470_000_000)
 
         engine.stop_scan(by_user=True)  # a user's Stop is respected...
         time.sleep(0.3)
@@ -215,13 +206,13 @@ def test_auto_mode_connects_and_sweeps_the_receiver_range(auto_cfg):
         time.sleep(0.3)
         assert not engine.status()["connected"]
         engine.connect(by_user=True)
-        _until(lambda: engine.status()["scanning"])
+        wait_until(lambda: engine.status()["scanning"])
     finally:
         engine.stop()
 
 
 def test_auto_mode_waits_for_and_recovers_the_device(auto_cfg):
-    class Unpluggable(DemoDevice):
+    class Unpluggable(SimTinySA):
         present, fail_next = False, False
 
         def open(self):
@@ -239,15 +230,15 @@ def test_auto_mode_waits_for_and_recovers_the_device(auto_cfg):
     engine = RFEngine(auto_cfg, dev)  # no receivers: falls back to the configured range
     engine.start()
     try:
-        _until(lambda: engine.status()["error"] is not None)
+        wait_until(lambda: engine.status()["error"] is not None)
         assert not engine.status()["connected"]  # keeps retrying while absent
 
         dev.present = True
-        _until(lambda: engine.status()["sweeps"] >= 1)
+        wait_until(lambda: engine.status()["sweeps"] >= 1)
         assert engine.status()["settings"]["start_hz"] == auto_cfg.start_hz
 
         n = engine.status()["sweeps"]
         dev.fail_next = True  # yanked mid-sweep: closed, reopened, sweeping again
-        _until(lambda: engine.status()["sweeps"] > n + 1 and engine.status()["error"] is None)
+        wait_until(lambda: engine.status()["sweeps"] > n + 1 and engine.status()["error"] is None)
     finally:
         engine.stop()

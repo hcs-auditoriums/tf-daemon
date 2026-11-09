@@ -21,7 +21,7 @@ from .console.sim import SimConsole
 from .modules import Module
 from .qlxd.engine import QLXDEngine
 from .qlxd.module import QLXDModule
-from .rf.devices import DemoDevice, RFDevice, TinySADevice
+from .rf.devices import RFDevice, SimTinySA, TinySADevice
 from .rf.engine import RangeHint, RFEngine, fit_span
 from .rf.module import RFModule
 from .system import register_system
@@ -70,7 +70,7 @@ def build_modules(cfg: Config) -> list[Module]:
 def _rf_module(cfg: Config, qlxd: QLXDEngine | None) -> RFModule | None:
     if cfg.rf.source == "off":
         return None
-    device: RFDevice = TinySADevice() if cfg.rf.source == "device" else DemoDevice()
+    device: RFDevice = TinySADevice() if cfg.rf.source == "device" else SimTinySA()
     return RFModule(RFEngine(cfg.rf, device, range_hint=receiver_range(qlxd)))
 
 

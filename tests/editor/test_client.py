@@ -9,7 +9,7 @@ from editor_fakes import (
     CAPTURED_NAMES,
     PASSWORD,
     PUSHES,
-    FakeEditorConsole,
+    SimEditor,
     assert_read_only,
     set_param,
     wait_until,
@@ -214,7 +214,7 @@ def test_scene_recall_dump_replaces_the_data(console, client_for):
 
 def test_falls_back_without_on_set_client_type(client_for, monkeypatch):
     monkeypatch.setattr(editor_client, "CLIENT_TYPE_WAIT_S", 0.3)
-    fake = FakeEditorConsole(send_on_set_client_type=False)
+    fake = SimEditor(send_on_set_client_type=False)
     try:
         client = client_for(fake)
         wait_until(lambda: client.synced)
@@ -226,7 +226,7 @@ def test_falls_back_without_on_set_client_type(client_for, monkeypatch):
 
 def test_no_mixing_dump_times_out_and_retries(client_for, monkeypatch):
     monkeypatch.setattr(editor_client, "SYNC_TIMEOUT_S", 0.5)
-    fake = FakeEditorConsole(send_mixing_dump=False)
+    fake = SimEditor(send_mixing_dump=False)
     try:
         client = client_for(fake)
         wait_until(lambda: client.connects >= 2, timeout=8)
@@ -238,7 +238,7 @@ def test_no_mixing_dump_times_out_and_retries(client_for, monkeypatch):
 
 
 def test_unknown_firmware_descriptor_is_reported(client_for):
-    fake = FakeEditorConsole(mixing_md5="00112233445566778899aabbccddeeff")
+    fake = SimEditor(mixing_md5="00112233445566778899aabbccddeeff")
     try:
         client = client_for(fake)
         wait_until(lambda: client.synced)

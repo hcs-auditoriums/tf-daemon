@@ -6,7 +6,7 @@
 * SimRCP: the console side of RCP (console/rcp.py): answers ``prminfo`` / ``get`` with a
   plausible service's channel list and pushes ``NOTIFY set`` when a fader moves
   "on the desk".
-* FakeEditorConsole: the console side of the TF Editor handshake recorded from TF
+* SimEditor: the console side of the TF Editor handshake recorded from TF
   Editor (guides/tf5_api.md, section 6), with synthetic MMSXLIT dumps. It applies
   and echoes set-params like the TF5, so "Apply to desk" works against it, and
   records every frame the client sends so tests can check that nothing but
@@ -225,7 +225,7 @@ def console_hash(func: str, md5: str | None = None) -> bytes:
 
 # ---------------------------------------------------------------------- fake console
 
-class FakeEditorConsole:
+class SimEditor:
     """Console side of TCP 50368. Records everything the client sends in ``received``."""
 
     def __init__(self, mixing_values: dict[str, int | str] | None = None, *, send_on_set_client_type: bool = True,
@@ -546,7 +546,7 @@ class SimConsole:
     def __init__(self, host: str = "127.0.0.1", rcp_port: int = 0, eq_port: int = 0, drift_s: float = 4.0) -> None:
         self.host = host
         self.rcp = SimRCP(host=host, port=rcp_port, drift_s=drift_s)
-        self.editor = FakeEditorConsole(demo_mixing_values(), host=host, port=eq_port)
+        self.editor = SimEditor(demo_mixing_values(), host=host, port=eq_port)
         self.rcp_port, self.eq_port = self.rcp.port, self.editor.port
         log.info("Simulated TF5 on %s: RCP port %d, TF Editor port %d", host, self.rcp_port, self.eq_port)
 

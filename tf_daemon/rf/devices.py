@@ -5,7 +5,7 @@ one float32 array of levels in dBm. Calls come from a single thread at a time
 (the engine serializes them).
 
 * TinySADevice  - a tinySA over USB serial, via the optional ``tsapython`` package.
-* DemoDevice    - synthetic noise floor plus a few carriers; no hardware needed.
+* SimTinySA    - synthetic noise floor plus a few carriers; no hardware needed.
 """
 
 from __future__ import annotations
@@ -152,7 +152,7 @@ def basic_input_for(start_hz: int, stop_hz: int) -> str:
         f"{BASIC_LOW_MAX_HZ / 1e6:g} MHz, HIGH from {BASIC_HIGH_MIN_HZ / 1e6:g} MHz; pick a range within one")
 
 
-class DemoDevice(RFDevice):
+class SimTinySA(RFDevice):
     name = "demo"
 
     def __init__(self, seed: int | None = None) -> None:

@@ -1,7 +1,7 @@
 """Fixtures for the TF Editor protocol tests."""
 
 import pytest
-from editor_fakes import FakeEditorConsole, build_dump, default_mixing_values, mixing_tree
+from editor_fakes import SimEditor, build_dump, default_mixing_values, mixing_tree
 
 from tf_daemon.console.editor.client import TFEditorClient
 from tf_daemon.console.editor.codec import DESC_MD5
@@ -15,7 +15,7 @@ def mixing():
 
 @pytest.fixture
 def console():
-    fake = FakeEditorConsole()
+    fake = SimEditor()
     yield fake
     fake.close()
 

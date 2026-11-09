@@ -19,7 +19,7 @@ write ad-hoc fakes or plan how to test against real devices; this is the recipe:
 5. For a new feature, add a unit test next to the existing ones, and a check in
    `tests/test_live.py` if it shows up in the running app.
 
-Test doubles live in `tf_daemon/console/sim.py` (TF5 RCP + TF Editor), `tf_daemon/qlxd/simulator.py`,
+Test doubles live in `tf_daemon/console/sim.py` (TF5 RCP + TF Editor), `tf_daemon/qlxd/sim.py`,
 the RF demo device in `tf_daemon/rf/devices.py` and the synth source in
 `tf_daemon/audio/sources.py`. Reuse and extend those, don't make new ones. Tests use
 ephemeral ports and `tmp_path`, so they are safe in parallel. Keep it that way.

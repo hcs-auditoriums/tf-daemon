@@ -14,6 +14,7 @@ Routes:
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import asdict
 from typing import Any
 
@@ -93,11 +94,6 @@ class RFModule:
 
         @sock.route("/ws/rf")
         def ws_rf(ws):
-            seq = 0  # the hub always holds a snapshot, so the first wait returns at once
-            try:
-                while True:
-                    seq, payload = engine.hub.wait(seq, timeout=1.0)
-                    if payload is not None:
-                        ws.send(payload)
-            except ConnectionClosed:
-                pass
+            # The hub always holds a full state snapshot, so a new client gets it at once.
+            with contextlib.suppress(ConnectionClosed):
+                engine.hub.stream(ws.send)

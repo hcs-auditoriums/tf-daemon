@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from typing import Any
 
 from tf_daemon.config import Config, config_from
@@ -18,3 +20,14 @@ def make_config(**sections: Any) -> Config:
     for name, value in sections.items():
         data[name] = {**data.get(name, {}), **value} if isinstance(value, dict) else value
     return config_from(data)
+
+
+def wait_until(pred: Callable[[], Any], timeout: float = 6.0) -> bool:
+    """Poll ``pred`` until it is true (then True) or ``timeout`` s pass (AssertionError).
+    Tests wait for a condition like this, never for a fixed time."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pred():
+            return True
+        time.sleep(0.02)
+    raise AssertionError("condition not reached in time")
