@@ -47,6 +47,14 @@ class Transfer:
         self.frames = 0
         self.weight = 0.0
 
+    def restart(self) -> None:
+        """Forget the averages (e.g. the path changed: an EQ move), keeping the delay."""
+        self.sxx[:] = 0
+        self.syy[:] = 0
+        self.sxy[:] = 0
+        self.weight = 0.0
+        self.frames = 0
+
     @property
     def history_needed(self) -> int:
         """Samples of x / y history ``process`` needs (newest last)."""

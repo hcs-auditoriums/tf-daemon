@@ -26,10 +26,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import numpy as np
 from flask import Blueprint, Flask, jsonify, request
 from flask_sock import Sock
 
 from ..config import VocalConfig
+from ..dsp.eq import eq_curve
 from .desk import DeskWriter
 from .ports import AudioInputs, DeskEQ
 from .session import MicChecks
@@ -44,8 +46,15 @@ class VocalModule:
                  mains: tuple[int, ...] = ()) -> None:
         self.engine = audio
         self.checks = MicChecks(audio, samplerate, inputs=set(cfg.inputs) or None, target_s=cfg.listen_s,
-                                max_cut_db=cfg.max_cut_db, max_boost_db=cfg.max_boost_db, mains=mains)
+                                max_cut_db=cfg.max_cut_db, max_boost_db=cfg.max_boost_db, mains=mains,
+                                house_mic=cfg.house_mic if cfg.house_mic >= 0 else None,
+                                tilt_db_oct=cfg.room_tilt_db_oct, eq_curve=self._eq_curve)
         self.desk = DeskWriter(desk, self.checks.result)
+
+    def _eq_curve(self, index: int, freqs: np.ndarray) -> np.ndarray | None:
+        """The channel EQ on the desk now for ``index``, at ``freqs`` (dB); None if unknown."""
+        eq = self.desk.current_eq(index)
+        return None if eq is None else eq_curve(eq, freqs)
 
     def snapshot(self) -> dict[str, Any]:
         sessions = {}
@@ -59,6 +68,7 @@ class VocalModule:
             sessions[str(index)] = entry
         inputs = self.checks.inputs
         return {"enabled": True, "inputs": sorted(inputs) if inputs is not None else None,
+                "house_mic": self.checks.house_mic,
                 "listen_s": self.checks.target_s, "sessions": sessions,
                 "can_write": self.desk.writable() is not None, **self.desk.history()}
 

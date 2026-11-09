@@ -11,6 +11,18 @@ Two kinds of session per input:
 
 Rings count towards a suggestion (as narrow cuts) when they're on this input, or
 when this input is the strongest source of a ring on the mains.
+
+With a house mic (``vocal.house_mic``) both kinds also measure the mic against it,
+and the suggestion aims at the voice as the room hears it (room.py).
+
+Live, the suggestion is a model that keeps being revised as data comes in: each
+analysis uses everything heard so far (weighted to the last minute), measured
+through the EQ on the desk now, so once a suggestion is applied the next round
+sees its effect and corrects what the prediction got wrong. ``model`` in the
+result says how much the suggestion moved since the last revision (settled once
+three in a row move less than SETTLED_DB), how far the voice is from the target
+now and how far it would be after the suggestion; ``mains`` says whether the
+mains follow the desk EQ (if not, something else in the path shapes the sound).
 """
 
 from __future__ import annotations
@@ -18,12 +30,15 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import deque
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
 
 from .ports import AudioInputs
-from .tone import analyze
+from .room import room_correction
+from .tone import POINTS, analyze
 from .transfer import Transfer
 from .voice import VoiceCollector
 
@@ -33,19 +48,54 @@ LIVE_MEMORY_S = 60.0     # live: how much recent speech the spectrum and mains c
 LIVE_EVERY_S = 3.0       # live: re-analyze after this much new speech
 LIVE_MIN_S = 8.0         # live: first suggestion after this much speech
 MIN_MAINS_COHERENCE = 0.5
+SETTLED_DB = 1.0         # live: a suggestion that moves less than this, three times running, has settled
+MAINS_MISMATCH_DB = 3.0  # mains shape vs desk EQ shape: more than this is worth saying
+EQ_CHECK_HOPS = 20       # look at the channel EQ on the desk about once a second
 
 
 class _Session:
-    def __init__(self, samplerate: int, target_s: float, live: bool = False) -> None:
+    def __init__(self, samplerate: int, target_s: float, live: bool = False, house: bool = False) -> None:
         self.live = live
-        self.collector = VoiceCollector(samplerate, memory_s=LIVE_MEMORY_S if live else None)
-        self.mains = Transfer(samplerate, max_delay_s=0.1, memory_s=LIVE_MEMORY_S) if live else None
+        memory = LIVE_MEMORY_S if live else None
+        self.collector = VoiceCollector(samplerate, memory_s=memory)
+        self.mains = Transfer(samplerate, max_delay_s=0.1, memory_s=memory) if live else None
+        self.house = Transfer(samplerate, max_delay_s=0.25, memory_s=memory) if house else None
         self.target_s = target_s
         self.state = "live" if live else "listening"   # listening | live | done | error
         self.started = time.time()
         self.finished: float | None = None
         self.result: dict[str, Any] | None = None
         self.analyzed_at = 0.0   # speech_s at the last live analysis
+        self.revisions = 0
+        self.eq_seen: np.ndarray | None = None   # the channel EQ the transfers were measured through
+        self.hops = 0
+        self._last_curve: np.ndarray | None = None
+        self._changes: deque[float] = deque(maxlen=3)
+
+    def revise(self, result: dict[str, Any], eq_now: np.ndarray | None) -> None:
+        """Track how the suggestion evolves and what it predicts (adds ``result["model"]``)."""
+        if not result.get("ok"):
+            return
+        # The suggested bands over the analysis range (not the HPF's far-low tail).
+        curve = np.asarray(result["after"], dtype=float) - np.asarray(result["deviation"], dtype=float)
+        change = None
+        if self._last_curve is not None and len(self._last_curve) == len(curve):
+            change = float(np.max(np.abs(curve - self._last_curve)))
+            self._changes.append(change)
+        self._last_curve = curve
+        self.revisions += 1
+        points = np.asarray(result["points"])
+        ref = (points >= 200) & (points <= 6300)
+        dev = np.asarray(result["deviation"]) + (eq_now if eq_now is not None else 0.0)
+        after = np.asarray(result["after"])
+        rms = lambda d: round(float(np.sqrt(np.mean((d[ref] - np.median(d[ref])) ** 2))), 1)   # noqa: E731
+        result["model"] = {
+            "revision": self.revisions,
+            "change_db": None if change is None else round(change, 1),
+            "settled": len(self._changes) == 3 and max(self._changes) < SETTLED_DB,
+            "off_now_db": rms(dev),           # how far the voice is from the target with the desk EQ now
+            "off_after_db": rms(after),       # ... and with the suggestion instead
+        }
 
     @property
     def running(self) -> bool:
@@ -58,13 +108,18 @@ class MicChecks:
     session runs, its input (and the mains) are kept analyzed by the engine."""
 
     def __init__(self, audio: AudioInputs, samplerate: int, *, inputs: set[int] | None, target_s: float,
-                 max_cut_db: float, max_boost_db: float, mains: tuple[int, ...] = ()) -> None:
+                 max_cut_db: float, max_boost_db: float, mains: tuple[int, ...] = (), house_mic: int | None = None,
+                 tilt_db_oct: float = 0.0,
+                 eq_curve: Callable[[int, np.ndarray], np.ndarray | None] = lambda index, freqs: None) -> None:
         self.engine = audio
         self.inputs = inputs
         self.target_s = target_s
         self.max_cut_db = max_cut_db
         self.max_boost_db = max_boost_db
         self.mains = tuple(mains)
+        self.house_mic = house_mic
+        self.tilt_db_oct = tilt_db_oct
+        self._eq_curve = eq_curve   # the channel EQ on the desk now, at given freqs (dB)
         self._fs = samplerate
         self._lock = threading.Lock()
         self._sessions: dict[int, _Session] = {}
@@ -77,12 +132,13 @@ class MicChecks:
     def start(self, index: int, live: bool = False) -> None:
         if not self.allowed(index):
             raise ValueError(f"input {index + 1} isn't listed in vocal.inputs")
-        held = [index, *(self.mains if live else ())]
+        house = self.house_mic if self.house_mic is not None and self.house_mic != index else None
+        held = [index, *(self.mains if live else ()), *([house] if house is not None else [])]
         for i in held:
             self.engine.acquire(i)  # keep them analyzed even if the page looks elsewhere
         with self._lock:
             self._release_locked(index)
-            self._sessions[index] = _Session(self._fs, self.target_s, live)
+            self._sessions[index] = _Session(self._fs, self.target_s, live, house is not None)
             self._held[index] = held
         log.info("Vocal %s started on input %d (%s)", "live listening" if live else "mic check", index + 1,
                  self.engine.inputs[index].label)
@@ -130,9 +186,15 @@ class MicChecks:
             if x is None or not s.running:
                 continue
             speech = self.tap(index, x, stream_t)
-            if s.mains is not None and speech and all(m in frames for m in self.mains) and self.mains:
-                y = np.mean([frames[m] for m in self.mains], axis=0)
-                s.mains.process(x, y)
+            s.hops += 1
+            if s.hops % EQ_CHECK_HOPS == 1 and (s.mains is not None or s.house is not None):
+                self._follow_eq(index, s)
+            if not speech:
+                continue
+            if s.mains is not None and self.mains and all(m in frames for m in self.mains):
+                s.mains.process(x, np.mean([frames[m] for m in self.mains], axis=0))
+            if s.house is not None and self.house_mic in frames:
+                s.house.process(x, frames[self.house_mic])
 
     def tap(self, index: int, samples: Any, stream_t: float) -> bool:
         """Feed one hop of ``index``'s samples to its session; True if it was speech."""
@@ -145,10 +207,22 @@ class MicChecks:
         elif s.live and s.collector.speech_s >= LIVE_MIN_S and s.collector.speech_s - s.analyzed_at >= LIVE_EVERY_S:
             s.analyzed_at = s.collector.speech_s
             result = self._analyze(index, s)
+            s.revise(result, self._eq_curve(index, POINTS))
             with self._lock:
                 if self._sessions.get(index) is s and s.state == "live":
                     s.result = result
         return speech
+
+    def _follow_eq(self, index: int, s: _Session) -> None:
+        """When the channel EQ changes, the mic -> mains / house paths change: start their
+        averages over, so they never mix sound from before and after the move."""
+        curve = self._eq_curve(index, POINTS)
+        eq = curve if curve is not None else np.zeros(len(POINTS))   # unknown: taken as flat
+        if s.eq_seen is not None and not np.allclose(eq, s.eq_seen, atol=0.05):
+            for t in (s.mains, s.house):
+                if t is not None:
+                    t.restart()
+        s.eq_seen = eq
 
     def rings_for(self, index: int) -> list[dict[str, Any]]:
         """Recurring or live rings this input causes: on the input itself, or with it as the
@@ -163,14 +237,19 @@ class MicChecks:
         return out
 
     def _analyze(self, index: int, s: _Session) -> dict[str, Any]:
+        room_db, room = None, None
         try:
+            if s.house is not None:
+                room_db, room = room_correction(s.house, POINTS, self._eq_curve(index, POINTS))
             result = analyze(s.collector, self.rings_for(index), max_cut_db=self.max_cut_db,
-                             max_boost_db=self.max_boost_db)
+                             max_boost_db=self.max_boost_db, room_db=room_db, tilt_db_oct=self.tilt_db_oct)
         except Exception as e:  # never break the analysis thread over a suggestion
             log.exception("Vocal analysis failed")
             result = {"ok": False, "error": f"analysis failed: {e}"}
         if s.mains is not None:
-            result["mains"] = mains_check(s.mains)
+            result["mains"] = mains_check(s.mains, self._eq_curve(index, POINTS))
+        if room is not None:
+            result["room"] = room
         return result
 
     def _finish(self, index: int, s: _Session) -> None:
@@ -188,8 +267,9 @@ class MicChecks:
                  f"{len(result.get('bands', []))} band(s)" if result.get("ok") else result.get("error"))
 
 
-def mains_check(t: Transfer) -> dict[str, Any]:
-    """Is the voice in the mains? From the mic -> mains transfer over the voice band."""
+def mains_check(t: Transfer, eq_db: np.ndarray | None = None) -> dict[str, Any]:
+    """Is the voice in the mains? From the mic -> mains transfer over the voice band. With
+    the desk EQ curve (``eq_db`` at POINTS), also whether the mains follow its shape."""
     summary = t.summary()
     coh = summary["coherence"]
     if summary["delay_ms"] is None:
@@ -200,4 +280,24 @@ def mains_check(t: Transfer) -> dict[str, Any]:
                                  else "the voice is mixed with a lot else in the mains")
     else:
         verdict, note = "ok", f"in the mains at {summary['gain_db']:+.1f} dB re the mic"
+        mismatch = _eq_mismatch(t, eq_db)
+        summary["eq_mismatch_db"] = mismatch
+        if mismatch is not None and mismatch > MAINS_MISMATCH_DB:
+            verdict = "differs"
+            note += (f"; its tone differs from the desk EQ by up to {mismatch:.0f} dB "
+                     "(dynamics, a bus EQ or another channel in the path?)")
     return {**summary, "verdict": verdict, "note": note}
+
+
+def _eq_mismatch(t: Transfer, eq_db: np.ndarray | None) -> float | None:
+    """Largest difference (dB) between the measured mic -> mains shape and the desk EQ's,
+    over the voice band where the measurement is clean."""
+    if eq_db is None:
+        return None
+    gain, coh = t.bands(POINTS, 1 / 3)
+    good = (coh >= 0.7) & ~np.isnan(gain) & (POINTS >= 200) & (POINTS <= 6300)
+    if good.sum() < 6:
+        return None
+    measured, expected = gain[good], np.asarray(eq_db)[good]
+    d = (measured - np.median(measured)) - (expected - np.median(expected))
+    return round(float(np.max(np.abs(d))), 1)

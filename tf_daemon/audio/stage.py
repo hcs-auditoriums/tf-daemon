@@ -52,6 +52,9 @@ TALKER_COLOURS = [
 ]
 # The PA -> mic path: where this stage wants to ring first (freq, gain dB, Q).
 LEAK_RESONANCES = [(820.0, 6.0, 8.0), (2480.0, 8.0, 10.0)]
+# What the PA and the room do to sound reaching the house mic (kind, freq, gain dB, Q):
+# a boomy low-mid build-up and a dull top end.
+ROOM_COLOUR = [("bell", 300.0, 6.0, 1.2), ("high_shelf", 5000.0, -5.0, 0.7)]
 
 
 class DeskMix(Protocol):
@@ -94,6 +97,7 @@ class StageSettings:
     turn_s: tuple[float, float] = (6.0, 12.0)
     seed: int = 1
     colours: list[list[tuple[float, float, float]]] = field(default_factory=lambda: TALKER_COLOURS)
+    room_colour: list[tuple[str, float, float, float]] = field(default_factory=lambda: ROOM_COLOUR)
 
 
 def fir_from_db(db: np.ndarray, taps: int) -> np.ndarray:
@@ -207,6 +211,11 @@ class StageSource(_PacedSource):
             tail[: int(0.005 * fs)] = 0.0                       # first reflections after ~5 ms
             tail *= 0.5 * math.sqrt(0.5 / max(float(np.sum(tail ** 2)), 1e-12))   # reverb ~ -3 dB re the direct
             h[self._direct_delay:] += tail
+            if s.room_colour:   # the PA and the room's colour, as heard at the house mic
+                freqs = np.fft.rfftfreq(EQ_TAPS, 1 / fs)
+                freqs[0] = freqs[1] / 2
+                colour = sum((section_db(k, f, g, q, freqs, fs) for k, f, g, q in s.room_colour), np.zeros(len(freqs)))
+                h = np.convolve(h, fir_from_db(colour, EQ_TAPS))
             self._room = _FFTConv(h, blocksize)
             self._house_noise_pos = int(self._rng.integers(0, len(self._noise)))
         self.mains_peak = 0.0

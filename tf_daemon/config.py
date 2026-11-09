@@ -281,10 +281,16 @@ class VocalConfig(Section):
     listen_s: float = 20.0        # seconds of speech to collect
     max_cut_db: float = 6.0
     max_boost_db: float = 3.0
+    house_mic: int = -1           # input of a measurement mic in the house; -1 = none
+    room_tilt_db_oct: float = 0.0  # in-room target: reference speech tilted by this (dB / octave re 1 kHz)
 
     def validate(self) -> None:
         if not all(isinstance(i, int) and not isinstance(i, bool) and i >= 0 for i in self.inputs):
             raise ConfigError("vocal.inputs must be a list of input indices (0-based)")
+        if not -1 <= self.house_mic <= 127:
+            raise ConfigError("vocal.house_mic must be an input index (0-based) or -1")
+        if not -3 <= self.room_tilt_db_oct <= 3:
+            raise ConfigError("vocal.room_tilt_db_oct must be between -3 and 3")
         if not 6 <= self.listen_s <= 120:
             raise ConfigError("vocal.listen_s must be between 6 and 120")
         if not 1 <= self.max_cut_db <= 12 or not 0 <= self.max_boost_db <= 6:

@@ -8,11 +8,18 @@ from helpers import make_config
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError, load_config
-from tf_daemon.vocal.tone import ANSI_FREQS, ANSI_NORMAL, analyze, bell_db
+from tf_daemon.vocal.tone import ANSI_FREQS, ANSI_NORMAL, analyze
 from tf_daemon.vocal.voice import VoiceCollector
 
 FS, HOP, N = 48000, 2400, 4096
 
+
+
+def bell_db(freqs, f0, gain_db, q):
+    """A peaking filter (RBJ analog prototype), to give test voices a colour."""
+    s = 1j * np.asarray(freqs, dtype=float) / f0
+    a = 10 ** (gain_db / 40)
+    return 20 * np.log10(np.abs((s * s + s * (a / q) + 1) / (s * s + s / (a * q) + 1)))
 
 def shape(x, gain_db):
     """Apply a magnitude response (dB as a function of Hz) to the whole signal."""

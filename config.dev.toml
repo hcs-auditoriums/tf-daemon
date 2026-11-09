@@ -13,6 +13,7 @@ state_file = ".dev/qlxd_state.json"   # keep dev edits out of the real state fil
 [vocal]
 enabled = true
 inputs = [0, 1]
+house_mic = 31        # the simulated stage's house mic (see [[channels]] below)
 
 # --demo: the named inputs are talkers on the simulated stage (they take turns).
 [[channels]]

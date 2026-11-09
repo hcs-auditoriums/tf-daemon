@@ -75,7 +75,7 @@ def test_the_house_mic_hears_the_mains_after_the_room_delay():
     n = 1 << 18
     xc = np.fft.irfft(np.fft.rfft(house[-n:]) * np.conj(np.fft.rfft(mains[-n:])))
     lag = int(np.argmax(xc[:FS // 10]))
-    assert abs(lag - round(12.0 / 343.0 * FS)) <= 2   # 12 m at 343 m/s
+    assert abs(lag - round(12.0 / 343.0 * FS + 256)) <= 2   # 12 m at 343 m/s, + the room colour's latency
 
 
 def test_talkers_take_turns():

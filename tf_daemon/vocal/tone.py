@@ -45,6 +45,7 @@ from typing import Any
 
 import numpy as np
 
+from ..dsp.eq import BUTTERWORTH_Q, FS, section_db
 from .voice import VoiceCollector
 
 # ANSI S3.5-1997 Table 3: standard speech spectrum level, normal vocal effort
@@ -72,23 +73,33 @@ def _name(table: Sequence[tuple[float, float, str]], f: float) -> str:
     return next(n for lo, hi, n in table if lo <= f < hi)
 
 
+# Bands are modelled with the desk's own filter maths (dsp/eq.py, TF Editor's), so
+# what the suggestion predicts is what the TF5 does once it's applied. (Its bell is
+# wider at a given Q than the textbook one, and its width depends on the gain.)
+
 def bell_db(freqs: np.ndarray, f0: float, gain_db: float, q: float) -> np.ndarray:
-    """Magnitude (dB) of an analog peaking EQ (RBJ prototype) at ``freqs``."""
-    s = 1j * np.asarray(freqs, dtype=float) / f0
-    a = 10 ** (gain_db / 40)
-    h = (s * s + s * (a / q) + 1) / (s * s + s / (a * q) + 1)
-    return 20 * np.log10(np.abs(h))
+    """The TF5's peaking EQ band: magnitude (dB) at ``freqs``."""
+    return section_db("bell", f0, gain_db, q, np.asarray(freqs, dtype=float), FS)
 
 
-def hpf_db(freqs: np.ndarray, f0: float, order: int = 2) -> np.ndarray:
-    """Butterworth high-pass magnitude (dB), 6 dB/octave per order."""
-    return -10 * np.log10(1 + (f0 / np.asarray(freqs, dtype=float)) ** (2 * order))
+def hpf_db(freqs: np.ndarray, f0: float) -> np.ndarray:
+    """The TF5's channel high-pass (12 dB/octave): magnitude (dB) at ``freqs``."""
+    return section_db("hpf", f0, 0.0, BUTTERWORTH_Q, np.asarray(freqs, dtype=float), FS)
 
 
-def q_for_octaves(n: float) -> float:
-    """Q of a bell whose half-gain points are ``n`` octaves apart."""
-    r = 2.0 ** n
-    return math.sqrt(r) / (r - 1)
+def q_for_octaves(n: float, gain_db: float) -> float:
+    """Q of a TF5 bell of ``gain_db`` whose half-gain points are ``n`` octaves apart."""
+    grid = 1000.0 * 2.0 ** np.linspace(-4, 4, 1601)
+
+    def width(q: float) -> float:
+        above = np.abs(bell_db(grid, 1000.0, gain_db, q)) >= abs(gain_db) / 2
+        return float(np.log2(grid[above][-1] / grid[above][0])) if above.any() else 0.0
+
+    lo, hi = math.log(0.1), math.log(20.0)   # wider at lower Q: bisect on log Q
+    for _ in range(30):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if width(math.exp(mid)) > n else (lo, mid)
+    return math.exp((lo + hi) / 2)
 
 
 def _band_levels(collector: VoiceCollector, centres: np.ndarray, width_oct: float) -> np.ndarray:
@@ -105,13 +116,14 @@ def _band_levels(collector: VoiceCollector, centres: np.ndarray, width_oct: floa
     return out
 
 
-def _difference(collector: VoiceCollector) -> np.ndarray:
-    """Measured minus target (dB) at POINTS, before levelling."""
+def _difference(collector: VoiceCollector, tilt_db_oct: float = 0.0) -> np.ndarray:
+    """Measured minus target (dB) at POINTS, before levelling. ``tilt_db_oct`` tilts the
+    target (reference speech) about 1 kHz."""
     # 1/3-octave averaging: smooths the voice's harmonic comb (which ripples
     # +-2 dB in narrower bands) while costing well under 1 dB on the
     # octave-wide build-ups that make a voice boxy or nasal.
     measured = _band_levels(collector, POINTS, 1 / 3)
-    target = np.interp(np.log(POINTS), np.log(ANSI_FREQS), ANSI_NORMAL)
+    target = np.interp(np.log(POINTS), np.log(ANSI_FREQS), ANSI_NORMAL) + tilt_db_oct * np.log2(POINTS / 1000.0)
     return measured - target
 
 
@@ -145,7 +157,6 @@ def _fit_bands(dev: np.ndarray, max_bands: int, max_cut: float, max_boost: float
                 resid[p] = 0.0
             continue
         octaves = max(np.log2(POINTS[hi] / POINTS[lo]) + 1 / 6, 1 / 3)
-        q = float(np.clip(q_for_octaves(octaves), 0.5, 4.0))
         fc = float(np.sqrt(POINTS[lo] * POINTS[hi])) if hi > lo else float(POINTS[p])
         if cut:
             gain = -min(round(resid[p] * 0.8 * 2) / 2, max_cut)
@@ -153,6 +164,7 @@ def _fit_bands(dev: np.ndarray, max_bands: int, max_cut: float, max_boost: float
             gain = min(round(-resid[p] * 0.6 * 2) / 2, max_boost)
         if abs(gain) < 1.0:
             break
+        q = float(np.clip(q_for_octaves(octaves, gain), 0.5, 4.0))
         if any(abs(math.log2(fc / b["freq"])) < 1 / 3 for b in bands):
             resid[lo:hi + 1] = 0.0  # already covered; don't stack bands
             continue
@@ -219,8 +231,13 @@ def _round_hpf(f: float) -> float:
 
 
 def analyze(collector: VoiceCollector, rings: list[dict[str, Any]] | None = None, *,
-            max_cut_db: float = 6.0, max_boost_db: float = 3.0, min_speech_s: float = 6.0) -> dict[str, Any]:
-    """Suggestions from a finished mic check (see the module docstring)."""
+            max_cut_db: float = 6.0, max_boost_db: float = 3.0, min_speech_s: float = 6.0,
+            room_db: np.ndarray | None = None, tilt_db_oct: float = 0.0) -> dict[str, Any]:
+    """Suggestions from a finished mic check (see the module docstring).
+
+    ``room_db`` (dB at POINTS, see room.py): what the PA and the room do to the voice
+    on its way to the listener, measured with a house mic. Added to the mic's
+    spectrum, so the suggestion aims at the voice as the room hears it."""
     prog = collector.progress()
     if collector.speech_s < min_speech_s:
         return {"ok": False, "error": f"only {collector.speech_s:.1f} s of speech heard; need at least "
@@ -237,7 +254,9 @@ def analyze(collector: VoiceCollector, rings: list[dict[str, Any]] | None = None
         f0_high = float(np.percentile(collector.f0s, 90))
         assert f0 is not None  # set under the same condition as f0_low
         fundamental = (POINTS >= 0.85 * f0_low) & (POINTS <= max(1.25 * f0, f0_high))
-    diff = _difference(collector)
+    diff = _difference(collector, tilt_db_oct)
+    if room_db is not None:
+        diff = diff + room_db
     ref = (POINTS >= NORM_LO) & (POINTS <= NORM_HI) & ~fundamental
 
     notches = _resonances(collector, f0)

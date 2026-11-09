@@ -85,6 +85,9 @@ export function renderVocal() {
                                   + (s.f0_hz ? ` · voice pitch ≈ ${Math.round(s.f0_hz)} Hz` : "")));
     const r = s.result || {};
     if (r.mains) items.push(el("p", r.mains.verdict === "weak" ? "vp-error" : "vp-note", `Mains: ${r.mains.note}`));
+    if (r.room) items.push(el("p", "vp-note", `Room: ${r.room.note}`));
+    if (r.model) items.push(el("p", "vp-note", `${r.model.settled ? "Settled" : "Still settling"} · now ${r.model.off_now_db} dB `
+                                              + `from the target, ${r.model.off_after_db} dB with this suggestion`));
     if (r.ok) items.push(...suggestionItems(s, r, label, row, button));
     else items.push(el("p", "vp-note", r.error && s.speech_s >= 8 ? r.error : "First suggestion after about 8 s of speech…"));
     items.push(row(button("Stop", () => vocalPost("stop"), true), button("Clear", () => vocalPost("clear"))));
@@ -101,6 +104,9 @@ export function renderVocal() {
       items.push(el("p", "vp-error", r.error || "No result."));
     } else {
       if (r.mains) items.push(el("p", r.mains.verdict === "weak" ? "vp-error" : "vp-note", `Mains: ${r.mains.note}`));
+    if (r.room) items.push(el("p", "vp-note", `Room: ${r.room.note}`));
+    if (r.model) items.push(el("p", "vp-note", `${r.model.settled ? "Settled" : "Still settling"} · now ${r.model.off_now_db} dB `
+                                              + `from the target, ${r.model.off_after_db} dB with this suggestion`));
       items.push(...suggestionItems(s, r, label, row, button));
     }
     items.push(row(button("Listen again", () => vocalPost("start"), true),

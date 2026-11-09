@@ -133,7 +133,24 @@ nasality is how a person talks), and the reference is an average voice, so treat
 the result as a starting point for your ears. It analyzes the mic before the EQ
 and dynamics, so compression isn't included.
 
+**Listen live** keeps listening while the person talks instead of stopping
+after 20 s: the suggestion follows the last minute of speech and updates every
+few seconds, and the panel says whether the voice reaches the **mains** (and at
+what gain re the mic), measured by comparing the mic with the mains. Rings that
+this mic causes (on the mic itself, or with it as the strongest source of a ring
+on the mains) become narrow cuts in the suggestion.
+
+**With a house mic** (`house_mic`: a measurement mic in the audience area on a
+desk input, patched to USB), the suggestion aims at the voice *as the room hears
+it*: the mic is compared with the house mic (like Smaart's transfer function,
+using the voice itself as the test signal), the channel EQ already on the desk is
+taken out, and what's left (the PA and the room) is added to the analysis. Only
+frequencies where the house mic clearly hears this voice count; if too few do, it
+says so and suggests from the mic alone.
+
 `[vocal]`: `enabled`, `inputs` (0-based inputs that are vocal mics; `[]` = any),
-`listen_s` (20), `max_cut_db` (6), `max_boost_db` (3). API: `GET /api/vocal/status`,
-`POST /api/vocal/start|stop|clear` `{"channel": n}`, `POST /api/vocal/apply|undo`
-`{"channel": n, "confirm": true}`.
+`listen_s` (20), `max_cut_db` (6), `max_boost_db` (3), `house_mic` (-1 = none),
+`room_tilt_db_oct` (0: the in-room target is the reference speech spectrum; tilt
+it for taste). API: `GET /api/vocal/status`,
+`POST /api/vocal/start|stop|clear` `{"channel": n}` (start also takes `"live": true`),
+`POST /api/vocal/apply|undo` `{"channel": n, "confirm": true}`.

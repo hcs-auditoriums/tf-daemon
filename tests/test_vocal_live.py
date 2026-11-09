@@ -8,7 +8,7 @@ import pytest
 from tf_daemon.audio.stage import FlatDesk, StageSettings, StageSource
 from tf_daemon.config import Channel
 from tf_daemon.dsp.ring import RingLog
-from tf_daemon.vocal.session import MicChecks
+from tf_daemon.vocal.session import MAINS_MISMATCH_DB, MicChecks
 
 FS, BLOCK, HOP, FRAME = 48000, 1200, 2400, 32768
 
@@ -102,3 +102,112 @@ def test_a_mains_ring_this_mic_feeds_becomes_a_notch_candidate():
     eng.rings.set_sources(32, 2480.0, [(0, "In 1", -20.0), (5, "In 6", -40.0)], "level")
     assert any(abs(r["freq"] - 2480.0) < 20 for r in checks.rings_for(0))
     assert checks.rings_for(5) == []   # not the strongest source
+
+
+def _room_run(house, leak=-30.0, gain=None):
+    st = StageSettings(talkers=[0], mains=(32, 33), house_mic=31, pa_leak_db=leak, turn_s=(600.0, 600.0),
+                       colours=[[]])   # a neutral voice: whatever needs fixing is the room's
+    src = StageSource(34, BLOCK, st, Desk(0.0))
+    eng = OfflineEngine(src, analyzed=[0, 31, 32, 33])
+    if gain is not None:   # what reaches the house mic (e.g. nearly nothing)
+        orig = src._fill
+
+        def fill(block):
+            orig(block)
+            block[:, 31] *= gain
+            block[:, 31] += np.random.default_rng(0).standard_normal(len(block)) * 0.05
+        src._fill = fill
+    checks = MicChecks(eng, FS, inputs=None, target_s=20.0, max_cut_db=6.0, max_boost_db=3.0, mains=(32, 33),
+                       house_mic=31 if house else None)
+    checks.start(0, live=True)
+    eng.run(40.0)
+    return checks.result(0)
+
+
+def test_a_house_mic_aims_the_suggestion_at_the_room():
+    """The simulated room is boomy around 300 Hz; the voice itself is neutral."""
+    low_cut = lambda r: any(b["gain"] < 0 and 150 <= b["freq"] <= 450 for b in r["bands"])   # noqa: E731
+    mic_only, room = _room_run(False), _room_run(True)
+    assert not low_cut(mic_only) and "room" not in mic_only
+    assert room["room"]["used"] and room["room"]["coherence"] > 0.5
+    assert room["room"]["delay_ms"] == pytest.approx((12.0 / 343.0 + 2 * 256 / FS) * 1000, abs=1.0)
+    assert low_cut(room), room["bands"]
+
+
+def test_a_house_mic_that_barely_hears_the_voice_is_not_used():
+    r = _room_run(True, gain=0.001)
+    assert r["ok"] and not r["room"]["used"]
+
+
+class EqDesk(Desk):
+    """A desk whose channel EQ the test sets (as Apply would); the stage hears it."""
+
+    def __init__(self):
+        super().__init__(0.0)
+        self.eq = None
+        self.hidden = None   # EQ the stage applies but the desk doesn't report (e.g. a bus EQ)
+
+    def channel_eq(self, x):
+        return self.hidden or self.eq
+
+
+def eq_from(result):
+    """The desk EQ a suggestion asks for (what Apply sets)."""
+    flat = {"type": "bell", "on": True, "gain": 0.0, "q": 1.0}
+    homes = (("L", 125.0), ("LM", 800.0), ("HM", 2500.0), ("H", 8000.0))
+    bands = {lbl: {**flat, "label": lbl, "freq": f} for lbl, f in homes}
+    for b in result["bands"]:
+        bands[b["band"]] = {**flat, "label": b["band"], "freq": b["freq"], "gain": b["gain"], "q": b["q"]}
+    hpf = result.get("hpf")
+    return {"on": True, "bank": "PRECISE", "one_knob": False, "bands": list(bands.values()),
+            "hpf": {"on": True, "freq": hpf["freq"], "slope": 12} if hpf else None}
+
+
+def _closed_loop(desk):
+    from tf_daemon.dsp.eq import eq_curve
+    st = StageSettings(talkers=[0], mains=(32, 33), house_mic=31, pa_leak_db=-30.0, turn_s=(600.0, 600.0),
+                       colours=[[(240.0, 6.0, 1.2)]])
+    eng = OfflineEngine(StageSource(34, BLOCK, st, desk), analyzed=[0, 31, 32, 33])
+    checks = MicChecks(eng, FS, inputs=None, target_s=20.0, max_cut_db=6.0, max_boost_db=3.0, mains=(32, 33),
+                       house_mic=31, eq_curve=lambda i, f: eq_curve(desk.eq, f) if desk.eq else None)
+    checks.start(0, live=True)
+    return eng, checks
+
+
+def test_the_live_model_settles_then_converges_once_applied():
+    desk = EqDesk()
+    eng, checks = _closed_loop(desk)
+    eng.run(45.0)
+    before = checks.result(0)
+    m = before["model"]
+    assert m["revision"] >= 5 and m["settled"], m
+    assert m["off_after_db"] < m["off_now_db"]
+    desk.eq = eq_from(before)          # Apply
+    eng.run(70.0)                      # past the 60 s memory: the model now only knows the EQ'd sound
+    after = checks.result(0)["model"]
+    assert after["off_now_db"] < m["off_now_db"]                      # the voice got closer to the target
+    assert after["off_now_db"] == pytest.approx(m["off_after_db"], abs=1.5)   # about as predicted
+    assert after["settled"]           # and it doesn't keep chasing its own change
+
+
+def test_the_mains_check_notices_eq_the_desk_does_not_report():
+    desk = EqDesk()
+    desk.hidden = eq_from({"bands": [{"band": "LM", "freq": 1000.0, "gain": 8.0, "q": 1.0}], "hpf": None})
+    eng, checks = _closed_loop(desk)   # the desk reports a flat channel EQ...
+    checks._eq_curve = lambda i, f: np.zeros(len(f))
+    eng.run(30.0)
+    mains = checks.result(0)["mains"]  # ...but the mains carry +8 dB at 1 kHz
+    assert mains["verdict"] == "differs" and mains["eq_mismatch_db"] > MAINS_MISMATCH_DB
+
+
+def test_the_measurements_restart_only_when_the_desk_eq_changes():
+    desk = EqDesk()
+    eng, checks = _closed_loop(desk)
+    eng.run(10.0)
+    s = dict(checks.sessions())[0]
+    frames = s.house.frames
+    eng.run(3.0)
+    assert s.house.frames > frames            # no EQ change: keeps averaging
+    desk.eq = eq_from({"bands": [{"band": "L", "freq": 240.0, "gain": -6.0, "q": 1.2}], "hpf": None})
+    eng.run(1.5)
+    assert s.house.frames < frames and s.house.delay is not None   # started over, delay kept
