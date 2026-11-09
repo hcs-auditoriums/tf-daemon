@@ -62,3 +62,47 @@ def test_no_editing_without_eq_write(rig):
     assert c.get("/api/tf5/eq/0").get_json()["writable"] is False
     r = c.put("/api/tf5/eq/0", json={"changes": [[GAIN, -450]], "confirm": True})
     assert r.status_code == 400 and "eq_write" in r.get_json()["error"]
+
+
+# ---------------------------------------------------------------- the sidebar's fader and ON (PUT /api/tf5/fader)
+
+
+def test_a_person_sets_the_fader_and_on_switch(rig):
+    c, tf5 = rig()
+    assert c.get("/api/tf5/eq/0").get_json()["fader_writable"] is True  # demo: tf5.fader_write on
+    r = c.put("/api/tf5/fader/0", json={"level": -1250, "confirm": True}).get_json()
+    assert r["ok"] and all(x["confirmed"] for x in r["results"])
+    wait_until(lambda: tf5.fader(0)["level"] == -1250 and tf5.fader(0)["rcp_level"] == -1250)  # RCP follows
+    r = c.put("/api/tf5/fader/0", json={"on": 0, "confirm": True}).get_json()
+    assert r["ok"]
+    wait_until(lambda: tf5.fader(0)["on"] == 0 and tf5.fader(0)["rcp_on"] == 0)
+    assert c.put("/api/tf5/fader/0", json={"on": 1, "level": -32768, "confirm": True}).get_json()["ok"]
+    wait_until(lambda: tf5.fader(0) == {"level": -32768, "on": 1, "rcp_level": -32768, "rcp_on": 1})
+
+
+@pytest.mark.parametrize(
+    "usb, body, error",
+    [
+        (0, {"level": -1000}, "confirm"),
+        (0, {"confirm": True}, "level"),
+        (0, {"level": "-10", "confirm": True}, "level"),
+        (0, {"on": 2, "confirm": True}, "level"),
+        (0, {"on": True, "confirm": True}, "level"),
+        (0, {"level": 1100, "confirm": True}, "outside"),  # above +10 dB
+        (32, {"level": 0, "confirm": True}, "input channel"),  # the stereo bus: never
+    ],
+)
+def test_refused_fader_sets(rig, usb, body, error):
+    c, tf5 = rig()
+    before = tf5.fader(0)
+    r = c.put(f"/api/tf5/fader/{usb}", json=body)
+    assert r.status_code == 400 and error in r.get_json()["error"], r.get_json()
+    assert tf5.fader(0) == before
+
+
+def test_no_fader_from_the_page_without_fader_write(rig):
+    c, tf5 = rig()
+    tf5.eq_client.fader_writes = False  # as with tf5.fader_write = false
+    assert c.get("/api/tf5/eq/0").get_json()["fader_writable"] is False
+    r = c.put("/api/tf5/fader/0", json={"level": -1000, "confirm": True})
+    assert r.status_code == 400 and "fader_write" in r.get_json()["error"]

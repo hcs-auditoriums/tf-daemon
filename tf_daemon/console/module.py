@@ -44,6 +44,9 @@ class TF5Module:
       PUT /api/tf5/eq/<usb>   {"changes": [[path, raw value], ...], "confirm": true}: SET that channel's EQ
                               (the page's EQ editing: a person dragging a band or typing a value; needs
                               tf5.eq_write; paths relative to the channel, e.g. "PEQ/Bank/Band:0/Gain")
+      PUT /api/tf5/fader/<usb> {"level": raw | omitted, "on": 0 | 1 | omitted, "confirm": true}: SET that
+                              input channel's fader (dB x 100, -32768 = -inf) and / or on switch (the
+                              sidebar's fader and ON button: a person's drag or click; needs tf5.fader_write)
     """
 
     name = "tf5"
@@ -138,7 +141,8 @@ class TF5Module:
 
     def write_fader(self, usb: int, level: int | None = None, on: int | None = None) -> list[dict[str, Any]]:
         """SET the fader level (raw) and / or on switch of the input channel on USB input
-        ``usb``. Only for a ring-out a person started (see TFEditorClient.write)."""
+        ``usb``. Only for a person's drag / click in the sidebar, or a ring-out a person
+        started (see TFEditorClient.write)."""
         target, ec = self.eq_target(usb), self.eq_client
         if ec is None or not ec.fader_writes:
             raise PermissionError("moving faders is off (tf5.fader_write = false)")
@@ -167,6 +171,7 @@ class TF5Module:
             "connected": ec.connected,
             "synced": ec.synced,
             "writable": ec.writes and src is not None and src[0] == "InCh",  # the page may offer editing
+            "fader_writable": ec.fader_writes and src is not None and src[0] == "InCh",
             "eq": settings,
             "freqs": [round(float(f), 2) for f in CURVE_FREQS] if settings else [],
             "curve": [round(float(v), 2) for v in eq_curve(settings)] if settings else [],
@@ -217,6 +222,25 @@ class TF5Module:
             except (ConnectionError, OSError) as e:
                 return jsonify({"ok": False, "error": f"desk not reachable: {e}"}), 503
             log.info("EQ edited from the page on USB %d: %s", usb + 1, ", ".join(f"{p}={v}" for p, v in changes))
+            return jsonify({"ok": True, "results": results})
+
+        @bp.put("/fader/<int:usb>")
+        def fader_set(usb: int):
+            # Changes the desk: only a person's drag / click (the page sends confirm with each).
+            body = request.get_json(silent=True) or {}
+            if body.get("confirm") is not True:
+                return jsonify({"ok": False, "error": 'changing the desk needs "confirm": true'}), 400
+            level, on = body.get("level"), body.get("on")
+            ok_int = lambda v: v is None or (isinstance(v, int) and not isinstance(v, bool))  # noqa: E731
+            if not ok_int(level) or on not in (None, 0, 1) or isinstance(on, bool) or (level is None and on is None):
+                return jsonify({"ok": False, "error": 'body needs "level": <raw> and / or "on": 0 | 1'}), 400
+            try:
+                results = self.write_fader(usb, level=level, on=on)
+            except (ValueError, PermissionError) as e:
+                return jsonify({"ok": False, "error": str(e)}), 400
+            except (ConnectionError, OSError) as e:
+                return jsonify({"ok": False, "error": f"desk not reachable: {e}"}), 503
+            log.info("Fader set from the page on USB %d: level=%s on=%s", usb + 1, level, on)
             return jsonify({"ok": True, "results": results})
 
         app.register_blueprint(bp)

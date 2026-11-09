@@ -83,6 +83,7 @@ def test_eq_route(console):
             "connected": True,
             "synced": True,
             "writable": False,
+            "fader_writable": False,
             "eq": None,
             "freqs": [],
             "curve": [],

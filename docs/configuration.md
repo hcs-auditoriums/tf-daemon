@@ -52,6 +52,12 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   narrow screens) for the shown input: name and colour, on/off, a fader with its
   level, pan, and the channel's sends to the mixes (by mix name; stereo pairs
   shown once), FX 1/2 and mono. Only active sends are listed unless **all** is
+  ticked. With `tf5.fader_write` on, an input channel's **ON** button and **fader** work
+  from the page: click ON to switch the channel, drag the fader (it moves with the
+  pointer from where it is, never jumps to it; Shift for fine) or use the arrow keys
+  (1 dB, Shift 0.1 dB). Each change is sent to the desk at once (`PUT /api/tf5/fader/<usb>`
+  with `"confirm": true`); moving a fader of a mic that is being rung out hands the
+  ring-out back to you. Stereo bus, mixes and sends stay read-only.
   ticked. On connect the console's parameter list (`prminfo`) is read, and any
   input-channel gain / EQ / HPF / dynamics parameters it offers are shown too. A
   TF5 lists none of those (checked on the desk at tf5-daemon); its EQ comes from
