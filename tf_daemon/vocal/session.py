@@ -53,7 +53,7 @@ LIVE_MEMORY_S = 60.0     # live: how much recent speech the spectrum and mains c
 LIVE_EVERY_S = 3.0       # live: re-analyze after this much new speech
 LIVE_MIN_S = 8.0         # live: first suggestion after this much speech
 MIN_MAINS_COHERENCE = 0.5
-SETTLED_DB = 1.0         # live: a suggestion that moves less than this, three times running, has settled
+SETTLED_DB = 0.5         # live: a suggestion that moves less than this (RMS), three times running, has settled
 MAINS_MISMATCH_DB = 3.0  # mains shape vs desk EQ shape: more than this is worth saying
 EQ_CHECK_HOPS = 20       # look at the channel EQ on the desk about once a second
 IDLE_AFTER_S = 0.75      # a mic counts as idle (for the feedback leak) this long after its last speech
@@ -89,7 +89,9 @@ class _Session:
         curve = np.asarray(result["after"], dtype=float) - np.asarray(result["deviation"], dtype=float)
         change = None
         if self._last_curve is not None and len(self._last_curve) == len(curve):
-            change = float(np.max(np.abs(curve - self._last_curve)))
+            # RMS over the analysis range: a band nudged a few Hz along its steep flank shouldn't
+            # count as a new suggestion; a band that really moved or changed gain does.
+            change = float(np.sqrt(np.mean((curve - self._last_curve) ** 2)))
             self._changes.append(change)
         self._last_curve = curve
         self.revisions += 1
@@ -316,8 +318,8 @@ def mains_check(t: Transfer, eq_db: np.ndarray | None = None) -> dict[str, Any]:
 
 
 def _eq_mismatch(t: Transfer, eq_db: np.ndarray | None) -> float | None:
-    """Largest difference (dB) between the measured mic -> mains shape and the desk EQ's,
-    over the voice band where the measurement is clean."""
+    """How far (dB) the measured mic -> mains shape is from the desk EQ's, over the voice band
+    where the measurement is clean (90th percentile of the difference)."""
     if eq_db is None:
         return None
     gain, coh = t.bands(POINTS, 1 / 3)
@@ -326,4 +328,6 @@ def _eq_mismatch(t: Transfer, eq_db: np.ndarray | None) -> float | None:
         return None
     measured, expected = gain[good], np.asarray(eq_db)[good]
     d = (measured - np.median(measured)) - (expected - np.median(expected))
-    return round(float(np.max(np.abs(d))), 1)
+    # The 90th percentile, not the maximum: a real difference in tone is broad, while a single
+    # point can be thrown by a steady tone (a ring, hum) that correlates with itself.
+    return round(float(np.percentile(np.abs(d), 90)), 1)

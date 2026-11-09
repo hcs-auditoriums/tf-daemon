@@ -21,6 +21,11 @@ Checked against the simulated stage, whose loop is known exactly: the headroom
 matches to within ~0.3 dB at its resonances. Where the leak measurement is
 disturbed it reads *more* leak (less headroom) than there is, which only ever
 makes the boosts more cautious.
+
+A steady tone (a ring that's already there, hum, the demo's synthetic 2.5 kHz
+"ring") can't be measured through: a sine looks the same at every delay, so it
+correlates with itself and reads as leak. The headroom at its frequency reads
+low (the safe way); the ring detector and the fast loop of auto EQ deal with it.
 """
 
 from __future__ import annotations
