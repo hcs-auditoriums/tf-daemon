@@ -144,7 +144,7 @@ def _band_levels(collector: VoiceCollector, centres: np.ndarray, width_oct: floa
     return out
 
 
-def _difference(collector: VoiceCollector, tilt_db_oct: float = 0.0) -> np.ndarray:
+def _difference(collector: VoiceCollector, tilt_db_oct: float = 0.0, target_db: np.ndarray | None = None) -> np.ndarray:
     """Measured minus target (dB) at POINTS, before levelling. ``tilt_db_oct`` tilts the
     target (reference speech) about 1 kHz."""
     # 1/3-octave averaging: smooths the voice's harmonic comb (which ripples
@@ -152,6 +152,8 @@ def _difference(collector: VoiceCollector, tilt_db_oct: float = 0.0) -> np.ndarr
     # octave-wide build-ups that make a voice boxy or nasal.
     measured = _band_levels(collector, POINTS, 1 / 3)
     target = np.interp(np.log(POINTS), np.log(ANSI_FREQS), ANSI_NORMAL) + tilt_db_oct * np.log2(POINTS / 1000.0)
+    if target_db is not None:  # the mic type's and EQ style's adjustments (targets.py)
+        target = target + target_db
     return measured - target
 
 
@@ -166,13 +168,15 @@ def _fit_bands(
     skip: np.ndarray | None = None,
     cut_thr: float = 3.0,
     boost_thr: float = 3.0,
+    cut_scale: float = 1.0,
+    boost_range: tuple[float, float] = (2000.0, 8000.0),
 ) -> list[dict[str, Any]]:
     """``skip``: points where no cut may be centred (the voice's fundamental, notches)."""
     resid = dev.copy()
     bands: list[dict[str, Any]] = []
     no_cut = np.zeros(len(POINTS), dtype=bool) if skip is None else skip
     for _ in range(max_bands):
-        boostable = (POINTS >= 2000) & (POINTS <= 8000)
+        boostable = (POINTS >= boost_range[0]) & (POINTS <= boost_range[1]) & (max_boost > 0)
         score = np.where((resid > cut_thr) & ~no_cut, resid, 0.0)
         score = np.maximum(score, np.where(boostable & (resid < -boost_thr), -resid, 0.0))
         if score.max() <= 0:
@@ -197,7 +201,7 @@ def _fit_bands(
         octaves = max(np.log2(POINTS[hi] / POINTS[lo]) + 1 / 6, 1 / 3)
         fc = float(np.sqrt(POINTS[lo] * POINTS[hi])) if hi > lo else float(POINTS[p])
         if cut:
-            gain = -min(round(resid[p] * 0.8 * 2) / 2, max_cut)
+            gain = -min(round(resid[p] * 0.8 * cut_scale * 2) / 2, max_cut)
         else:
             gain = min(round(-resid[p] * 0.6 * 2) / 2, max_boost)
             if boost_cap is not None and gain > (limit := boost_cap(fc)):
@@ -277,21 +281,23 @@ def _resonances(collector: VoiceCollector, f0: float | None, limit: int = 2) -> 
     ]
 
 
-def _assign_slots(moves: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Give each move a TF5 PEQ band, keeping frequency order, preferring each band's home range."""
+def _assign_slots(moves: list[dict[str, Any]], free: Sequence[str] | None = None) -> list[dict[str, Any]]:
+    """Give each move a TF5 PEQ band, keeping frequency order, preferring each band's home
+    range. ``free``: the bands that may be used (default: all)."""
     moves = sorted(moves, key=lambda m: m["freq"])
+    slots = [sl for sl in SLOTS if free is None or sl[0] in free]
 
     def outside(s: int, f: float) -> float:  # octaves outside the band's home range
-        lo, hi = SLOTS[s][1], SLOTS[s][2]
+        lo, hi = slots[s][1], slots[s][2]
         return 0.0 if lo <= f <= hi else abs(math.log2(f / (lo if f < lo else hi)))
 
     best, best_cost = None, math.inf
-    for combo in itertools.combinations(range(len(SLOTS)), len(moves)):
+    for combo in itertools.combinations(range(len(slots)), len(moves)):
         cost = sum(outside(s, m["freq"]) for s, m in zip(combo, moves, strict=True))
         if cost < best_cost:
             best, best_cost = combo, cost
     for s, m in zip(best or (), moves, strict=False):  # best is None when nothing fits
-        m["band"] = SLOTS[s][0]
+        m["band"] = slots[s][0]
     return moves
 
 
@@ -309,8 +315,20 @@ def analyze(
     room_db: np.ndarray | None = None,
     tilt_db_oct: float = 0.0,
     boost_cap: Callable[[float], float] | None = None,
+    target_db: np.ndarray | None = None,
+    cut_scale: float = 1.0,
+    boost_range: tuple[float, float] = (2000.0, 8000.0),
+    hpf_ratio: float = 0.75,
+    hpf_min_hz: float = 60.0,
+    reserved: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any]:
     """Suggestions from a finished mic check (see the module docstring).
+
+    ``target_db`` (dB at POINTS), ``cut_scale``, ``boost_range``, ``hpf_ratio``,
+    ``hpf_min_hz``: the mic type's and EQ style's settings (targets.tone_options).
+    ``reserved``: bands already in use that must stay as they are (ring-out notches:
+    ``{"band", "freq", "gain", "q"}``). The suggestion uses the other bands only,
+    boosts nothing near them, and counts them in its predicted curve.
 
     ``room_db`` (dB at POINTS, see room.py): what the PA and the room do to the voice
     on its way to the listener, measured with a house mic. Added to the mic's
@@ -339,13 +357,20 @@ def analyze(
         f0_high = float(np.percentile(collector.f0s, 90))
         assert f0 is not None  # set under the same condition as f0_low
         fundamental = (POINTS >= 0.85 * f0_low) & (POINTS <= max(1.25 * f0, f0_high))
-    diff = _difference(collector, tilt_db_oct)
+    diff = _difference(collector, tilt_db_oct, target_db)
     if room_db is not None:
         diff = diff + room_db
     ref = (POINTS >= NORM_LO) & (POINTS <= NORM_HI) & ~fundamental
 
-    notches = _resonances(collector, f0)
+    free = [sl[0] for sl in SLOTS if sl[0] not in {r["band"] for r in reserved}]
+
+    def near_reserved(f: float, octaves: float) -> bool:
+        return any(abs(math.log2(f / r["freq"])) < octaves for r in reserved)
+
+    notches = [n for n in _resonances(collector, f0) if not near_reserved(n["freq"], 1 / 12)]
     for r in rings or []:
+        if near_reserved(float(r["freq"]), 1 / 12):
+            continue  # already notched
         if not any(abs(math.log2(r["freq"] / n["freq"])) < 1 / 12 for n in notches):
             notches.append(
                 {
@@ -358,11 +383,20 @@ def analyze(
                     "kind": "notch",
                 }
             )
-    notches = notches[:2]
+    notches = notches[: min(2, len(free))]
+    if reserved:  # nothing boosted near a band kept for a ring
+        inner_cap = boost_cap
+
+        def cap_near_reserved(freq: float) -> float:
+            if near_reserved(freq, 1 / 3):
+                return 0.0
+            return float("inf") if inner_cap is None else inner_cap(freq)
+
+        boost_cap = cap_near_reserved
     # No broad cut centred on the voice's own fundamental (that energy *is* the
     # voice; the standard spectrum averages low and high voices) or on a notch.
     skip = fundamental.copy()
-    for n in notches:
+    for n in [*notches, *reserved]:
         skip |= np.abs(np.log2(POINTS / n["freq"])) <= 1 / 4
     # Level and fit together: start low (the 35th percentile, so build-ups that
     # cover much of the range still stand out), fit, then re-level so the median
@@ -373,23 +407,25 @@ def analyze(
         capped: list[str] = []
         broad = _fit_bands(
             dev_raw,
-            max_bands=4 - len(notches),
+            max_bands=len(free) - len(notches),
             max_cut=max_cut_db,
             max_boost=max_boost_db,
             skip=skip,
             boost_cap=boost_cap,
             capped=capped,
+            cut_scale=cut_scale,
+            boost_range=boost_range,
         )
-        eq = sum((bell_db(POINTS, b["freq"], b["gain"], b["q"]) for b in broad), np.zeros(len(POINTS)))
+        eq = sum((bell_db(POINTS, b["freq"], b["gain"], b["q"]) for b in [*broad, *reserved]), np.zeros(len(POINTS)))
         new_off = float(np.median((diff + eq)[ref]))
         if abs(new_off - off) < 0.1:
             break
         off = new_off
-    moves = _assign_slots(broad + notches)
+    moves = _assign_slots(broad + notches, free)
 
     hpf: dict[str, Any] | None = None
     if f0_low:
-        freq = _round_hpf(min(max(0.75 * f0_low, 60.0), 180.0))
+        freq = _round_hpf(min(max(hpf_ratio * f0_low, hpf_min_hz), 180.0))
         hpf = {
             "band": "HPF",
             "type": "hpf",
@@ -399,7 +435,7 @@ def analyze(
 
     curve = np.zeros(len(CURVE))
     after = dev_raw.copy()
-    for m in moves:
+    for m in [*moves, *reserved]:
         curve += bell_db(CURVE, m["freq"], m["gain"], m["q"])
         after += bell_db(POINTS, m["freq"], m["gain"], m["q"])
     if hpf:
@@ -431,6 +467,7 @@ def analyze(
         "notes": notes,
         "hpf": hpf,
         "bands": moves,
+        "reserved": [dict(r) for r in reserved],
         "points": [round(float(f), 1) for f in POINTS],
         "deviation": [round(float(d), 2) for d in dev_raw],
         "after": [round(float(d), 2) for d in after],

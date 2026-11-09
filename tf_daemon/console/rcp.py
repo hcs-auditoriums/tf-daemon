@@ -417,6 +417,20 @@ class TF5Client:
             "mixes": mixes,
         }
 
+    def fader(self, usb: int) -> tuple[int, int] | None:
+        """(raw fader level, on) of the channel on USB input ``usb`` as RCP last reported it;
+        None when unknown."""
+        src = self.patch[usb] if 0 <= usb < len(self.patch) else None
+        if src is None:
+            return None
+        with self._lock:
+            on = self._values.get((src[0], src[1], "Fader/On", 0))
+            level = self._values.get((src[0], src[1], "Fader/Level", 0))
+        try:
+            return None if on is None or level is None else (int(level), int(on))
+        except ValueError:
+            return None
+
     def gains(self) -> dict[int, float | None]:
         """Per USB input whose channel state is known: fader dB, or None if off or at -inf."""
         out: dict[int, float | None] = {}

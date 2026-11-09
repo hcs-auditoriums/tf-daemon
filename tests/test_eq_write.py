@@ -130,6 +130,58 @@ def test_write_refuses_anything_else(console, client_for, path, value):
     assert sent_sets(console) == [] and console.writes == []
 
 
+FADER_1 = "InputChannel:3/Fader/Level"
+
+
+@pytest.mark.parametrize(
+    "path,value",
+    [
+        ("Stereo:0/Fader/Level", -1000),  # the bus: never
+        ("Mix:0/Fader/Level", -1000),  # a mix: never
+        (FADER_1, 1001),  # above +10 dB
+        (FADER_1, -32769),
+        ("InputChannel:3/Fader/On", 2),
+    ],
+)
+def test_fader_writes_only_input_faders_within_range(console, client_for, path, value):
+    c = client_for(console, writes=True, fader_writes=True)
+    with pytest.raises(ValueError):
+        c.write([(path, value)])
+    assert sent_sets(console) == [] and console.writes == []
+
+
+def test_fader_writes_need_their_own_flag(console, client_for):
+    c = client_for(console, writes=True)  # EQ writes only
+    assert not c.status()["fader_writes"]
+    with pytest.raises(ValueError):
+        c.write([(FADER_1, -1000)])
+    assert sent_sets(console) == []
+    assert not TFEditorClient("127.0.0.1", 9, fader_writes=True).fader_writes  # and never without writes
+    f = client_for(console, writes=True, fader_writes=True)
+    res = f.write([("InputChannel:3/Fader/On", 0), (FADER_1, -32768)])
+    assert all(r["confirmed"] for r in res) and console.writes == [("InputChannel:3/Fader/On", 0), (FADER_1, -32768)]
+
+
+def test_sim_console_moves_the_fader_rcp_and_the_stage_hear():
+    from tf_daemon.console.sim import RCP_PREFIX, SimConsole
+
+    sim = SimConsole(drift_s=0)
+    c = TFEditorClient("127.0.0.1", sim.eq_port, writes=True, fader_writes=True)
+    c.start()
+    try:
+        assert wait_until(lambda: c.synced)
+        level = c.get("InputChannel:0/Fader/Level")
+        assert str(level) == sim.rcp.values[(RCP_PREFIX["InCh"] + "Fader/Level", 0, 0)]  # one desk
+        c.write([("InputChannel:0/Fader/Level", -700)])
+        assert sim.rcp.values[(RCP_PREFIX["InCh"] + "Fader/Level", 0, 0)] == "-700" and sim.fader_db(0) == -7.0
+        assert 0 in sim.rcp.held  # the demo's random drift leaves it alone now
+        sim.rcp.set(RCP_PREFIX["InCh"] + "Fader/On", 0, 0, "0")  # "on the desk"
+        assert wait_until(lambda: c.get("InputChannel:0/Fader/On") == 0)  # editor clients see it too
+    finally:
+        c.stop()
+        sim.close()
+
+
 def test_unconfirmed_write_is_reported():
     fake = SimEditor(echo_writes=False)
     c = TFEditorClient("127.0.0.1", fake.port, writes=True)
@@ -323,3 +375,31 @@ def test_not_applied_with_one_knob_on_or_to_a_bus():
     finally:
         app.extensions["tf_stop"]()
         fake.close()
+
+
+def test_eq_routes_never_reach_a_fader_even_with_fader_writes_on():
+    from tf_daemon.console.sim import SimConsole
+
+    sim = SimConsole(drift_s=0)
+    cfg = make_config(
+        tf5={
+            "host": "127.0.0.1",
+            "port": sim.rcp_port,
+            "eq_port": sim.eq_port,
+            "eq": True,
+            "eq_write": True,
+            "fader_write": True,
+        }
+    )
+    tf5 = next(m for m in build_modules(cfg) if m.name == "tf5")
+    tf5.start()
+    try:
+        assert wait_until(lambda: tf5.eq_client.synced)
+        with pytest.raises(ValueError, match="EQ parameter"):
+            tf5.write_eq(0, [("Fader/Level", 0)])
+        with pytest.raises(ValueError, match="EQ parameter"):
+            tf5.write_eq(0, [("Fader/On", 0)])
+        assert sim.editor.writes == []
+    finally:
+        tf5.stop()
+        sim.close()

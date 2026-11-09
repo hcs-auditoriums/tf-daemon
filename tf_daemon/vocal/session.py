@@ -12,6 +12,10 @@ Two kinds of session per input:
 Rings count towards a suggestion (as narrow cuts) when they're on this input, or
 when this input is the strongest source of a ring on the mains.
 
+Each session has a mic type and an EQ style (targets.py) that shape what the
+suggestion aims at, and may have reserved bands (ring-out notches, ringout.py)
+that the suggestion leaves alone.
+
 With a house mic (``vocal.house_mic``) both kinds also measure the mic against it,
 and the suggestion aims at the voice as the room hears it (room.py).
 
@@ -43,6 +47,7 @@ import numpy as np
 from .feedback import Feedback, boost_cap
 from .ports import AudioInputs
 from .room import room_correction
+from .targets import tone_options
 from .tone import POINTS, analyze
 from .transfer import Transfer
 from .voice import VoiceCollector
@@ -60,8 +65,19 @@ IDLE_AFTER_S = 0.75  # a mic counts as idle (for the feedback leak) this long af
 
 
 class _Session:
-    def __init__(self, samplerate: int, target_s: float, live: bool = False, house: bool = False) -> None:
+    def __init__(
+        self,
+        samplerate: int,
+        target_s: float,
+        live: bool = False,
+        house: bool = False,
+        mic: str = "generic",
+        style: str = "speech",
+        reserved: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.live = live
+        self.mic, self.style = mic, style
+        self.reserved: list[dict[str, Any]] = list(reserved or [])  # bands to leave alone (ring-out notches)
         memory = LIVE_MEMORY_S if live else None
         self.collector = VoiceCollector(samplerate, memory_s=memory)
         self.mains = Transfer(samplerate, max_delay_s=0.1, memory_s=memory) if live else None
@@ -135,6 +151,8 @@ class MicChecks:
         house_mic: int | None = None,
         tilt_db_oct: float = 0.0,
         eq_curve: Callable[[int, np.ndarray], np.ndarray | None] = lambda index, freqs: None,
+        mic: str = "generic",
+        style: str = "speech",
     ) -> None:
         self.engine = audio
         self.inputs = inputs
@@ -144,6 +162,7 @@ class MicChecks:
         self.mains = tuple(mains)
         self.house_mic = house_mic
         self.tilt_db_oct = tilt_db_oct
+        self.default_mic, self.default_style = mic, style
         self._eq_curve = eq_curve  # the channel EQ on the desk now, at given freqs (dB)
         self._fs = samplerate
         self._lock = threading.Lock()
@@ -154,7 +173,17 @@ class MicChecks:
     def allowed(self, index: int) -> bool:
         return self.inputs is None or index in self.inputs
 
-    def start(self, index: int, live: bool = False) -> None:
+    def start(
+        self,
+        index: int,
+        live: bool = False,
+        *,
+        mic: str | None = None,
+        style: str | None = None,
+        reserved: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Start (or restart) a session. ``mic`` / ``style``: keys of targets.MIC_TYPES /
+        EQ_STYLES (default: the config's); ``reserved``: bands the suggestion must leave alone."""
         if not self.allowed(index):
             raise ValueError(f"input {index + 1} isn't listed in vocal.inputs")
         house = self.house_mic if self.house_mic is not None and self.house_mic != index else None
@@ -163,7 +192,15 @@ class MicChecks:
             self.engine.acquire(i)  # keep them analyzed even if the page looks elsewhere
         with self._lock:
             self._release_locked(index)
-            self._sessions[index] = _Session(self._fs, self.target_s, live, house is not None)
+            self._sessions[index] = _Session(
+                self._fs,
+                self.target_s,
+                live,
+                house is not None,
+                mic=mic or self.default_mic,
+                style=style or self.default_style,
+                reserved=reserved,
+            )
             self._held[index] = held
         log.info(
             "Vocal %s started on input %d (%s)",
@@ -198,6 +235,13 @@ class MicChecks:
         if s is None or s.state not in ("done", "live") or not (s.result or {}).get("ok"):
             return None
         return s.result
+
+    def set_reserved(self, index: int, reserved: list[dict[str, Any]]) -> None:
+        """Bands of ``index`` the suggestion must leave alone from now on (ring-out notches)."""
+        with self._lock:
+            s = self._sessions.get(index)
+            if s is not None:
+                s.reserved = [dict(r) for r in reserved]
 
     def sessions(self) -> list[tuple[int, _Session]]:
         with self._lock:
@@ -286,12 +330,13 @@ class MicChecks:
             result = analyze(
                 s.collector,
                 self.rings_for(index),
-                max_cut_db=self.max_cut_db,
-                max_boost_db=self.max_boost_db,
                 room_db=room_db,
                 tilt_db_oct=self.tilt_db_oct,
                 boost_cap=boost_cap(fb) if fb else None,
+                reserved=list(s.reserved),
+                **tone_options(s.mic, s.style, POINTS, max_cut_db=self.max_cut_db, max_boost_db=self.max_boost_db),
             )
+            result["mic"], result["style"] = s.mic, s.style
             if fb is not None:
                 result["feedback"] = fb
         except Exception as e:  # never break the analysis thread over a suggestion

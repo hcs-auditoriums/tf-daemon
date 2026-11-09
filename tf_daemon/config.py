@@ -293,8 +293,22 @@ class VocalConfig(Section):
     auto_allowed: bool = False  # allow auto EQ (still off until a person turns it on per channel)
     profiles_file: str = "eq_profiles.json"  # saved EQ profiles (e.g. per actor)
     room_tilt_db_oct: float = 0.0  # in-room target: reference speech tilted by this (dB / octave re 1 kHz)
+    mic_type: str = "generic"  # default mic type (vocal/targets.py MIC_TYPES); the page can pick per channel
+    eq_style: str = "speech"  # default EQ target (vocal/targets.py EQ_STYLES); the page can pick per channel
+    ringout_ceiling_db: float = 6.0  # ring-out: the highest it pushes a fader (dB) looking for feedback
+    ringout_margin_db: float = 6.0  # ring-out: faders end at least this far below where they rang
 
     def validate(self) -> None:
+        from .vocal.targets import EQ_STYLES, MIC_TYPES
+
+        if self.mic_type not in MIC_TYPES:
+            raise ConfigError(f"vocal.mic_type must be one of {', '.join(MIC_TYPES)}, got {self.mic_type!r}")
+        if self.eq_style not in EQ_STYLES:
+            raise ConfigError(f"vocal.eq_style must be one of {', '.join(EQ_STYLES)}, got {self.eq_style!r}")
+        if not -20 <= self.ringout_ceiling_db <= 10:
+            raise ConfigError("vocal.ringout_ceiling_db must be between -20 and 10")
+        if not 3 <= self.ringout_margin_db <= 15:
+            raise ConfigError("vocal.ringout_margin_db must be between 3 and 15")
         if not all(isinstance(i, int) and not isinstance(i, bool) and i >= 0 for i in self.inputs):
             raise ConfigError("vocal.inputs must be a list of input indices (0-based)")
         if not -1 <= self.house_mic <= 127:
@@ -323,6 +337,7 @@ class TF5Config(Section):
     eq: bool = False  # also read the EQ (TF Editor protocol, read-only) for the spectrum overlay
     eq_port: int = 50368
     eq_write: bool = False  # let a person apply suggested EQ to the desk (vocal assist "Apply to desk")
+    fader_write: bool = False  # also input faders / on (the vocal assist's ring-out session; needs eq_write)
 
     def validate(self) -> None:
         _check_source("tf5", self.source, DEVICE_SOURCES)
@@ -340,6 +355,8 @@ class TF5Config(Section):
                 raise ConfigError(f"[tf5] {e}") from None
         if self.eq_write and not self.eq:
             raise ConfigError("tf5.eq_write needs tf5.eq = true (EQ is written over the same connection)")
+        if self.fader_write and not self.eq_write:
+            raise ConfigError("tf5.fader_write needs tf5.eq_write = true (faders are written over the same connection)")
 
     @property
     def active_source(self) -> str:

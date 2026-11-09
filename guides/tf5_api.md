@@ -289,7 +289,7 @@ Designer `FUN_005196e0(coef, fs, Q, gain, freq, type)`:
 
 `tf_daemon/dsp/eq.py` (`biquad`, `eq_curve`) implements this. `tests/tf_editor_reference.py` is a literal transcription of the decompiled code that the tests compare against.
 
-### 6.2 Writing EQ (tf-daemon's "Apply to desk") [CODE per 4.4; StageMix acceptance PENDING]
+### 6.2 Writing EQ (tf-daemon's "Apply to desk") [VERIFIED-CAP 2026-11-09]
 
 What tf-daemon sends, only on a person's confirmed click (`POST /api/vocal/apply|undo` with `"confirm": true`) and only with `tf5.eq_write = true`:
 - **Frame:** `MMIX` set-param `01 11 01`, as in the 4.4 example:
@@ -305,9 +305,22 @@ What tf-daemon sends, only on a person's confirmed click (`POST /api/vocal/apply
   - `PEQ/Bank/{BandL,Band:n,BandH}/{Type,Frequency,Gain,Q,LPFOn}` (20 Hz–20 kHz, ±18 dB, Q 0.1–10)
 - **Guard:** `check_outbound` passes a set-param only while `write()` runs, and only if the address, value, type and origin equal one of the requested changes. Anything else still raises `ReadOnlyViolation`.
 - **Confirmation:** the console is expected to echo each write as a set-param for the same address (4.4, step 7 above). `write()` waits up to 3 s for each echo and reports `confirmed` / the echoed value per change. Our copy of the data changes only through that echo.
-- **[PENDING]** Writes from a `TYPE:StageMix` client haven't been tried on the real console. If the TF5 ignores them, every change comes back unconfirmed. If the console rounds a value to its own step (e.g. frequency), the echo shows the value it used.
+- **Accepted from a `TYPE:StageMix` client** [VERIFIED 2026-11-09, TF5 at the auditorium, ch40]: an EQ band gain write was echoed (origin 0xA0) with the same value in ~10 ms. If the console rounds a value to its own step (e.g. frequency), the echo shows the value it used.
 
 ---
+
+### 6.3 Writing input faders (tf-daemon's ring-out) [VERIFIED-CAP 2026-11-09]
+
+Only with `tf5.fader_write = true` (and `eq_write`), only while a ring-out a person started runs
+(`POST /api/vocal/ringout/start` with `"confirm": true`; its Mute & cancel needs none):
+- **Parameters** (`console/editor/guard.py`: `FADER_WRITABLE`): `InputChannel:N/Fader/{Level,On}` only.
+  Level raw −32768 (−inf) … 1000 (+10 dB), On 0/1. Same frame and guard as 6.2.
+- **Scale** [VERIFIED 2026-11-09]: `Fader/Level` is dB x 100 with -32768 = -inf, exactly as over RCP: the
+  two protocols reported identical raw values on all 16 show channels (e.g. -765, -1520), and writes of
+  -3000 / -2550 / -32768 and `Fader/On` 0 / 1 from a StageMix client were echoed in 10-14 ms and showed up
+  over RCP within 0.6 s. The ring-out still refuses to start unless both protocols agree, and checks every
+  move against RCP, as a guard against a mis-patched channel.
+- **Order:** muting writes `On = 0` before any level change; unmuting writes `On = 1` after it.
 
 ## 7. Password [VERIFIED-CODE `FUN_00474030`]
 
@@ -365,7 +378,7 @@ Treat port 50368 as unauthenticated: keep it on a trusted VLAN. This guide inten
 - [x] Confirmed on the wire (2026-11-08): EQ gain pushes arrive as `0x24` s32, frequencies / switches as `0x14` u32, to a StageMix client, for changes made on the desk and in TF Editor. Not yet seen: band Type and Q pushes, `ChangeSelectedCH` event meaning (the console sends it when the selected channel changes; TF Editor's reply, if any, is unknown).
 - [ ] The console closed tf-daemon's StageMix session once during that test, probably when TF Editor connected; the client re-synced 2 s later.
 - [ ] Test the string-path form of e4 (e.g. `31:"InputChannel/PEQ/Bank/BandL/Gain"`?). The exact string syntax the resolver expects is unverified. Check vtable+0x14 of the MMS facade called from `FUN_0066fb50`.
-- [ ] Behaviour of `TYPE:StageMix` (allowed functions, coexistence with an Editor), in particular **whether it accepts set-param writes** (section 6.2). The first real "Apply to desk" answers it: confirmed vs unconfirmed counts in the panel and log.
+- [x] `TYPE:StageMix` accepts set-param writes (EQ and input faders), echoed in ~10 ms (sections 6.2, 6.3; 2026-11-09). Still open: coexistence with a TF Editor session that is connected at the same time.
 - [ ] `01 05 01` command, `DS_A` frame, d0x0 file-transfer details (`02 01` announce, `02 03` 2048-B chunks + ack).
 - [ ] YMDP block-id → meter-point mapping and value scale.
 

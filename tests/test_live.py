@@ -80,6 +80,15 @@ def test_vocal_assist_can_write_to_the_simulated_desk(status):
     assert s["enabled"] and s["can_write"]
 
 
+def test_ring_out_is_offered_with_the_simulated_desks_faders(status):
+    _, s = get("/api/vocal/status")
+    assert s["ringout_allowed"] and {m["id"] for m in s["mic_types"]} >= {"wig", "lav"}
+    _, ro = get("/api/vocal/ringout")
+    assert ro["allowed"] and not ro["running"]  # read-only: never started here
+    _, tf5 = get("/api/tf5/status")
+    assert tf5["eq"]["fader_writes"]
+
+
 def test_rf_sweeps_the_receiver_range(status):
     _, qlxd = get("/api/qlxd/state")
     freqs = [r["frequency_mhz"] * 1e6 for r in qlxd["receivers"]]

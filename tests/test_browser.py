@@ -290,3 +290,21 @@ def test_eq_bands_can_be_dragged_and_typed_on_the_spectrum(page):
                 [f"{band}/Q", round(before["q"] * 1000)],
             ]
         )
+
+
+def test_mic_type_and_eq_style_pickers_and_ring_out_setup(page):
+    _open(page, "/")  # config.dev.toml / --demo: the desk's faders are writable, so ring-out is offered
+    page.locator("#mic-check").wait_for(state="visible", timeout=8000)
+    page.locator("#mic-check").click()
+    panel = page.locator("#vocal-panel")
+    panel.wait_for(state="visible", timeout=4000)
+    mic = panel.locator("select.ro-pick").first
+    mic.wait_for(timeout=5000)
+    assert "wig" in mic.locator("option").evaluate_all("os => os.map(o => o.value)")
+    panel.get_by_role("button", name="Ring out…").click()
+    dialog = page.locator("#ringout")
+    dialog.wait_for(state="visible", timeout=4000)
+    dialog.get_by_role("button", name="Start ring-out").wait_for(timeout=2000)
+    assert dialog.locator("select.ro-pick").count() >= 2  # a mic type and an EQ style per mic
+    dialog.get_by_role("button", name="Cancel").click()  # read-only: nothing is started
+    dialog.wait_for(state="hidden", timeout=4000)

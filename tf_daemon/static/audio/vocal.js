@@ -2,7 +2,8 @@
 
 import { eqAvailable, eqHalf, eqY } from "./eq.js";
 import { H, PAD, W, xOf } from "./plot.js";
-import { $, C, color, ctx, el, loadInt, save, state } from "./shared.js";
+import { micKey, openRingoutSetup, styleKey } from "./ringout.js";
+import { $, C, color, ctx, el, loadInt, loadStr, save, state } from "./shared.js";
 
 // Optional module (vocal.enabled): during a mic check, listen to the shown
 // input while the person talks and suggest HPF / PEQ settings. Suggestions
@@ -24,6 +25,31 @@ export async function pollVocal() {
     state.dirty = true;
   } catch { /* server restarting: try again */ }
   setTimeout(pollVocal, next);
+}
+
+// Mic type and EQ style for the shown input (remembered per input in this browser).
+function micChoice() {
+  const ids = (list) => (list || []).map((m) => m.id);
+  return {
+    mic: loadStr(micKey(state.input), vocal.mic_type, ids(vocal.mic_types)),
+    style: loadStr(styleKey(state.input), vocal.eq_style, ids(vocal.eq_styles)),
+  };
+}
+
+function choiceItems(row) {
+  const pick = (list, value, key, title) => {
+    const s = el("select", "ro-pick"); s.title = title;
+    for (const m of list) { const o = el("option", "", m.label); o.value = m.id; o.title = m.note; s.append(o); }
+    s.value = value;
+    s.onchange = () => { save(key(state.input), s.value); renderVocal(); };
+    return s;
+  };
+  const c = micChoice();
+  const mic = pick(vocal.mic_types, c.mic, micKey, "Mic type: where the capsule sits");
+  const style = pick(vocal.eq_styles, c.style, styleKey, "What the voice should end up like");
+  const lbl = (text, s) => { const l = el("label", "vp-check"); l.append(text, s); return l; };
+  const note = (vocal.mic_types.find((m) => m.id === c.mic) || {}).note;
+  return [row(lbl("Mic ", mic), lbl("EQ for ", style)), el("p", "vp-note", note || "")];
 }
 
 function vocalPost(path, extra = {}) {
@@ -76,8 +102,9 @@ export function renderVocal() {
   } else if (!s) {
     items.push(el("p", "", "Have the person talk normally into this mic, at their usual distance, for about "
                             + `${Math.round(vocal.listen_s)} s (reading a passage works well).`));
-    items.push(row(button("Start listening", () => vocalPost("start"), true),
-                   button("Listen live", () => vocalPost("start", { live: true }))));
+    items.push(...choiceItems(row));
+    items.push(row(button("Start listening", () => vocalPost("start", micChoice()), true),
+                   button("Listen live", () => vocalPost("start", { live: true, ...micChoice() }))));
     items.push(el("p", "vp-note", "Live keeps listening while they talk, updates the suggestion every few "
                                   + "seconds, and checks that the voice reaches the mains."));
   } else if (s.state === "live") {
@@ -113,10 +140,17 @@ export function renderVocal() {
                                               + `from the target, ${r.model.off_after_db} dB with this suggestion`));
       items.push(...suggestionItems(s, r, label, row, button));
     }
-    items.push(row(button("Listen again", () => vocalPost("start"), true),
-                   button("Listen live", () => vocalPost("start", { live: true })), button("Clear", () => vocalPost("clear"))));
+    items.push(...choiceItems(row));
+    items.push(row(button("Listen again", () => vocalPost("start", micChoice()), true),
+                   button("Listen live", () => vocalPost("start", { live: true, ...micChoice() })), button("Clear", () => vocalPost("clear"))));
   }
   const key = String(state.input);
+  if (vocal.ringout_allowed) {
+    items.push(el("h4", "vp-sub", "Ring out"));
+    items.push(el("p", "vp-note", "Let the software raise the gain until the mics ring, notch the rings and set "
+                                  + "safe fader levels (and then the tone, live). Mute & cancel stays on screen."));
+    items.push(row(button("Ring out…", () => openRingoutSetup(vocal))));
+  }
   if (vocal.auto_allowed) items.push(...autoItems(label, key, row, button));
   const done = vocal.applied && vocal.applied[key];
   if (done) {

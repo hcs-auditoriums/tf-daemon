@@ -23,11 +23,13 @@ import argparse
 import hashlib
 import logging
 import random
+import re
 import socket
 import struct
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -374,6 +376,7 @@ class SimEditor:
         )
         self.received: list[tuple[str, Message]] = []
         self.writes: list[tuple[str, int]] = []  # (name path, value) of every set-param the client sent
+        self.on_write: Callable[[str, int], None] | None = None  # after a client's set-param is applied
         self.raw: list[tuple[str, bytes]] = []
         self.srv = socket.create_server((host, port))
         self.port = self.srv.getsockname()[1]
@@ -429,6 +432,8 @@ class SimEditor:
             with self._lock:
                 self.writes.append((name, e[7].value[0]))
                 self.mixing.apply(e[4].value, e[5].value, e[7].value[0])
+            if self.on_write is not None:
+                self.on_write(name, e[7].value[0])
             if self.echo_writes:
                 self._send(
                     conn,
@@ -604,6 +609,8 @@ class SimRCP:
         )
         self.requests = 0
         self.received: deque[str] = deque(maxlen=100_000)
+        self.on_set: Callable[[str, int, int, str], None] | None = None  # a change "on the desk"
+        self.held: set[int] = set()  # input channels a client set the fader of: the drift leaves them
         self._rng = random.Random(seed)
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -655,7 +662,13 @@ class SimRCP:
         return f"ERROR {parts[0]} UnknownCommand"  # tf-daemon never sends set; refuse anything else
 
     def set(self, addr: str, x: int, y: int, value: str) -> None:
-        """Change a value "on the desk": stored and pushed to every client."""
+        """Change a value "on the desk": stored and pushed to every client (both protocols)."""
+        self.store(addr, x, y, value)
+        if self.on_set is not None:
+            self.on_set(addr, x, y, value)
+
+    def store(self, addr: str, x: int, y: int, value: str) -> None:
+        """Store a value and push it to RCP clients (also for a change made over the other protocol)."""
         with self._lock:
             self.values[(addr, x, y)] = value
         self.push(f"NOTIFY set {addr} {x} {y} {value}")
@@ -671,6 +684,8 @@ class SimRCP:
         addr = RCP_PREFIX["InCh"] + "Fader/Level"
         while not self._stop.wait(period):
             x = self._rng.randrange(len(DEMO_INPUTS))
+            if x in self.held:
+                continue
             with self._lock:
                 level = int(self.values[(addr, x, 0)])
             if level > -32768:
@@ -713,13 +728,40 @@ class SimConsole:
     def __init__(self, host: str = "127.0.0.1", rcp_port: int = 0, eq_port: int = 0, drift_s: float = 4.0) -> None:
         self.host = host
         self.rcp = SimRCP(host=host, port=rcp_port, drift_s=drift_s)
-        self.editor = SimEditor(demo_mixing_values(), host=host, port=eq_port)
+        mixing = demo_mixing_values()
+        inch = RCP_PREFIX["InCh"]
+        for x in range(40):  # one desk: the editor protocol sees the faders RCP does
+            mixing[f"InputChannel:{x}/Fader/Level"] = int(self.rcp.values.get((inch + "Fader/Level", x, 0), "-32768"))
+            mixing[f"InputChannel:{x}/Fader/On"] = int(self.rcp.values.get((inch + "Fader/On", x, 0), "1"))
+        self.editor = SimEditor(mixing, host=host, port=eq_port)
+        self.editor.on_write = self._editor_wrote
+        self.rcp.on_set = self._rcp_set
         self.rcp_port, self.eq_port = self.rcp.port, self.editor.port
         log.info("Simulated TF5 on %s: RCP port %d, TF Editor port %d", host, self.rcp_port, self.eq_port)
 
     def close(self) -> None:
         self.rcp.close()
         self.editor.close()
+
+    _FADER = re.compile(r"InputChannel:(\d+)/Fader/(Level|On)")
+
+    def _editor_wrote(self, path: str, value: int) -> None:
+        """A client set a fader over the editor protocol: the desk's fader moves, RCP sees it."""
+        m = self._FADER.fullmatch(path)
+        if m:
+            x = int(m.group(1))
+            self.rcp.held.add(x)
+            self.rcp.store(RCP_PREFIX["InCh"] + f"Fader/{m.group(2)}", x, 0, str(value))
+
+    def _rcp_set(self, addr: str, x: int, y: int, value: str) -> None:
+        """A fader moved "on the desk": editor-protocol clients see it too (origin: the console)."""
+        for kind in ("Level", "On"):
+            if addr == RCP_PREFIX["InCh"] + f"Fader/{kind}" and y == 0:
+                path = f"InputChannel:{x}/Fader/{kind}"
+                wp, idx = wire_address(self.editor.mixing, path)
+                with self.editor._lock:
+                    self.editor.mixing.apply(wp, idx, int(value))
+                self.editor.push_change(path, int(value))
 
     def status(self) -> dict:
         return {

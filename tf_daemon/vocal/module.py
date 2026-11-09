@@ -14,10 +14,18 @@ after a confirmation dialog) sets the input channel's EQ to the suggestion, and
 on for a channel (``confirm: true``); it stops itself the moment anyone changes
 that EQ on the desk.
 
+Ring-out (ringout.py): only with ``tf5.fader_write`` in the config AND a person
+starting it (``confirm: true``). It moves the session channels' faders and EQ on its
+own until it finishes or a person presses Mute & cancel (``/ringout/abort``, never
+needs a confirmation).
+
+Each mic check / live session can name a mic type and an EQ style (targets.py).
+
 Routes:
   GET  /api/vocal/status        sessions per input: state, progress, result
-  POST /api/vocal/start         {"channel": n, "live": bool}: start (or restart) listening on input n;
-                                live keeps listening and re-suggesting, and checks the mains
+  POST /api/vocal/start         {"channel": n, "live": bool, "mic": id, "style": id}: start (or restart)
+                                listening on input n; live keeps listening and re-suggesting, and checks
+                                the mains; mic / style: targets.MIC_TYPES / EQ_STYLES (default: config)
   POST /api/vocal/stop          {"channel": n}: stop now and analyze what was heard
   POST /api/vocal/clear         {"channel": n}: forget the session
   POST /api/vocal/apply         {"channel": n, "confirm": true}: set the desk EQ to the suggestion
@@ -30,12 +38,18 @@ Routes:
   POST /api/vocal/profiles/recall {"channel": n, "name": s, "confirm": true}: put profile s on channel n
   POST /api/vocal/profiles/copy   {"channel": n, "from": m, "confirm": true}: copy channel m's EQ to n
   POST /api/vocal/profiles/delete {"name": s}
+  GET  /api/vocal/ringout       the ring-out session (also the page's heartbeat while one runs)
+  POST /api/vocal/ringout/start {"mics": [{"channel": n, "mic": id, "style": id}, ...], "tone": bool,
+                                "confirm": true}: ring out those mics (needs tf5.fader_write)
+  POST /api/vocal/ringout/abort   MUTE & CANCEL: mute the session channels, put faders and EQ back
+  POST /api/vocal/ringout/unmute  after abort: the on switches back as they were
+  POST /api/vocal/ringout/finish  end it, keep the desk as it is now
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from flask import Blueprint, Flask, jsonify, request
@@ -45,9 +59,11 @@ from ..config import VocalConfig
 from ..dsp.eq import eq_curve
 from .auto import PATHS, AutoEQ
 from .desk import DeskWriter
-from .ports import AudioInputs, DeskEQ
+from .ports import AudioInputs, DeskEQ, DeskFaders
 from .profiles import ProfileStore, changes_to, summary
+from .ringout import RingOut
 from .session import MicChecks
+from .targets import check, choices
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +91,8 @@ class VocalModule:
             house_mic=cfg.house_mic if cfg.house_mic >= 0 else None,
             tilt_db_oct=cfg.room_tilt_db_oct,
             eq_curve=self._eq_curve,
+            mic=cfg.mic_type,
+            style=cfg.eq_style,
         )
         self.desk = DeskWriter(desk, self.checks.result)
         self.auto = (
@@ -83,6 +101,22 @@ class VocalModule:
             else None
         )
         self.profiles = ProfileStore(cfg.profiles_file)
+        # Ring-out moves faders: only when the config lets the desk's faders be written.
+        faders = cast("DeskFaders", desk) if desk is not None and getattr(desk, "fader_writable", False) else None
+        self.ringout = (
+            RingOut(
+                audio,
+                self.checks,
+                faders,
+                AutoEQ(self.checks, faders, max_cut_db=cfg.max_cut_db, max_boost_db=cfg.max_boost_db),
+                mains=mains,
+                ceiling_db=cfg.ringout_ceiling_db,
+                margin_db=cfg.ringout_margin_db,
+                samplerate=samplerate,
+            )
+            if faders is not None
+            else None
+        )
 
     # ------------------------------------------------------------------ profiles
 
@@ -148,6 +182,11 @@ class VocalModule:
             **self.desk.history(),
             "auto_allowed": self.auto is not None and self.desk.writable() is not None,
             "auto": self.auto.states() if self.auto is not None else {},
+            "ringout_allowed": self.ringout is not None,
+            "ringout": sorted(self.ringout.channels()) if self.ringout is not None else [],
+            "mic_type": self.checks.default_mic,
+            "eq_style": self.checks.default_style,
+            **choices(),
         }
 
     # ------------------------------------------------------------------ module plumbing
@@ -174,8 +213,15 @@ class VocalModule:
 
         @bp.post("/start")
         def start():
-            live = (request.get_json(silent=True) or {}).get("live") is True
-            return session_action(lambda ch: self.checks.start(ch, live=live))
+            body = request.get_json(silent=True) or {}
+            live = body.get("live") is True
+            try:
+                mic, style = check(
+                    body.get("mic", self.checks.default_mic), body.get("style", self.checks.default_style)
+                )
+            except ValueError as e:
+                return jsonify({"ok": False, "error": str(e)}), 400
+            return session_action(lambda ch: self.checks.start(ch, live=live, mic=mic, style=style))
 
         @bp.post("/stop")
         def stop():
@@ -250,6 +296,8 @@ class VocalModule:
                 except ValueError as e:
                     return jsonify({"ok": False, "error": str(e)}), 400
                 return jsonify({"ok": True})
+            if self.ringout is not None and channel_arg() in self.ringout.channels():
+                return jsonify({"ok": False, "error": "a ring-out is running on this channel"}), 400
             return desk_write(self.auto.arm)
 
         @bp.post("/auto/undo")
@@ -258,13 +306,78 @@ class VocalModule:
                 return jsonify({"ok": False, "error": "auto EQ isn't allowed (vocal.auto_allowed)"}), 400
             return desk_write(self.auto.undo)
 
+        self._register_ringout(bp)
         app.register_blueprint(bp)
+
+    def _register_ringout(self, bp: Blueprint) -> None:
+        def ro() -> RingOut:
+            if self.ringout is None:
+                raise PermissionError("ring-out needs tf5.fader_write = true (and tf5.eq_write)")
+            return self.ringout
+
+        def act(fn):
+            try:
+                return jsonify({"ok": True, **fn(ro())})
+            except (ValueError, PermissionError) as e:
+                return jsonify({"ok": False, "error": str(e)}), 400
+            except (ConnectionError, OSError) as e:
+                return jsonify({"ok": False, "error": f"desk not reachable: {e}"}), 503
+            except Exception as e:
+                log.exception("Ring-out request failed")
+                return jsonify({"ok": False, "error": str(e)}), 500
+
+        @bp.get("/ringout")
+        def ringout_status():
+            if self.ringout is None:
+                return jsonify({"allowed": False})
+            self.ringout.touch()  # the page is watching
+            return jsonify({"allowed": True, **self.ringout.status()})
+
+        @bp.post("/ringout/start")
+        def ringout_start():
+            # Moves faders and EQ on its own: only with the page's explicit confirmation.
+            body = request.get_json(silent=True) or {}
+            if body.get("confirm") is not True:
+                return jsonify({"ok": False, "error": 'a ring-out needs "confirm": true'}), 400
+            try:
+                mics = []
+                for m in body.get("mics") or []:
+                    ch = m.get("channel") if isinstance(m, dict) else None
+                    if not isinstance(ch, int) or isinstance(ch, bool) or not 0 <= ch < len(self.engine.inputs):
+                        raise ValueError('"mics" needs [{"channel": <input index>, "mic": id, "style": id}, ...]')
+                    if not self.checks.allowed(ch):
+                        raise ValueError(f"input {ch + 1} isn't listed in vocal.inputs")
+                    if self.auto is not None and self.auto.state(ch)["on"]:
+                        raise ValueError(f"turn auto EQ off on {self.engine.inputs[ch].label} first")
+                    mic, style = check(m.get("mic", self.checks.default_mic), m.get("style", self.checks.default_style))
+                    mics.append((ch, mic, style))
+            except ValueError as e:
+                return jsonify({"ok": False, "error": str(e)}), 400
+            tone = body.get("tone") is True
+            return act(lambda r: r.start(mics, tone))
+
+        @bp.post("/ringout/abort")
+        def ringout_abort():  # mute & cancel: always allowed, no confirmation
+            return act(lambda r: r.abort())
+
+        @bp.post("/ringout/unmute")
+        def ringout_unmute():
+            return act(lambda r: r.unmute())
+
+        @bp.post("/ringout/finish")
+        def ringout_finish():
+            return act(lambda r: r.finish())
 
     def start(self) -> None:
         if self.auto is not None:
             self.auto.start()  # idle until a person turns it on for a channel
+        if self.ringout is not None:
+            self.ringout.auto.start()  # idle until a ring-out's tone phase
 
     def stop(self) -> None:
+        if self.ringout is not None:
+            self.ringout.close()
+            self.ringout.auto.stop()
         if self.auto is not None:
             self.auto.stop()
         self.checks.close()

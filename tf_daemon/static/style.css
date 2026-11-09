@@ -442,3 +442,31 @@ main.page {
 .eqp-row input[type=number], .eqp-row select { width: 100%; font: inherit; }
 .eqp-row input[type=checkbox] { justify-self: start; }
 .eqp-unit, .eqp-note { color: var(--muted); }
+
+/* Ring-out (audio/ringout.js): the setup dialog and the popup that stays up while it runs */
+.ro-overlay {
+  position: fixed; inset: 0; z-index: 100; display: flex; align-items: flex-start; justify-content: center;
+  padding: 56px 16px 16px; background: rgba(0, 0, 0, 0.35); overflow: auto;
+}
+.ro-overlay[hidden] { display: none; }
+.ro-box {
+  width: 560px; max-width: 100%; display: flex; flex-direction: column; gap: 8px; padding: 14px 16px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55); font-size: 12px;
+}
+.ro-box p { margin: 0; }
+.ro-popup.running { border-color: var(--vocal); }
+.ro-title { margin: 0; font-size: 15px; }
+.ro-head { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+.ro-note { color: var(--muted); }
+.ro-pick { font: inherit; font-size: 12px; padding: 2px 4px; max-width: 100%; }
+.ro-table td:first-child { width: auto; }
+.ro-table tr.ro-now td { color: var(--vocal); }
+.ro-mnote { color: var(--muted); font-style: italic; border-top: 0 !important; padding-top: 0 !important; }
+.ro-log { font-size: 11px; }
+.ro-go { border-color: var(--peak); }
+.ro-abort {
+  font: inherit; font-size: 16px; font-weight: 700; color: #fff; background: #c62828; border: 2px solid #ff5d5d;
+  border-radius: 8px; padding: 12px 16px; cursor: pointer; width: 100%;
+}
+.ro-abort:hover, .ro-abort:focus-visible { background: #e53935; outline: none; }

@@ -7,6 +7,7 @@ import { drawGrid, drawHover, H, PAD, resize, trace, W } from "./audio/plot.js";
 import { drawRingMarkers } from "./audio/rings.js";
 import { C, ctx, state } from "./audio/shared.js";
 import { connect } from "./audio/socket.js";
+import { pollRingout } from "./audio/ringout.js";
 import { drawVocal, pollVocal } from "./audio/vocal.js";
 import { drawWaterfall, wf, wfHoverReadout } from "./audio/waterfall.js";
 
@@ -45,4 +46,5 @@ function loop() {
 resize();
 connect();
 pollVocal();
+pollRingout();
 requestAnimationFrame(loop);

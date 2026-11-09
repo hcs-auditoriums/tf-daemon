@@ -19,6 +19,10 @@ Fast loop (feedback), whenever a ring this mic causes is live (session.rings_for
     ring, deepened by 3 dB each tick while the ring lasts (down to NOTCH_MAX_DB),
     and that band is left alone by the slow loop for NOTCH_HOLD_S.
 
+Reserved bands (``arm(..., reserved=...)``: the ring-out session's notches, and every
+notch the fast loop places) are never touched by the slow loop, and the fast loop
+deepens them only for their own ring.
+
 It stops itself when the channel's EQ changes on the desk (any value it didn't
 write: an operator takes over), when the desk stops being writable, or when the
 channel's EQ is off or in 1-knob mode. Undo puts back the EQ from before it was
@@ -63,8 +67,11 @@ PATHS = ["PEQ/On", "PEQ/Bank/HPF/On", "PEQ/Bank/HPF/Frequency"] + [
 
 
 class _Channel:
-    def __init__(self, baseline: dict[str, int]) -> None:
-        self.baseline = baseline  # the desk before auto was turned on (for Undo)
+    def __init__(self, baseline: dict[str, int], reserved: set[str] | None = None) -> None:
+        self.baseline = baseline
+        self.reserved: set[str] = set(
+            reserved or ()
+        )  # bands kept for notches: the slow loop leaves them  # the desk before auto was turned on (for Undo)
         self.known = dict(baseline)  # what the desk holds, as far as we know
         self.acted_revision = 0
         self.last_step = 0.0
@@ -88,8 +95,9 @@ class AutoEQ:
 
     # ------------------------------------------------------------------ control (a person's requests)
 
-    def arm(self, index: int) -> dict[str, Any]:
-        """Turn auto EQ on for ``index``. Raises ValueError / PermissionError why not."""
+    def arm(self, index: int, reserved: set[str] | None = None) -> dict[str, Any]:
+        """Turn auto EQ on for ``index``. ``reserved``: band paths (BANDS) holding notches that
+        the tone loop must leave alone. Raises ValueError / PermissionError why not."""
         desk = self._writable()
         if desk.eq_target(index) is None:
             raise ValueError("this input isn't an input channel on the desk")
@@ -103,7 +111,7 @@ class AutoEQ:
             raise ValueError("couldn't read the channel's EQ from the desk")
         if not any(s.live and s.running for i, s in self.checks.sessions() if i == index):
             self.checks.start(index, live=True)
-        ch = _Channel({p: int(v) for p, v in raw.items() if isinstance(v, int)})
+        ch = _Channel({p: int(v) for p, v in raw.items() if isinstance(v, int)}, reserved)
         with self._lock:
             self._channels[index] = ch
             self._stopped.pop(index, None)
@@ -216,7 +224,7 @@ class AutoEQ:
             for b in BANDS:  # no boost anywhere near a ring
                 if cur[f"{b}/Gain"] > 0 and abs(math.log2(cur[f"{b}/Frequency"] / 10 / f)) <= 1 / 6:
                     changes.append((f"{b}/Gain", 0))
-            band = self._notch_band(cur, f)
+            band = self._notch_band(cur, f, ch.reserved)
             if band is None:
                 continue
             at_ring = abs(math.log2(cur[f"{band}/Frequency"] / 10 / f)) < 1 / 24 and cur[f"{band}/Q"] >= 5000
@@ -229,12 +237,13 @@ class AutoEQ:
             if depth != cur[f"{band}/Gain"]:
                 changes.append((f"{band}/Gain", depth))
             ch.held[band] = now + NOTCH_HOLD_S
+            ch.reserved.add(band)
         return list(dict(changes).items()), f"ring at {live[0]['freq']:.0f} Hz"
 
     @staticmethod
-    def _notch_band(cur: dict[str, int], f: float) -> str | None:
+    def _notch_band(cur: dict[str, int], f: float, reserved: set[str] | frozenset[str] = frozenset()) -> str | None:
         """The band to notch ``f`` with: one already on it, else the least-used band whose
-        home range holds it (never a band used as a filter)."""
+        home range holds it (never a band used as a filter, nor one reserved for another ring)."""
         for b in BANDS:
             if abs(math.log2(cur[f"{b}/Frequency"] / 10 / f)) < 1 / 24 and cur[f"{b}/Q"] >= 5000:
                 return b
@@ -243,6 +252,7 @@ class AutoEQ:
             for b in BANDS
             if SLOT_RANGES[b][0] <= f < SLOT_RANGES[b][1]
             and not (b in ("PEQ/Bank/BandL", "PEQ/Bank/BandH") and cur[f"{b}/Type"] == 2)
+            and b not in reserved
         ]
         return min(fits, key=lambda b: abs(cur[f"{b}/Gain"])) if fits else None
 
@@ -270,7 +280,7 @@ class AutoEQ:
         fb = result.get("feedback") or {}
         changes: list[tuple[str, int]] = []
         for b in BANDS:
-            if ch.held.get(b, 0) > now:
+            if ch.held.get(b, 0) > now or b in ch.reserved:
                 continue
             changes += self._band_step(b, cur, target_d, boosts_ok=bool(fb.get("known")))
         changes += self._hpf_step(cur, target_d)
