@@ -177,7 +177,7 @@ def test_editor_has_a_single_send_path_and_one_guarded_write_builder():
 
 
 def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
-    """write() <- TF5Module.write_eq <- VocalModule.apply_suggestion / undo <- POST /api/vocal/apply|undo
+    """write() <- TF5Module.write_eq <- vocal DeskWriter.apply_suggestion / undo <- POST /api/vocal/apply|undo
     (which need "confirm": true). Nothing else in tf-daemon calls them, so nothing writes on its own."""
     calls: dict[str, list[str]] = {}
     for p in PKG.rglob("*.py"):
@@ -189,10 +189,10 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
                 calls.setdefault(name, []).append(p.relative_to(PKG).as_posix())
     assert calls.get("write") == ["console/module.py"]        # ec.write(...) in TF5Module.write_eq only
     assert "ec = self.eq_client" in (PKG / "console" / "module.py").read_text(encoding="utf-8")
-    assert sorted(calls.get("write_eq", [])) == ["vocal/module.py", "vocal/module.py"]
+    assert sorted(calls.get("write_eq", [])) == ["vocal/desk.py", "vocal/desk.py"]   # apply_suggestion, undo
     vocal_src = (PKG / "vocal" / "module.py").read_text(encoding="utf-8")
-    assert re.search(r"desk_write\(self\.apply_suggestion\)", vocal_src)
-    assert re.search(r"desk_write\(self\.undo\)", vocal_src)
+    assert re.search(r"desk_write\(self\.desk\.apply_suggestion\)", vocal_src)
+    assert re.search(r"desk_write\(self\.desk\.undo\)", vocal_src)
     assert "apply_suggestion" not in calls and "undo" not in calls   # never called, only handed to desk_write
     assert '.get("confirm") is not True' in vocal_src
 

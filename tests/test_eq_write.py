@@ -17,8 +17,8 @@ from tf_daemon.console.editor.client import TFEditorClient
 from tf_daemon.console.editor.codec import ORIGIN_SELF, SET_PARAM, T_S32, T_U32, parse_message, set_param_message
 from tf_daemon.console.editor.dump import Dump
 from tf_daemon.console.editor.guard import ReadOnlyViolation, check_outbound
-from tf_daemon.vocal.module import _Session
 from tf_daemon.vocal.plan import eq_plan
+from tf_daemon.vocal.session import _Session
 
 GAIN_L = "InputChannel:3/PEQ/Bank/BandL/Gain"
 FREQ_2 = "InputChannel:3/PEQ/Bank/Band:1/Frequency"
@@ -221,7 +221,7 @@ def _vocal_app(fake, eq_write=True):
     assert wait_until(lambda: tf5.eq_client.synced)
     s = _Session(48000, 20.0)
     s.state, s.result = "done", RESULT
-    vm._sessions[3] = s                       # a finished mic check on USB 4 = InCh 4
+    vm.checks._sessions[3] = s                       # a finished mic check on USB 4 = InCh 4
     return app, vm, tf5
 
 
@@ -273,11 +273,11 @@ def test_not_applied_with_one_knob_on_or_to_a_bus():
     fake = SimEditor({**default_mixing_values(), "InputChannel:3/PEQ/Bank/OneKnob/On": 1})
     app, vm, _ = _vocal_app(fake)
     try:
-        assert "1-knob" in vm.apply_blocker(3)
+        assert "1-knob" in vm.desk.apply_blocker(3)
         s = _Session(48000, 20.0)
         s.state, s.result = "done", RESULT
-        vm._sessions[32] = s                  # USB 33 = St L: a bus, not an input channel
-        assert "input channel" in vm.apply_blocker(32)
+        vm.checks._sessions[32] = s                  # USB 33 = St L: a bus, not an input channel
+        assert "input channel" in vm.desk.apply_blocker(32)
         c = app.test_client()
         for ch in (3, 32):
             assert c.post("/api/vocal/apply", json={"channel": ch, "confirm": True}).status_code == 400

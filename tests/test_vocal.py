@@ -8,7 +8,8 @@ from helpers import make_config
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError, load_config
-from tf_daemon.dsp.vocal import ANSI_FREQS, ANSI_NORMAL, VoiceCollector, analyze, bell_db
+from tf_daemon.vocal.tone import ANSI_FREQS, ANSI_NORMAL, analyze, bell_db
+from tf_daemon.vocal.voice import VoiceCollector
 
 FS, HOP, N = 48000, 2400, 4096
 
@@ -136,12 +137,12 @@ def _engine_and_module(**vocal):
 
 def feed(module, index, x, t0=0.0):
     for end in range(N, len(x) + 1, HOP):
-        module._tap(index, x[end - N:end].astype(np.float32), t0 + end / FS)
+        module.checks.tap(index, x[end - N:end].astype(np.float32), t0 + end / FS)
 
 
 def test_session_listens_then_suggests(voice):
     _, _, engine, vm = _engine_and_module()
-    vm.start_session(5)
+    vm.checks.start(5)
     assert 5 in engine.active_inputs()                       # kept analyzed for the check
     assert vm.snapshot()["sessions"]["5"]["state"] == "listening"
     feed(vm, 5, shape(voice, lambda f: bell_db(f, 350, 6, 1.4)))
@@ -150,26 +151,26 @@ def test_session_listens_then_suggests(voice):
     assert s["speech_s"] >= 10 and [b["issue"] for b in s["result"]["bands"]] == ["boxy"]
     assert s["current_eq"] is None                               # no TF5 EQ reader configured
     assert 5 not in engine.active_inputs()                       # released when done
-    vm.clear_session(5)
+    vm.checks.clear(5)
     assert vm.snapshot()["sessions"] == {}
 
 
 def test_stop_early_and_cancel(voice):
     _, _, engine, vm = _engine_and_module()
-    vm.start_session(2)
+    vm.checks.start(2)
     feed(vm, 2, voice[: 8 * FS])
-    vm.stop_session(2)                                           # analyze what was heard
+    vm.checks.stop(2)                                           # analyze what was heard
     assert vm.snapshot()["sessions"]["2"]["state"] in ("done", "error")
-    vm.start_session(3)
-    vm.clear_session(3)                                          # cancel
+    vm.checks.start(3)
+    vm.checks.clear(3)                                          # cancel
     assert "3" not in vm.snapshot()["sessions"] and 3 not in engine.active_inputs()
 
 
 def test_only_listed_inputs():
     _, _, _, vm = _engine_and_module(inputs=[4, 5])
     with pytest.raises(ValueError, match="vocal.inputs"):
-        vm.start_session(0)
-    vm.start_session(4)
+        vm.checks.start(0)
+    vm.checks.start(4)
     assert vm.snapshot()["inputs"] == [4, 5]
 
 
