@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import itertools
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
@@ -128,6 +128,7 @@ def _difference(collector: VoiceCollector, tilt_db_oct: float = 0.0) -> np.ndarr
 
 
 def _fit_bands(dev: np.ndarray, max_bands: int, max_cut: float, max_boost: float, *,
+               boost_cap: Callable[[float], float] | None = None, capped: list[str] | None = None,
                skip: np.ndarray | None = None, cut_thr: float = 3.0, boost_thr: float = 3.0) -> list[dict[str, Any]]:
     """``skip``: points where no cut may be centred (the voice's fundamental, notches)."""
     resid = dev.copy()
@@ -162,6 +163,17 @@ def _fit_bands(dev: np.ndarray, max_bands: int, max_cut: float, max_boost: float
             gain = -min(round(resid[p] * 0.8 * 2) / 2, max_cut)
         else:
             gain = min(round(-resid[p] * 0.6 * 2) / 2, max_boost)
+            if boost_cap is not None and gain > (limit := boost_cap(fc)):
+                cap = math.floor(limit * 2) / 2   # whole half-dBs, rounded down (the safe way)
+                if capped is not None:   # too close to feedback for the whole boost
+                    capped.append(f"Boost at {fc:.0f} Hz " + (f"held to +{cap:g} dB" if cap >= 1 else "left out")
+                                  + " to stay clear of feedback.")
+                if cap < 1.0:
+                    no_cut = no_cut.copy()
+                    no_cut[p] = True
+                    resid[p] = 0.0
+                    continue
+                gain = cap
         if abs(gain) < 1.0:
             break
         q = float(np.clip(q_for_octaves(octaves, gain), 0.5, 4.0))
@@ -232,12 +244,14 @@ def _round_hpf(f: float) -> float:
 
 def analyze(collector: VoiceCollector, rings: list[dict[str, Any]] | None = None, *,
             max_cut_db: float = 6.0, max_boost_db: float = 3.0, min_speech_s: float = 6.0,
-            room_db: np.ndarray | None = None, tilt_db_oct: float = 0.0) -> dict[str, Any]:
+            room_db: np.ndarray | None = None, tilt_db_oct: float = 0.0,
+            boost_cap: Callable[[float], float] | None = None) -> dict[str, Any]:
     """Suggestions from a finished mic check (see the module docstring).
 
     ``room_db`` (dB at POINTS, see room.py): what the PA and the room do to the voice
     on its way to the listener, measured with a house mic. Added to the mic's
-    spectrum, so the suggestion aims at the voice as the room hears it."""
+    spectrum, so the suggestion aims at the voice as the room hears it.
+    ``boost_cap(freq)``: the largest boost that stays clear of feedback there (feedback.py)."""
     prog = collector.progress()
     if collector.speech_s < min_speech_s:
         return {"ok": False, "error": f"only {collector.speech_s:.1f} s of speech heard; need at least "
@@ -277,8 +291,9 @@ def analyze(collector: VoiceCollector, rings: list[dict[str, Any]] | None = None
     off = float(np.percentile(diff[ref], 35))
     for _ in range(6):
         dev_raw = diff - off
+        capped: list[str] = []
         broad = _fit_bands(dev_raw, max_bands=4 - len(notches), max_cut=max_cut_db, max_boost=max_boost_db,
-                           skip=skip)
+                           skip=skip, boost_cap=boost_cap, capped=capped)
         eq = sum((bell_db(POINTS, b["freq"], b["gain"], b["q"]) for b in broad), np.zeros(len(POINTS)))
         new_off = float(np.median((diff + eq)[ref]))
         if abs(new_off - off) < 0.1:
@@ -301,7 +316,7 @@ def analyze(collector: VoiceCollector, rings: list[dict[str, Any]] | None = None
         curve += hpf_db(CURVE, hpf["freq"])
 
     snr = collector.snr_db
-    notes = []
+    notes = list(dict.fromkeys(capped))
     if collector.speech_s < 15:
         notes.append(f"Only {collector.speech_s:.0f} s of speech: treat these as rough.")
     if snr is not None and snr < 20:

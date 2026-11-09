@@ -211,3 +211,44 @@ def test_the_measurements_restart_only_when_the_desk_eq_changes():
     desk.eq = eq_from({"bands": [{"band": "L", "freq": 240.0, "gain": -6.0, "q": 1.2}], "hpf": None})
     eng.run(1.5)
     assert s.house.frames < frames and s.house.delay is not None   # started over, delay kept
+
+
+class FaderDesk(FlatDesk):
+    def __init__(self, faders):
+        self.faders = faders
+
+    def fader_db(self, x):
+        return self.faders.get(x, 0.0)
+
+
+@pytest.mark.parametrize("mic_fader", [0.0, 6.0])
+def test_feedback_headroom_matches_the_stages_known_loop(mic_fader):
+    """Mic 0 at ``mic_fader``, a second talker at -6 dB keeps the mains busy while mic 0 is
+    idle. The stage's loop is known: headroom = -(fader + the leak filter's response)."""
+    from tf_daemon.vocal import feedback
+    from tf_daemon.vocal.feedback import headroom_at
+    st = StageSettings(talkers=[0, 1], mains=(32, 33), house_mic=None, pa_leak_db=-18.0, turn_s=(4.0, 7.0),
+                       tone_db=-120.0, colours=[[], []])
+    src = StageSource(34, BLOCK, st, FaderDesk({0: mic_fader, 1: -6.0}))
+    eng = OfflineEngine(src, analyzed=[0, 1, 32, 33])
+    checks = MicChecks(eng, FS, inputs=None, target_s=20.0, max_cut_db=6.0, max_boost_db=3.0, mains=(32, 33))
+    checks.start(0, live=True)
+    eng.run(90.0)
+    s = dict(checks.sessions())[0]
+    fb = s.feedback.headroom(s.mains)
+    assert fb["known"] and fb["leak_delay_ms"] == pytest.approx((6.0 / 343.0 + 128 / FS) * 1000, abs=0.5)
+    n = 1 << 16
+    leak = 20 * np.log10(np.abs(np.fft.rfft(src._leak_h, n)) + 1e-12)
+    for f in (820.0, 1500.0, 2480.0):
+        expected = -(mic_fader + leak[int(round(f * n / FS))])
+        assert headroom_at(fb, f, 1 / 12) == pytest.approx(expected, abs=1.0), f
+    true_min = min(-(mic_fader + leak[int(round(f * n / FS))]) for f in feedback.POINTS)
+    assert fb["min_db"] <= true_min + 1.0          # never reports more headroom than there is
+
+
+def test_boosts_are_held_back_near_feedback():
+    from tf_daemon.vocal.feedback import MARGIN_DB, boost_cap
+    fb = {"known": True, "points": [3000.0, 6500.0], "headroom": [20.0, MARGIN_DB + 1.0]}
+    cap = boost_cap(fb)
+    assert cap(3000.0) == 20.0 - MARGIN_DB and cap(6500.0) == 1.0 and cap(500.0) == float("inf")
+    assert boost_cap({"known": False}) is None

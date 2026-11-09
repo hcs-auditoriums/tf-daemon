@@ -113,11 +113,15 @@ class Transfer:
             sel = (self.freqs >= fc * 2 ** (-width_oct / 2)) & (self.freqs < fc * 2 ** (width_oct / 2))
             if not sel.any():
                 continue
-            sxx, syy, sxy = float(self.sxx[sel].sum()), float(self.syy[sel].sum()), complex(self.sxy[sel].sum())
-            if sxx <= 0 or syy <= 0:
+            sxx, syy, sxy2 = self.sxx[sel], self.syy[sel], np.abs(self.sxy[sel]) ** 2
+            total = float(sxx.sum())
+            if total <= 0 or float(syy.sum()) <= 0:
                 continue
-            gain[i] = 20 * math.log10(max(abs(sxy) / sxx, 1e-12))
-            coh[i] = min(1.0, abs(sxy) ** 2 / (sxx * syy))
+            # Per-bin |H|^2 and coherence, averaged weighted by the reference's power: a
+            # magnitude average, so a phase that turns across the band (a resonance, a
+            # delay) doesn't cancel itself out the way averaging Sxy first would.
+            gain[i] = 10 * math.log10(max(float(np.sum(sxy2 / np.maximum(sxx, 1e-30))) / total, 1e-24))
+            coh[i] = min(1.0, float(np.sum(sxy2 / np.maximum(syy, 1e-30))) / total)
         return gain, coh
 
     def summary(self, lo: float = 200.0, hi: float = 5000.0) -> dict[str, Any]:

@@ -148,6 +148,15 @@ taken out, and what's left (the PA and the room) is added to the analysis. Only
 frequencies where the house mic clearly hears this voice count; if too few do, it
 says so and suggests from the mic alone.
 
+**Feedback headroom** (live): how far each frequency is from feedback, from
+150 Hz to 5 kHz. The loop is mic → channel → mains → PA → back into the mic:
+the first half is measured while the person talks (mic vs mains), the second
+while their mic is idle and the mains carry something else, like another talker
+or music (mains vs mic: the PA leaking back). The panel shows the frequency
+closest to feedback; suggested boosts are held to what keeps 6 dB of headroom.
+Until both halves have been heard, the headroom is unknown and only the usual
+boost limit applies.
+
 `[vocal]`: `enabled`, `inputs` (0-based inputs that are vocal mics; `[]` = any),
 `listen_s` (20), `max_cut_db` (6), `max_boost_db` (3), `house_mic` (-1 = none),
 `room_tilt_db_oct` (0: the in-room target is the reference speech spectrum; tilt

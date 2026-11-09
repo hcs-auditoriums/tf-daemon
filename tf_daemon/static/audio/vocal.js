@@ -86,6 +86,8 @@ export function renderVocal() {
     const r = s.result || {};
     if (r.mains) items.push(el("p", r.mains.verdict === "weak" ? "vp-error" : "vp-note", `Mains: ${r.mains.note}`));
     if (r.room) items.push(el("p", "vp-note", `Room: ${r.room.note}`));
+    if (r.feedback) items.push(el("p", r.feedback.known && r.feedback.min_db < 6 ? "vp-error" : "vp-note",
+                                  r.feedback.known ? `Feedback: ${r.feedback.note}` : r.feedback.note));
     if (r.model) items.push(el("p", "vp-note", `${r.model.settled ? "Settled" : "Still settling"} · now ${r.model.off_now_db} dB `
                                               + `from the target, ${r.model.off_after_db} dB with this suggestion`));
     if (r.ok) items.push(...suggestionItems(s, r, label, row, button));
@@ -105,6 +107,8 @@ export function renderVocal() {
     } else {
       if (r.mains) items.push(el("p", r.mains.verdict === "weak" ? "vp-error" : "vp-note", `Mains: ${r.mains.note}`));
     if (r.room) items.push(el("p", "vp-note", `Room: ${r.room.note}`));
+    if (r.feedback) items.push(el("p", r.feedback.known && r.feedback.min_db < 6 ? "vp-error" : "vp-note",
+                                  r.feedback.known ? `Feedback: ${r.feedback.note}` : r.feedback.note));
     if (r.model) items.push(el("p", "vp-note", `${r.model.settled ? "Settled" : "Still settling"} · now ${r.model.off_now_db} dB `
                                               + `from the target, ${r.model.off_after_db} dB with this suggestion`));
       items.push(...suggestionItems(s, r, label, row, button));

@@ -15,6 +15,10 @@ when this input is the strongest source of a ring on the mains.
 With a house mic (``vocal.house_mic``) both kinds also measure the mic against it,
 and the suggestion aims at the voice as the room hears it (room.py).
 
+Live, it also learns how close the mic is to feedback (feedback.py): while the
+person talks, mic -> mains; while the mic is idle, mains -> mic (the PA leaking
+back). Boosts are held to what keeps a safety margin of headroom.
+
 Live, the suggestion is a model that keeps being revised as data comes in: each
 analysis uses everything heard so far (weighted to the last minute), measured
 through the EQ on the desk now, so once a suggestion is applied the next round
@@ -36,6 +40,7 @@ from typing import Any
 
 import numpy as np
 
+from .feedback import Feedback, boost_cap
 from .ports import AudioInputs
 from .room import room_correction
 from .tone import POINTS, analyze
@@ -51,6 +56,7 @@ MIN_MAINS_COHERENCE = 0.5
 SETTLED_DB = 1.0         # live: a suggestion that moves less than this, three times running, has settled
 MAINS_MISMATCH_DB = 3.0  # mains shape vs desk EQ shape: more than this is worth saying
 EQ_CHECK_HOPS = 20       # look at the channel EQ on the desk about once a second
+IDLE_AFTER_S = 0.75      # a mic counts as idle (for the feedback leak) this long after its last speech
 
 
 class _Session:
@@ -59,6 +65,8 @@ class _Session:
         memory = LIVE_MEMORY_S if live else None
         self.collector = VoiceCollector(samplerate, memory_s=memory)
         self.mains = Transfer(samplerate, max_delay_s=0.1, memory_s=memory) if live else None
+        self.feedback = Feedback(samplerate) if live else None
+        self.last_speech_t = float("-inf")
         self.house = Transfer(samplerate, max_delay_s=0.25, memory_s=memory) if house else None
         self.target_s = target_s
         self.state = "live" if live else "listening"   # listening | live | done | error
@@ -189,10 +197,18 @@ class MicChecks:
             s.hops += 1
             if s.hops % EQ_CHECK_HOPS == 1 and (s.mains is not None or s.house is not None):
                 self._follow_eq(index, s)
-            if not speech:
+            mains = (np.mean([frames[m] for m in self.mains], axis=0)
+                     if self.mains and all(m in frames for m in self.mains) else None)
+            if speech:
+                s.last_speech_t = stream_t
+            else:
+                # The PA leaking back into this mic, once it has been quiet a while: a voice's
+                # soft tails correlate with itself at the leak delay and would read as leak.
+                if s.feedback is not None and mains is not None and stream_t - s.last_speech_t >= IDLE_AFTER_S:
+                    s.feedback.process_idle(mains, x)
                 continue
-            if s.mains is not None and self.mains and all(m in frames for m in self.mains):
-                s.mains.process(x, np.mean([frames[m] for m in self.mains], axis=0))
+            if s.mains is not None and mains is not None:
+                s.mains.process(x, mains)
             if s.house is not None and self.house_mic in frames:
                 s.house.process(x, frames[self.house_mic])
 
@@ -241,8 +257,12 @@ class MicChecks:
         try:
             if s.house is not None:
                 room_db, room = room_correction(s.house, POINTS, self._eq_curve(index, POINTS))
+            fb = s.feedback.headroom(s.mains) if s.feedback is not None else None
             result = analyze(s.collector, self.rings_for(index), max_cut_db=self.max_cut_db,
-                             max_boost_db=self.max_boost_db, room_db=room_db, tilt_db_oct=self.tilt_db_oct)
+                             max_boost_db=self.max_boost_db, room_db=room_db, tilt_db_oct=self.tilt_db_oct,
+                             boost_cap=boost_cap(fb) if fb else None)
+            if fb is not None:
+                result["feedback"] = fb
         except Exception as e:  # never break the analysis thread over a suggestion
             log.exception("Vocal analysis failed")
             result = {"ok": False, "error": f"analysis failed: {e}"}
