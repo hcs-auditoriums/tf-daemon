@@ -101,15 +101,37 @@ def test_talkers_take_turns():
 
 
 def test_cheap_enough_to_run_live():
+    """One second of the stage costs well under a second of CPU. Measured against a fixed
+    reference workload of the same kind (FIR filtering, FFTs) at the same moment, because the
+    suite runs in parallel: contention slows both alike (idle the stage is ~3x the reference,
+    0.15 s; with every worker busy ~3-4x, but 0.5-0.7 s). Fails if the stage gets ~2x slower."""
     import time
 
     st = StageSettings(talkers=[0, 1], mains=(32, 33), house_mic=31)
     src = StageSource(34, N, st, Desk(0.0))
     b = np.zeros((N, 34), np.float32)
-    t0 = time.perf_counter()
-    for _ in range(40):  # one second of audio
-        src._fill(b)
-    assert time.perf_counter() - t0 < 0.5
+    x = np.random.default_rng(1).standard_normal(4096)
+    h = np.random.default_rng(2).standard_normal(512)
+
+    def stage():
+        for _ in range(40):  # one second of audio
+            src._fill(b)
+
+    def reference():
+        for _ in range(40):
+            for _ in range(4):
+                np.convolve(x, h)
+            np.fft.irfft(np.fft.rfft(x, 8192))
+
+    def cpu(fn):
+        t0 = time.process_time()
+        fn()
+        return time.process_time() - t0
+
+    runs = [(cpu(stage), cpu(reference)) for _ in range(3)]
+    ratio = min(s / r for s, r in runs)
+    assert ratio < 7.0, runs  # vs ~3.2 today
+    assert min(s for s, _ in runs) < 1.0, runs  # and it keeps up with real time even on a busy machine
 
 
 def test_config_builds_the_stage_from_the_patch():

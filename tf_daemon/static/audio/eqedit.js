@@ -80,7 +80,27 @@ function flush() {
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ changes: Object.entries(changes), confirm: true }),
   }).then((r) => r.json()).catch(() => ({ ok: false, error: "server unreachable" }))
-    .then((d) => { inflight = false; if (!d.ok) alert(d.error || "The desk didn't take that."); flush(); });
+    .then((d) => { inflight = false; if (!d.ok) alert(d.error || "The desk didn't take that."); flush(); settled(); });
+}
+
+// After a drag the desk echoes each value the drag sent, in order, for a while after the release:
+// applied as they came, the handle would jump back and creep forward again. So the preview stays
+// until the last write is answered (and its echo has had a moment to arrive), then the desk's
+// newest state is taken once.
+const SETTLE_MS = 250;
+let settleTimer = null;
+function settle() {
+  state.eqSettling = true;
+  settled();
+}
+function settled() {
+  if (!state.eqSettling || inflight || pending) return;
+  clearTimeout(settleTimer);
+  settleTimer = setTimeout(() => {
+    if (inflight || pending) return;  // another edit went out meanwhile: wait for that one
+    state.eqSettling = false;
+    if (state.eqPushed) { state.eq = state.eqPushed; state.eqPushed = null; state.dirty = true; }
+  }, SETTLE_MS);
 }
 
 // The desk changes for a band's new settings (raw values: Hz x10, dB x100, Q x1000).
@@ -166,7 +186,8 @@ function endDrag() {
   drag = null;
   state.eqEditing = false;
   canvas.style.cursor = "";
-  if (state.eqPushed) { state.eq = state.eqPushed; state.eqPushed = null; state.dirty = true; }
+  if (moved) settle();  // the desk's echoes of the drag are still on their way
+  else if (state.eqPushed && !state.eqSettling) { state.eq = state.eqPushed; state.eqPushed = null; state.dirty = true; }
   if (!moved) showPop(key);   // a click: its settings
 }
 canvas.addEventListener("pointerup", endDrag);
@@ -251,7 +272,14 @@ export function showPop(key) {
 
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePop(); });
 // Another input, or the overlay hidden: nothing to edit.
-export function eqEditReset() { closePop(); drag = null; state.eqEditing = false; }
+export function eqEditReset() {
+  closePop();
+  drag = null;
+  state.eqEditing = false;
+  clearTimeout(settleTimer);
+  state.eqSettling = false;
+  if (state.eqPushed) { state.eq = state.eqPushed; state.eqPushed = null; state.dirty = true; }
+}
 
 // For the browser tests: where the handles are (canvas CSS px).
 window.tfEqHandles = () => eqHandles().map(({ key, x, y }) => ({ key, x, y }));
