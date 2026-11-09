@@ -33,8 +33,14 @@ Requires Python 3.11+.
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e '.[dev]'
-python -m tf_daemon --source synth --rf-source demo --qlxd-source demo
+python -m tf_daemon --demo --config config.dev.toml
 ```
+
+`--demo` simulates all the hardware: synthetic audio, a demo tinySA, four QLX-D
+receivers and a TF5 console (names, faders, EQ read and EQ write). It is short for
+`--source synth --rf-source demo --qlxd-source demo --tf5-source demo`; each flag
+also works on its own. `config.dev.toml` turns on every feature and names a few
+inputs. Or use the dev container below, which needs only Docker.
 
 Open <http://localhost:8080> (audio), <http://localhost:8080/rf> (RF) or
 <http://localhost:8080/qlxd> (wireless receivers). The synthetic source plays pink noise, speech-like
@@ -55,7 +61,66 @@ The RF demo device plays three synthetic carriers over a −80 dBm noise floor. 
 QLX-D demo runs four simulated QLXD4 receivers on 127.0.0.1 (batteries drain at
 60× speed; one has no transmitter). `--qlxd-source off` disables the module.
 
-Run the tests with `pytest`.
+Run the tests with `pytest` (`pytest -n auto` runs them in parallel).
+
+## Dev container (Docker, any platform)
+
+The same environment on macOS, Windows and Linux, with only Docker installed:
+the demo server runs in a container on the code on your disk and restarts
+whenever you save a file under `tf_daemon/` or `config.dev.toml`.
+
+```bash
+docker compose up -d --build        # build (first time, or after pyproject.toml changes) and start
+```
+
+Open <http://localhost:8080>. In VS Code, **Dev Containers: Reopen in Container**
+(or a Codespace) uses the same container, with the server already running.
+
+Shortcuts. These start the container if it isn't running. Use `./dev` on macOS / Linux,
+`dev` in Windows `cmd` and `.\dev` in PowerShell:
+
+```bash
+./dev shell                          # bash in the container
+./dev test                           # all tests, in parallel
+./dev test tests/test_tf5.py -k reconnects   # any pytest arguments
+./dev logs                           # follow the server log
+./dev open                           # open the running app in the browser (./dev open rf | qlxd | config)
+./dev up                             # start, rebuilding if pyproject.toml changed
+./dev down                           # stop
+./dev help                           # list the commands
+```
+
+The full `docker compose` commands they run:
+
+| What | Command |
+| --- | --- |
+| Server log, live (each reload shows up here) | `docker compose logs -f app` |
+| Last 100 lines | `docker compose logs --tail 100 app` |
+| Shell in the container | `docker compose exec app bash` |
+| Run all tests (parallel, ~10 s) | `docker compose exec app pytest` |
+| One file / one test | `docker compose exec app pytest tests/test_tf5.py -k reconnects` |
+| Serial, e.g. to use `pdb` | `docker compose exec app pytest -n 0 --pdb` |
+| Restart the server by hand | `docker compose restart app` |
+| Is it healthy? | `docker compose ps` |
+| Stop | `docker compose down` |
+| Rebuild after a dependency change | `docker compose up -d --build` |
+
+Inside the container, `pytest` runs on every core (`PYTEST_ADDOPTS` in
+`compose.yaml`) and includes `tests/test_live.py`, which checks the running
+server end to end: every simulated device up, the pages, the console's names
+and EQ, and the WebSockets. Outside the container those tests skip, unless you
+point `TF_DAEMON_URL` at a server started with `--demo`. If you've just saved a
+file, they wait for the server to come back.
+
+Notes:
+
+- The container runs the Flask development server, not gunicorn, and has no
+  systemd, so the Config page's **Restart** and **Update now** do nothing there.
+  Saving on the Config page writes `config.dev.toml`.
+- QLX-D settings edited on the Wireless page go to `.dev/qlxd_state.json`
+  (ignored by git), not the real `qlxd_state.json`.
+- The image sets `OPENBLAS_NUM_THREADS=1`. Without it numpy's BLAS keeps a
+  thread per core spinning, and the idle demo server uses about 2.5 cores.
 
 ## Server install (Raspberry Pi OS or Ubuntu)
 

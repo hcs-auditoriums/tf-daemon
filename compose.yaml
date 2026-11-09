@@ -1,0 +1,40 @@
+# Development stack: tf-daemon with all hardware simulated, running the code on
+# your disk and restarting whenever it changes.
+#
+#   docker compose up -d                       # http://localhost:8080
+#   docker compose exec app pytest             # whole suite, in parallel, incl. live checks
+#   docker compose logs -f app                 # server log (shows each reload)
+#
+# The same container backs the VS Code / Codespaces dev container
+# (.devcontainer/devcontainer.json). Production does not use Docker; see deploy/.
+name: tf-daemon
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    image: tf-daemon-dev
+    volumes:
+      - .:/workspace
+    ports:
+      - "8080:8080"
+    environment:
+      # tests/test_live.py exercises this server; unset, those tests skip.
+      TF_DAEMON_URL: http://127.0.0.1:8080
+      # pytest in the container runs on every core (pytest-xdist); `-n 0` for serial / pdb.
+      PYTEST_ADDOPTS: -n auto --dist worksteal
+    # watchfiles restarts the server (a whole new process, so the "open the
+    # device once" rule holds) when anything under tf_daemon/ or the dev config
+    # changes; reload the browser tab to pick up static file edits.
+    command: >
+      watchfiles --sigint-timeout 3
+      "python -m tf_daemon --demo --config config.dev.toml"
+      tf_daemon config.dev.toml
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/status"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    init: true

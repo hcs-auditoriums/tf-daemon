@@ -1,0 +1,27 @@
+# tf-daemon: notes for Claude
+
+## Testing: use the dev container, don't improvise
+
+All hardware (TF5, QLX-D, tinySA, audio) is simulated in the dev container. Don't
+write ad-hoc fakes or plan how to test against real devices; this is the recipe:
+
+1. `docker compose ps`. If `app` isn't `healthy`: `docker compose up -d --build`.
+   (`./dev shell | test | logs` are the human shortcuts; `dev.cmd` on Windows.)
+2. `docker compose exec -T app pytest -q` runs the whole suite in parallel (~10 s),
+   including `tests/test_live.py` against the running server. Target with a path
+   or `-k`; `-n 0` for serial.
+3. The server reloads on save. Check behaviour with
+   `curl -s localhost:8080/api/status` (and `/api/tf5/status`, `/api/qlxd/state`,
+   `/api/rf/state`, `/api/audio/meta`, `/api/tf5/eq/<n>`).
+   `docker compose logs --tail 50 app` shows the server log.
+4. For a new feature, add a unit test next to the existing ones, and a check in
+   `tests/test_live.py` if it shows up in the running app.
+
+Test doubles live in `tf_daemon/tf5sim.py` (TF5 RCP + TF Editor), `tf_daemon/qlxd/simulator.py`,
+the RF demo device in `tf_daemon/rf/devices.py` and the synth source in
+`tf_daemon/audio/sources.py`. Reuse and extend those, don't make new ones. Tests use
+ephemeral ports and `tmp_path`, so they are safe in parallel. Keep it that way.
+When a test waits on a simulated device, wait for the condition (`wait_until`,
+`wait_settled` in `tests/test_tf5.py`), never a fixed sleep.
+
+The host `.venv` may be stale; don't rely on it.

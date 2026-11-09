@@ -2,3 +2,6 @@
 # deployed with `git archive` from a Windows checkout (core.autocrlf=true).
 *.sh       text eol=lf
 *.service  text eol=lf
+/dev       text eol=lf
+# cmd.exe can misread labels in LF files
+*.cmd      text eol=crlf

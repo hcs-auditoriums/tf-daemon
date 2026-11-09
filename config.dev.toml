@@ -1,0 +1,32 @@
+# Development config: every feature on, for use with simulated hardware.
+#   python -m tf_daemon --config config.dev.toml --demo
+# --demo also turns on tf5.eq and tf5.eq_write against the simulated console.
+# Anything not set here comes from the defaults in tf_daemon/config.py.
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[qlxd]
+state_file = ".dev/qlxd_state.json"   # keep dev edits out of the real state file
+
+[vocal]
+enabled = true
+inputs = [0, 1]
+
+# Synth audio plays voice + a ring tone on every listed input.
+[[channels]]
+index = 0
+label = "Pastor"
+
+[[channels]]
+index = 1
+label = "Lead Vox"
+
+[[channels]]
+index = 32
+label = "Main L"
+
+[[channels]]
+index = 33
+label = "Main R"

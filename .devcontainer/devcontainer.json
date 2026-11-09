@@ -1,0 +1,23 @@
+{
+  // VS Code / Codespaces: the same container as `docker compose up` (../compose.yaml).
+  // The demo server is already running when the window opens: http://localhost:8080
+  "name": "tf-daemon (simulated hardware)",
+  "dockerComposeFile": "../compose.yaml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "dev",
+  "updateRemoteUserUID": true,
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": { "label": "tf-daemon", "onAutoForward": "notify" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python"],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.testing.pytestEnabled": true
+      }
+    }
+  }
+}
