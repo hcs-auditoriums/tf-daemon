@@ -409,7 +409,7 @@ class Dump:
         if not path or len(path) != len(idx):
             raise ProtocolError("path / index length mismatch")
         node, names, off = self.root, [], 0
-        for depth, (p, i) in enumerate(zip(path, idx)):
+        for depth, (p, i) in enumerate(zip(path, idx, strict=True)):
             last = depth == len(path) - 1
             if 0 <= p < len(node.params):
                 if not last:
@@ -518,7 +518,7 @@ def channel_eq(dump: Dump, kind: str, x: int) -> dict[str, Any] | None:
             "bands": [],
         }
         if _has(dump, f"{base}/Bank/HPF/On"):
-            eq["hpf"] = {"on": bool(g(bank + "HPF/On")), "freq": g(bank + "HPF/Frequency") / 10,
+            eq["hpf"] = {"on": bool(g(bank + "HPF/On")), "freq": int(g(bank + "HPF/Frequency")) / 10,
                          "slope": int(_opt(g, bank + "HPF/Slope", 12))}
         eq["bands"].append(_band(g, bank + "BandL", "L", low=True))
         n_mid = dump.root.child(col).child("PEQ").child("Bank").child("Band").arraysize \
@@ -622,8 +622,8 @@ def biquad(kind: str, freq: float, gain_db: float, q: float, fs: float = FS) -> 
         sv = math.sqrt(v)
         plain = [1 + k, k - 1]
         shelf = [1 + k * sv, k * sv - 1] if kind == "low_shelf" else [k + sv, k - sv]
-        num, den = (shelf, plain) if gain_db > 0 else (plain, shelf)
-        return [float(x) for x in np.convolve(num, num)], [float(x) for x in np.convolve(den, den)]
+        top, bottom = (shelf, plain) if gain_db > 0 else (plain, shelf)
+        return [float(x) for x in np.convolve(top, top)], [float(x) for x in np.convolve(bottom, bottom)]
     if kind in ("hpf", "lpf"):
         d = [1 + k / q + kk, 2 * (kk - 1), 1 - k / q + kk]
         return ([kk, 2 * kk, kk] if kind == "lpf" else [1.0, -2.0, 1.0]), d
@@ -751,8 +751,8 @@ class TFEditorClient:
             try:
                 self._authorized = {key: (prm.type, value) for _, key, prm, value in plan}
                 try:
-                    for _, (wp, idx), prm, value in plan:
-                        self._send(sock, "MMIX", set_param_message(list(wp), list(idx), prm, value))
+                    for _, (wpath, widx), prm, value in plan:
+                        self._send(sock, "MMIX", set_param_message(list(wpath), list(widx), prm, value))
                 finally:
                     self._authorized = {}
                 log.info("TF5 editor protocol: wrote %d EQ parameter(s) on user request: %s", len(plan),

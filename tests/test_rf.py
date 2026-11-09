@@ -64,7 +64,7 @@ def test_rf_module_end_to_end_with_demo():
         s = _wait_state(engine, lambda s: s["sweeps"] >= 3)
         assert s["scanning"] and s["sweep"]["start_hz"] == 400_000_000
         assert len(s["sweep"]["live"]) == len(s["sweep"]["peak"]) == 101
-        assert all(p >= v for p, v in zip(s["sweep"]["peak"], s["sweep"]["live"]))
+        assert all(p >= v for p, v in zip(s["sweep"]["peak"], s["sweep"]["live"], strict=True))
 
         assert client.post("/api/rf/reset-peak").get_json()["ok"]
         assert client.get("/api/status").get_json()["modules"]["rf"]["sweeps"] >= 3

@@ -129,9 +129,11 @@ class SLPListener:
 
     def _run(self) -> None:
         own = set(self.iface.ipv4)
+        sock = self._sock
+        assert sock is not None  # start() opens it before starting this thread
         while not self._stop.is_set():
             try:
-                _, (addr, _) = self._sock.recvfrom(4096)
+                _, (addr, _) = sock.recvfrom(4096)
             except TimeoutError:
                 continue
             except OSError:

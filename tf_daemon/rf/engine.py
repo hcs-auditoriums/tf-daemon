@@ -266,7 +266,7 @@ class RFEngine:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             sweep = None
-            if self._sweep is not None and self._live is not None:
+            if self._sweep is not None and self._live is not None and self._peak is not None:
                 sweep = {
                     **self._sweep,
                     "live": np.round(self._live, 1).tolist(),

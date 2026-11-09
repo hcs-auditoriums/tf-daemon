@@ -8,7 +8,6 @@ import pytest
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError, load_config
 from tf_daemon.dsp.vocal import ANSI_FREQS, ANSI_NORMAL, VoiceCollector, analyze, bell_db
-from tf_daemon.vocal import VocalModule
 
 FS, HOP, N = 48000, 2400, 4096
 

@@ -84,6 +84,7 @@ Shortcuts. These start the container if it isn't running. Use `./dev` on macOS /
 ./dev test                           # all tests, in parallel
 ./dev test tests/test_tf5.py -k reconnects   # any pytest arguments
 ./dev logs                           # follow the server log
+./dev lint                           # ruff + mypy
 ./dev open                           # open the running app in the browser (./dev open rf | qlxd | config)
 ./dev up                             # start, rebuilding if pyproject.toml changed
 ./dev down                           # stop
@@ -98,6 +99,7 @@ The full `docker compose` commands they run:
 | Last 100 lines | `docker compose logs --tail 100 app` |
 | Shell in the container | `docker compose exec app bash` |
 | Run all tests (parallel, ~10 s) | `docker compose exec app pytest` |
+| Lint and type-check | `docker compose exec app ruff check .` and `docker compose exec app mypy` |
 | One file / one test | `docker compose exec app pytest tests/test_tf5.py -k reconnects` |
 | Serial, e.g. to use `pdb` | `docker compose exec app pytest -n 0 --pdb` |
 | Restart the server by hand | `docker compose restart app` |
@@ -111,6 +113,14 @@ server end to end: every simulated device up, the pages, the console's names
 and EQ, and the WebSockets. Outside the container those tests skip, unless you
 point `TF_DAEMON_URL` at a server started with `--demo`. If you've just saved a
 file, they wait for the server to come back.
+
+CI (`.github/workflows/ci.yml`) runs `ruff`, `mypy` and the tests in this same
+container on every pull request and push to `main`. `./dev lint` and `./dev test`
+run the same checks locally. `ruff check --fix .` fixes the simple cases (import order,
+unused imports). The settings for both tools are in `pyproject.toml`.
+
+On Linux, if your user ID isn't 1000, build with `DEV_UID=$(id -u) docker compose up -d --build`
+so files written in the container stay yours.
 
 Notes:
 

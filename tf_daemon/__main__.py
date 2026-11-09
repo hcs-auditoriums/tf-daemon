@@ -46,7 +46,8 @@ def list_devices() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="tf-daemon", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(prog="tf-daemon", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--config", default="config.toml", help="path to config.toml (default: ./config.toml)")
     p.add_argument("--source", nargs="+", default=["device"], metavar="KIND",
                    help="device | synth | wav PATH (default: device)")

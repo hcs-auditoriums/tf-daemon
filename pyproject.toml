@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 rf = ["tsapython>=2.0"]
-dev = ["pytest>=8", "pytest-xdist>=3.5"]
+dev = ["pytest>=8", "pytest-xdist>=3.5", "ruff>=0.15", "mypy>=1.15"]
 
 [project.scripts]
 tf-daemon = "tf_daemon.__main__:main"
@@ -32,3 +32,27 @@ tf_daemon = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import order, bugbear, pyupgrade
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.flake8-bugbear]
+# Frozen dataclasses: safe as argument defaults.
+extend-immutable-calls = ["tf_daemon.dsp.ring.RingSettings"]
+
+[tool.mypy]
+files = ["tf_daemon"]
+python_version = "3.11"
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+# No type information published for these.
+module = ["sounddevice", "tsapython", "flask_sock", "simple_websocket", "psutil"]
+ignore_missing_imports = true

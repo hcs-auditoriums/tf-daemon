@@ -8,14 +8,23 @@ import socket
 import time
 
 import pytest
+from tfeditor_fakes import FakeEditorConsole, build_dump, default_mixing_values, mixing_tree, set_param, wait_until
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError, load_config
-from tf_daemon.tfeditor import (ORIGIN_SELF, SET_PARAM, T_S32, T_U32, Dump, ReadOnlyViolation, TFEditorClient,
-                                check_outbound, parse_message, set_param_message)
+from tf_daemon.tfeditor import (
+    ORIGIN_SELF,
+    SET_PARAM,
+    T_S32,
+    T_U32,
+    Dump,
+    ReadOnlyViolation,
+    TFEditorClient,
+    check_outbound,
+    parse_message,
+    set_param_message,
+)
 from tf_daemon.vocal import _Session, eq_plan
-
-from tfeditor_fakes import FakeEditorConsole, build_dump, default_mixing_values, mixing_tree, set_param, wait_until
 
 GAIN_L = "InputChannel:3/PEQ/Bank/BandL/Gain"
 FREQ_2 = "InputChannel:3/PEQ/Bank/Band:1/Frequency"

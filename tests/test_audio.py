@@ -70,7 +70,9 @@ def test_synth_tone_is_at_expected_level():
 def test_wav_source_reads_and_rejects_rate(tmp_path):
     good = tmp_path / "a.wav"
     with wave.open(str(good), "wb") as w:
-        w.setnchannels(2); w.setsampwidth(3); w.setframerate(48000)
+        w.setnchannels(2)
+        w.setsampwidth(3)
+        w.setframerate(48000)
         v = (np.array([[1 << 22, -(1 << 22)]] * 2400, dtype=np.int32))
         b = v.astype("<i4").tobytes()
         w.writeframes(b"".join(b[i:i + 3] for i in range(0, len(b), 4)))
@@ -81,7 +83,9 @@ def test_wav_source_reads_and_rejects_rate(tmp_path):
 
     bad = tmp_path / "b.wav"
     with wave.open(str(bad), "wb") as w:
-        w.setnchannels(1); w.setsampwidth(2); w.setframerate(44100)
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(44100)
         w.writeframes(b"\0\0" * 4410)
     with pytest.raises(SourceError, match="48000"):
         WavSource(bad, 1200)
