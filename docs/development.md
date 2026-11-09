@@ -9,10 +9,18 @@ pip install -e '.[dev]'
 python -m tf_daemon --demo --config config.dev.toml
 ```
 
-`--demo` simulates all the hardware: synthetic audio, a demo tinySA, four QLX-D
+`--demo` simulates all the hardware: a stage, a demo tinySA, four QLX-D
 receivers and a TF5 console (names, faders, EQ read and EQ write). It is short for
-`--source synth --rf-source demo --qlxd-source demo --tf5-source demo`; each flag
-also works on its own. `config.dev.toml` turns on every feature and names a few
+`--source stage --rf-source demo --qlxd-source demo --tf5-source demo`; each flag
+also works on its own.
+
+The simulated stage (`tf_daemon/audio/stage.py`) is a closed loop: the named
+inputs are talkers taking turns, each channel goes through the simulated desk's
+current EQ and fader into the mains (USB 33/34), the PA leaks back into the mics
+after ~17 ms through a couple of resonances, and a house mic hears the mains
+through a reverberant room. So an EQ change on the desk is heard in the mains and
+the house mic, and too much gain really rings (at 820 Hz and 2.48 kHz first). The
+plain `synth` source (same voice, no desk, no loop) is still there for tests. `config.dev.toml` turns on every feature and names a few
 inputs. Or use the dev container (next section), which needs only Docker.
 
 Open <http://localhost:8080> (audio), <http://localhost:8080/rf> (RF) or

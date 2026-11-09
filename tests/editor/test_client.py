@@ -204,6 +204,8 @@ def test_client_sends_keepalives(console, client_for, monkeypatch):
 def test_scene_recall_dump_replaces_the_data(console, client_for):
     client = client_for(console)
     wait_until(lambda: client.synced)
+    # The client's sync close for the first dump may still be on its way to the console.
+    wait_until(lambda: console.sent_by_client().count(("MMIX", SYNC_CLOSE)) >= 1)
     closes = console.sent_by_client().count(("MMIX", SYNC_CLOSE))
     console.push_dump({"InputChannel:0/PEQ/Bank/Band:0/Gain": 900, "InputChannel:0/Label/Name": "Recalled"})
     wait_until(lambda: client.eq("InCh", 0)["bands"][1]["gain"] == 9.0)

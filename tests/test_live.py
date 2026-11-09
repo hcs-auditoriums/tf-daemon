@@ -53,7 +53,7 @@ def status():
 
 def test_every_simulated_device_is_up(status):
     m = status["modules"]
-    assert m["audio"]["source"] == "synth" and m["audio"]["skipped_hops"] == 0
+    assert m["audio"]["source"] == "stage" and m["audio"]["skipped_hops"] == 0
     assert m["rf"]["device"] == "demo"
     assert m["qlxd"]["receivers"] == m["qlxd"]["online"] == 4
 

@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 REQUIRED_SAMPLERATE = 48000
 
 DEVICE_SOURCES = ("device", "demo", "off")
-AUDIO_SOURCES = ("device", "synth", "wav")
+AUDIO_SOURCES = ("device", "synth", "stage", "wav")
 
 
 class ConfigError(ValueError):
@@ -128,7 +128,7 @@ class ServerConfig(Section):
 @dataclass(frozen=True)
 class AudioConfig(Section):
     NAME: ClassVar[str] = "audio"
-    source: str = "device"    # device (capture) | synth (test signal) | wav (loop a file)
+    source: str = "device"    # device (capture) | synth (test signal) | stage (simulated stage) | wav
     wav: str = ""             # file for source = "wav"
     device: str = "TF"        # case-insensitive substring of the capture device name
     channels: int = 34        # capture channels (TF5: 32 + St L/R); a device with fewer is zero-padded
@@ -182,6 +182,18 @@ class SynthConfig(Section):
     tone_hz: float = 2500.0   # the steady "ring" the feedback detector should find
     tone_db: float = -15.0    # relative to speech_db
     seed: int = 1
+    # audio.source = "stage" (audio/stage.py): the simulated venue.
+    house_mic: int = 31       # input the simulated house mic arrives on; -1 = none
+    pa_leak_db: float = -18.0  # PA level reaching an open vocal mic, re the mains
+    room_rt60: float = 0.8    # reverberation time of the simulated room, s
+
+    def validate(self) -> None:
+        if not -1 <= self.house_mic <= 127:
+            raise ConfigError("synth.house_mic must be an input index (0-based) or -1")
+        if not -60 <= self.pa_leak_db <= 0:
+            raise ConfigError("synth.pa_leak_db must be between -60 and 0")
+        if not 0.1 <= self.room_rt60 <= 4:
+            raise ConfigError("synth.room_rt60 must be between 0.1 and 4 s")
 
 
 @dataclass(frozen=True)

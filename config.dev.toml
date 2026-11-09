@@ -14,7 +14,7 @@ state_file = ".dev/qlxd_state.json"   # keep dev edits out of the real state fil
 enabled = true
 inputs = [0, 1]
 
-# Synth audio plays voice + a ring tone on every listed input.
+# --demo: the named inputs are talkers on the simulated stage (they take turns).
 [[channels]]
 index = 0
 label = "Pastor"
@@ -22,6 +22,11 @@ label = "Pastor"
 [[channels]]
 index = 1
 label = "Lead Vox"
+
+# The simulated stage (--demo) puts a house mic here: the voice as the room hears it.
+[[channels]]
+index = 31
+label = "House mic"
 
 [[channels]]
 index = 32

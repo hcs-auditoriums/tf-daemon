@@ -289,18 +289,77 @@ def make_pink_noise(n: int, rng: np.random.Generator) -> np.ndarray:
     return x.astype(np.float32)
 
 
+class VoiceGen:
+    """A speech-like voice: a harmonic series whose pitch glides between random
+    targets, in syllables that stop and start. ``block(n)`` is unit RMS while voiced."""
+
+    MAX_HARMONICS = 48
+    VOICE_FMAX = 5000.0
+
+    def __init__(self, rng: np.random.Generator, samplerate: int, blocksize: int,
+                 f0_range: tuple[float, float] = (95.0, 240.0)) -> None:
+        self._rng = rng
+        self.samplerate = samplerate
+        self.f0_range = f0_range
+        self._f0 = 140.0
+        self._f0_target = 140.0
+        self._phase = 0.0
+        self._env = 0.0
+        self._voiced = False
+        self._seg_left = 0  # samples remaining in current syllable or gap
+        self._k = np.arange(1, self.MAX_HARMONICS + 1, dtype=np.float64)[:, None]
+        self._k_amp = (1.0 / self._k)  # ~ -6 dB/octave rolloff
+        self._t = np.arange(1, blocksize + 1, dtype=np.float64)
+
+    def _next_segment(self) -> None:
+        fs = self.samplerate
+        self._voiced = not self._voiced
+        if self._voiced:
+            self._seg_left = int(fs * self._rng.uniform(0.12, 0.45))
+            self._f0_target = float(self._rng.uniform(*self.f0_range))
+        else:
+            self._seg_left = int(fs * self._rng.uniform(0.04, 0.35))
+
+    def block(self, n: int) -> np.ndarray:
+        fs = self.samplerate
+        if self._seg_left <= 0:
+            self._next_segment()
+        self._seg_left -= n
+
+        # Pitch glides toward the target (time constant ~80 ms), occasionally retargets.
+        if self._voiced and self._rng.random() < 0.02:
+            self._f0_target = float(self._rng.uniform(*self.f0_range))
+        a = 1.0 - np.exp(-n / (0.08 * fs))
+        f0_end = self._f0 + (self._f0_target - self._f0) * a
+        f0 = self._f0 + (f0_end - self._f0) * (self._t[:n] / n)
+        self._f0 = f0_end
+
+        phase = self._phase + np.cumsum(2 * np.pi * f0 / fs)
+        self._phase = float(phase[-1] % (2 * np.pi))
+
+        # Harmonics below the voice bandwidth, normalized to unit RMS.
+        mask = (self._k * f0[None, :]) < self.VOICE_FMAX
+        amps = self._k_amp * mask
+        norm = np.sqrt(0.5 * np.sum(amps * amps, axis=0))
+        v = np.sum(amps * np.sin(self._k * phase[None, :]), axis=0) / norm
+
+        # Syllable envelope: ~10 ms attack/release.
+        target = 1.0 if self._voiced else 0.0
+        env_end = self._env + (target - self._env) * (1.0 - np.exp(-n / (0.01 * fs)))
+        env = self._env + (env_end - self._env) * (self._t[:n] / n)
+        self._env = float(env_end)
+        return v * env
+
+
 class SynthSource(_PacedSource):
     """Synthetic test signal for development and for exercising the ring detector.
 
     Each analyzed channel gets: independent pink noise, a speech-like voice
-    (harmonic series whose pitch glides between random targets, in syllables
-    that stop and start), and a faint *steady* sine at ``tone_hz`` - the
-    simulated feedback ring.
+    (VoiceGen), and a faint *steady* sine at ``tone_hz`` - the simulated
+    feedback ring.
     """
 
     name = "synth"
-    _MAX_HARMONICS = 48
-    _VOICE_FMAX = 5000.0
 
     def __init__(self, channels: int, active: list[int], blocksize: int, *, speech_db: float, noise_db: float,
                  tone_hz: float, tone_db: float, seed: int = 1, samplerate: int = REQUIRED_SAMPLERATE) -> None:
@@ -321,63 +380,12 @@ class SynthSource(_PacedSource):
         self._noise = make_pink_noise(1 << 19, self._rng)
         self._noise_pos = [int(self._rng.integers(0, len(self._noise))) for _ in self.active]
 
-        # Voice state.
-        self._f0 = 140.0
-        self._f0_target = 140.0
-        self._phase = 0.0
-        self._env = 0.0
-        self._voiced = False
-        self._seg_left = 0  # samples remaining in current syllable or gap
-        self._k = np.arange(1, self._MAX_HARMONICS + 1, dtype=np.float64)[:, None]
-        self._k_amp = (1.0 / self._k)  # ~ -6 dB/octave rolloff
-
-        n = blocksize
-        self._t = np.arange(1, n + 1, dtype=np.float64)
-        self._voice = np.zeros(n, dtype=np.float64)
-        self._tone = np.zeros(n, dtype=np.float64)
-
-    def _next_segment(self) -> None:
-        fs = self.samplerate
-        self._voiced = not self._voiced
-        if self._voiced:
-            self._seg_left = int(fs * self._rng.uniform(0.12, 0.45))
-            self._f0_target = float(self._rng.uniform(95.0, 240.0))
-        else:
-            self._seg_left = int(fs * self._rng.uniform(0.04, 0.35))
-
-    def _voice_block(self, n: int) -> np.ndarray:
-        fs = self.samplerate
-        if self._seg_left <= 0:
-            self._next_segment()
-        self._seg_left -= n
-
-        # Pitch glides toward the target (time constant ~80 ms), occasionally retargets.
-        if self._voiced and self._rng.random() < 0.02:
-            self._f0_target = float(self._rng.uniform(95.0, 240.0))
-        a = 1.0 - np.exp(-n / (0.08 * fs))
-        f0_end = self._f0 + (self._f0_target - self._f0) * a
-        f0 = self._f0 + (f0_end - self._f0) * (self._t[:n] / n)
-        self._f0 = f0_end
-
-        phase = self._phase + np.cumsum(2 * np.pi * f0 / fs)
-        self._phase = float(phase[-1] % (2 * np.pi))
-
-        # Harmonics below the voice bandwidth, normalized to unit RMS.
-        mask = (self._k * f0[None, :]) < self._VOICE_FMAX
-        amps = self._k_amp * mask
-        norm = np.sqrt(0.5 * np.sum(amps * amps, axis=0))
-        v = np.sum(amps * np.sin(self._k * phase[None, :]), axis=0) / norm
-
-        # Syllable envelope: ~10 ms attack/release.
-        target = 1.0 if self._voiced else 0.0
-        env_end = self._env + (target - self._env) * (1.0 - np.exp(-n / (0.01 * fs)))
-        env = self._env + (env_end - self._env) * (self._t[:n] / n)
-        self._env = float(env_end)
-        return v * env
+        self._voice_gen = VoiceGen(self._rng, fs, blocksize)
+        self._t = np.arange(1, blocksize + 1, dtype=np.float64)
 
     def _fill(self, block: np.ndarray) -> None:
         n = block.shape[0]
-        voice = self._voice_block(n) * self._speech_amp
+        voice = self._voice_gen.block(n) * self._speech_amp
         ph = self._tone_phase + self._tone_w * self._t[:n]
         tone = self._tone_peak * np.sin(ph)
         self._tone_phase = float(ph[-1] % (2 * np.pi))

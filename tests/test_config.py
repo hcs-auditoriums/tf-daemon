@@ -72,7 +72,7 @@ def test_source_overrides():
     assert source_overrides("wav", "a.wav", tf5="off") == {"audio": {"source": "wav", "wav": "a.wav"},
                                                          "tf5": {"source": "off"}}
     demo = source_overrides("device", rf="off", demo=True)   # --demo simulates everything
-    assert demo == {"audio": {"source": "synth"}, "rf": {"source": "demo"}, "qlxd": {"source": "demo"},
+    assert demo == {"audio": {"source": "stage"}, "rf": {"source": "demo"}, "qlxd": {"source": "demo"},
                     "tf5": {"source": "demo"}}
 
 

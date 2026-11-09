@@ -29,6 +29,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from typing import Any
 
 from .editor.codec import (
     DESC_MD5,
@@ -51,7 +52,7 @@ from .editor.codec import (
     message,
     parse_message,
 )
-from .editor.dump import Dump
+from .editor.dump import Dump, channel_eq
 
 log = logging.getLogger(__name__)
 
@@ -294,7 +295,7 @@ class SimEditor:
             name, _, _ = self.mixing.resolve(e[4].value, e[5].value)
             with self._lock:
                 self.writes.append((name, e[7].value[0]))
-            self.mixing.apply(e[4].value, e[5].value, e[7].value[0])
+                self.mixing.apply(e[4].value, e[5].value, e[7].value[0])
             if self.echo_writes:
                 self._send(conn, "MMIX", set_param("Mixing", e[4].value, e[5].value, e[7].value[0],
                                                    origin=0xA0, vtype=e[7].type))
@@ -557,6 +558,26 @@ class SimConsole:
     def status(self) -> dict:
         return {"host": self.host, "rcp_port": self.rcp_port, "eq_port": self.eq_port,
                 "rcp_requests": self.rcp.requests, "eq_writes": len(self.editor.writes)}
+
+    # The desk as the simulated stage hears it (audio.stage.DeskMix).
+
+    def channel_eq(self, x: int) -> dict[str, Any] | None:
+        with self.editor._lock:
+            return channel_eq(self.editor.mixing, "InCh", x)
+
+    def fader_db(self, x: int) -> float | None:
+        return self._fader("InCh", x)
+
+    def master_db(self) -> float:
+        db = self._fader("St", 0)
+        return -138.0 if db is None else db
+
+    def _fader(self, kind: str, x: int) -> float | None:
+        values, prefix = self.rcp.values, RCP_PREFIX[kind]
+        with self.rcp._lock:
+            on = values.get((prefix + "Fader/On", x, 0), "1")
+            level = int(values.get((prefix + "Fader/Level", x, 0), "0"))
+        return None if on == "0" or level <= -32768 else level / 100
 
 
 def main(argv: list[str] | None = None) -> int:

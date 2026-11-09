@@ -3,7 +3,7 @@
 Everything lives in `config.toml`; any missing key falls back to the defaults in
 `tf_daemon/config.py`. Highlights:
 
-- Every device has a `source`: `audio.source` is `device`, `synth` or `wav`
+- Every device has a `source`: `audio.source` is `device`, `synth`, `stage` or `wav`
   (with `audio.wav = "path"`); `rf.source`, `qlxd.source` and `tf5.source` are
   `device`, `demo` (simulated) or `off`. The command-line flags (`--source`,
   `--rf-source`, ..., `--demo`) and the `TF_DAEMON_*_SOURCE` variables override
@@ -28,7 +28,9 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
 - `[[channels]]`: `index` (0-based device input) and `label`. These get their own
   buttons, a name in the input menu, and continuous analysis (their average and
   peak hold are already warm when you switch to them).
-- `[synth]`: test-signal levels and the ring tone frequency/level.
+- `[synth]`: test-signal levels and the ring tone frequency/level; for the simulated
+  stage also `house_mic` (input, -1 = none), `pa_leak_db` (PA level at an open mic) and
+  `room_rt60` (s).
 - `[rf]`: `source` (`device` = tinySA, `demo`, `off`), `auto_connect`
   (default `true`) and the default sweep (`start_hz`, `stop_hz`, `points` ≤ 450,
   `rbw` `"auto"` or kHz, `interval_s`). With `auto_connect` the tinySA is opened
