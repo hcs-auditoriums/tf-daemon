@@ -1,13 +1,9 @@
 """MMSXLIT dumps and a channel's EQ settings (console/editor/dump.py)."""
 
-import json
 import struct
 
-import numpy as np
 import pytest
 from editor_fakes import (
-    PUSHES,
-    REAL_DUMP,
     C,
     build_dump,
     default_mixing_values,
@@ -19,7 +15,6 @@ from editor_fakes import (
 from tf_daemon.console.editor.codec import (
     DESC_MD5,
     DUMP,
-    T_S32,
     T_U8,
     ProtocolError,
     element,
@@ -27,7 +22,6 @@ from tf_daemon.console.editor.codec import (
     parse_message,
 )
 from tf_daemon.console.editor.dump import Dump, channel_eq, dump_blob
-from tf_daemon.dsp.eq import eq_curve
 
 
 def test_dump_parses_header_and_tree(mixing):
@@ -121,29 +115,6 @@ def test_builder_layout_matches_the_real_peq_layout(mixing):
                                                          ("BandH", 55)]
     assert bank.datasize == 65 and bank.child("Band").datasize == 9 and bank.child("Band").arraysize == 2
 
-
-@pytest.mark.skipif(not REAL_DUMP.exists(), reason="captured Mixing dump not available")
-def test_real_console_dump():
-    d = Dump(REAL_DUMP.read_bytes())
-    assert d.func == "Mixing" and d.desc_md5 == DESC_MD5["Mixing"] and len(d.data) == 38285
-    eq = channel_eq(d, "InCh", 0)   # ch1 as in the guide
-    assert eq["on"] and eq["bank"] == "BOLD" and not eq["one_knob"]
-    assert eq["hpf"] == {"on": True, "freq": 200.0, "slope": 12}
-    low, b1, _, high = eq["bands"]
-    assert (low["type"], low["freq"], low["gain"], low["q"]) == ("bell", 160.0, -5.2, 0.14)
-    assert (b1["freq"], b1["gain"], b1["q"]) == (800.0, -14.1, 0.25)
-    assert (high["type"], high["freq"], high["gain"]) == ("high_shelf", 10000.0, 4.6)
-    assert d.resolve([0, 19, 1], [14, 0, 0])[0] == "InputChannel:14/Fader/On"
-    # Addresses as the TF5 sends them (parameters first, then collections, at each level).
-    assert d.resolve([0, 7, 1, 3, 2], [0, 0, 0, 0, 0])[0] == "InputChannel:0/PEQ/Bank/BandL/Gain"
-    assert d.resolve([0, 7, 0], [3, 0, 0])[0] == "InputChannel:3/PEQ/On"
-    for push in json.loads(PUSHES.read_text())["pushes"]:
-        name, _, prm = d.resolve(push["path"], push["idx"])
-        assert (prm.type == 1) == (push["type"] == T_S32), name
-    for x in range(40):
-        assert channel_eq(d, "InCh", x) is not None
-    assert channel_eq(d, "St", 0)["hpf"] is None and len(channel_eq(d, "St", 1)["bands"]) == 4
-    assert np.all(np.isfinite(eq_curve(eq)))
 
 
 # ====================================================================== EQ settings

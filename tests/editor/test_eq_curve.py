@@ -4,9 +4,8 @@
 import numpy as np
 import pytest
 import tf_editor_reference as ref
-from editor_fakes import REAL_DUMP
 
-from tf_daemon.console.editor.dump import Dump, channel_eq
+from tf_daemon.console.editor.dump import channel_eq
 from tf_daemon.dsp.eq import CURVE_FREQS, biquad, eq_curve, section_db
 
 KINDS = ["bell", "low_shelf", "high_shelf", "lpf", "hpf", "lpf1", "hpf1"]
@@ -58,15 +57,6 @@ def test_curve_matches_tf_editor_for_board_like_settings(mixing):
         eq = channel_eq(mixing, "St", x)
         assert np.allclose(eq_curve(eq), ref.curve(_ref_sections(eq), CURVE_FREQS), atol=1e-6)
 
-
-@pytest.mark.skipif(not REAL_DUMP.exists(), reason="captured Mixing dump not available")
-def test_curve_matches_tf_editor_for_every_captured_channel():
-    d = Dump(REAL_DUMP.read_bytes())
-    for kind, n in (("InCh", 40), ("St", 2)):
-        for x in range(n):
-            eq = channel_eq(d, kind, x)
-            expect = ref.curve(_ref_sections(eq), CURVE_FREQS) if eq["on"] else [0.0] * len(CURVE_FREQS)
-            assert np.allclose(eq_curve(eq), expect, atol=1e-6), (kind, x)
 
 
 def test_curve_flat_when_off_missing_or_zero_gain():

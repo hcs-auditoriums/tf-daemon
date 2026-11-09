@@ -26,10 +26,6 @@ from tf_daemon.console.sim import (
 
 PKG = Path(tf_daemon.__file__).parent
 EDITOR = PKG / "console" / "editor"
-RE_DIR = Path.home() / "yamaha-tf-re" / "capture"   # the reverse-engineering workspace, if present
-REAL_DUMP = RE_DIR / "dump_MMIX.bin"
-REAL_CSV = RE_DIR / "tcp50368.csv"
-EDITOR_IP = "10.99.40.20"
 # Every EQ / fader push the production TF5 sent to tf-daemon while InCh 1's EQ was changed on the
 # desk and from TF Editor (2026-11-08, tcpdump on the server; wire addresses and values only).
 PUSHES = Path(__file__).parent / "data" / "tf5_eq_pushes.json"
@@ -59,5 +55,5 @@ def assert_read_only(fake):
 __all__ = [
     "C", "SimEditor", "PASSWORD", "build_dump", "console_hash", "default_mixing_values", "dump_message",
     "mixing_tree", "property_tree", "set_param", "wait_until", "wire_address", "assert_read_only", "PKG", "EDITOR",
-    "RE_DIR", "REAL_DUMP", "REAL_CSV", "EDITOR_IP", "PUSHES", "CAPTURED_NAMES", "SUBSCRIBE", "EVENT_REPLY",
+    "PUSHES", "CAPTURED_NAMES", "SUBSCRIBE", "EVENT_REPLY",
 ]
