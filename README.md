@@ -196,10 +196,11 @@ gunicorn is configured through environment variables:
 | Variable | Default | |
 |---|---|---|
 | `TF_DAEMON_CONFIG` | `config.toml` | config path |
-| `TF_DAEMON_SOURCE` | `device` | `device`, `synth` or `wav` |
+| `TF_DAEMON_SOURCE` | `audio.source` | `device`, `synth` or `wav` |
 | `TF_DAEMON_WAV` | | WAV path for `wav` |
 | `TF_DAEMON_RF_SOURCE` | `rf.source` | `device`, `demo` or `off` |
 | `TF_DAEMON_QLXD_SOURCE` | `qlxd.source` | `device`, `demo` or `off` |
+| `TF_DAEMON_TF5_SOURCE` | `tf5.source` | `device`, `demo` or `off` |
 | `TF_DAEMON_BIND` | `0.0.0.0:8080` | listen address |
 | `TF_DAEMON_THREADS` | `8` | gunicorn threads |
 | `TF_DAEMON_LOG` | `INFO` | log level |
@@ -324,6 +325,12 @@ and dynamics, so compression isn't included.
 Everything lives in `config.toml`; any missing key falls back to the defaults in
 `tf_daemon/config.py`. Highlights:
 
+- Every device has a `source`: `audio.source` is `device`, `synth` or `wav`
+  (with `audio.wav = "path"`); `rf.source`, `qlxd.source` and `tf5.source` are
+  `device`, `demo` (simulated) or `off`. The command-line flags (`--source`,
+  `--rf-source`, ..., `--demo`) and the `TF_DAEMON_*_SOURCE` variables override
+  them. `enabled = false` under `[rf]` / `[qlxd]` (from earlier versions) still
+  means `off`. Unknown keys are logged at startup and ignored.
 - `audio.device`: case-insensitive substring of the capture device name (default `"TF"`).
   `audio.channels` (34) channels are opened (a device with fewer is zero-padded),
   and every one can be picked in the browser (the input menu). An input is
@@ -344,19 +351,19 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   buttons, a name in the input menu, and continuous analysis (their average and
   peak hold are already warm when you switch to them).
 - `[synth]`: test-signal levels and the ring tone frequency/level.
-- `[rf]`: `enabled`, `source` (`device` = tinySA, `demo`), `auto_connect`
+- `[rf]`: `source` (`device` = tinySA, `demo`, `off`), `auto_connect`
   (default `true`) and the default sweep (`start_hz`, `stop_hz`, `points` ≤ 450,
   `rbw` `"auto"` or kHz, `interval_s`). With `auto_connect` the tinySA is opened
   and swept from startup, nobody needs to press Connect, and the range is the
   span of the known QLX-D receivers (`start_hz`/`stop_hz` only apply when none
   are known). With `auto_connect = false` it opens only on **Connect**.
-- `[qlxd]`: `enabled`, `source` (`device`, `demo`), `interface` (NIC the
+- `[qlxd]`: `source` (`device`, `demo`, `off`), `interface` (NIC the
   receivers are on; `""` = first physical, up interface with a 169.254.x.x
   address), `hosts` (receivers to always monitor, `"ip"` or `"ip:port"`),
   `state_file`, `meter_poll_s`, `full_poll_s`. Interface and hosts are normally
   set on the `/qlxd` page (**Network…**); that choice is saved to `state_file`
   (default `qlxd_state.json` in the working directory) and overrides config.toml.
-- `[tf5]`: `host` (console IP; `""` = off), `port` (49280), `username` /
+- `[tf5]`: `source` (`device`, `demo`, `off`), `host` (console IP; `""` = off), `port` (49280), `username` /
   `password`, `poll_s`, `usb_patch`, `usb_post_fader` (default `false`: the USB
   Direct Outs are tapped before the fader; see Ring detection). With a host set, the server reads the TF5's
   channel names over Yamaha's remote control protocol and uses them as input
@@ -403,8 +410,8 @@ Levels are dBFS with AES17 convention: a full-scale sine reads 0 dBFS.
 tf_daemon/
   __main__.py      CLI + Flask dev server
   wsgi.py          gunicorn entry point (env-var configured)
-  app.py           Flask app factory; builds sources and modules
-  config.py        TOML loading, defaults, validation
+  app.py           Flask app factory; the one place modules are built and wired
+  config.py        typed, validated, immutable Config (one dataclass per section)
   modules.py       Module protocol: register(app, sock) / start / stop / status
   audio/           ── the audio analysis module ──
     sources.py     DeviceSource (PortAudio), SynthSource, WavSource
@@ -416,6 +423,7 @@ tf_daemon/
   rf/              ── the RF (tinySA) module ──
     devices.py     TinySADevice (tsapython, USB serial), DemoDevice
     engine.py      connect/disconnect, sweep thread, peak hold, JSON state hub
+    settings.py    SweepSettings (validated sweep range; also used by config.py)
     module.py      /rf page, HTTP + WebSocket routes for RF
   qlxd/            ── the Shure QLX-D module (read-only) ──
     protocol.py    TCP 2202 ASCII protocol: message framing, parsing, value decoding

@@ -33,7 +33,7 @@ from typing import Any
 from flask import Blueprint, Flask, jsonify, request
 
 from . import __version__
-from .config import load_config
+from .config import UpdateConfig, load_config
 
 log = logging.getLogger(__name__)
 
@@ -203,12 +203,12 @@ def _restart_now() -> None:
         log.exception("Restart command failed")
 
 
-def register_system(app: Flask, cfg: dict[str, Any], config_path: str | Path | None) -> None:
+def register_system(app: Flask, cfg: UpdateConfig, config_path: str | Path | None) -> None:
     cfg_file = Path(config_path).resolve() if config_path else None
     # The revision this process runs, fixed at startup: the checkout on disk
     # moves ahead of it while an update is in progress.
     running_revision = current_revision()
-    updater = Updater(str(cfg["update"]["remote"]), str(cfg["update"]["branch"]), running_revision)
+    updater = Updater(cfg.remote, cfg.branch, running_revision)
     bp = Blueprint("system", __name__, url_prefix="/api/system")
 
     @app.get("/config")

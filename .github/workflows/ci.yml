@@ -10,12 +10,14 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # Pinned, so the runner image changes only when we change it. The tests run
+    # in the dev container, so the host only needs Docker.
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     env:
       DEV_UID: "1001"   # the runner's user, so the container can write to the checkout
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Start the dev container
         run: docker compose up -d --build --wait

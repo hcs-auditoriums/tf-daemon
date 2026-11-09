@@ -1,7 +1,15 @@
-"""Configuration loading.
+"""Configuration: ``config.toml`` read into a typed, validated, immutable ``Config``.
 
-A single ``config.toml`` is read at startup and deep-merged over DEFAULTS, so
-any missing key gets a sensible value.
+Every key is optional; anything missing takes the default declared on its
+section below. Unknown keys are logged and ignored. Each device has a
+``source``: ``device`` (the real hardware), ``demo`` / ``synth`` / ``wav``
+(simulated) or ``off``.
+
+Code that needs different settings (the command line, tests) passes
+``overrides`` in the same nested shape as the TOML file, so everything goes
+through the same validation:
+
+    load_config("config.toml", {"tf5": {"source": "demo"}})
 """
 
 from __future__ import annotations
@@ -9,114 +17,384 @@ from __future__ import annotations
 import copy
 import logging
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
-from .rf.engine import SweepSettings
+from .rf.settings import SweepSettings
 
 log = logging.getLogger(__name__)
 
 REQUIRED_SAMPLERATE = 48000
 
-DEFAULTS: dict[str, Any] = {
-    "server": {"host": "0.0.0.0", "port": 8080},
-    "audio": {
-        "device": "TF",
-        "channels": 34,  # capture channels (TF5: 32 + St L/R); a device with fewer is zero-padded
-        "samplerate": REQUIRED_SAMPLERATE,
-        "blocksize": 1200,
-        "buffer_seconds": 2.0,
-    },
-    "dsp": {
-        "fft_size": 32768,
-        "hop": 2400,
-        "average_tau": 3.0,
-        "display_fmin": 50.0,
-        "display_fmax": 16000.0,
-        "display_bands_per_octave": 48,
-        "db_floor": -140.0,
-    },
-    "synth": {
-        "speech_db": -20.0,
-        "noise_db": -50.0,
-        "tone_hz": 2500.0,
-        "tone_db": -15.0,
-        "seed": 1,
-    },
-    "rf": {
-        "enabled": True,
-        "source": "device",  # device (tinySA) | demo
-        "auto_connect": True,  # keep the tinySA connected and sweeping (range: the QLX-D receivers)
-        "start_hz": 88_000_000,
-        "stop_hz": 108_000_000,
-        "points": 290,
-        "rbw": "auto",
-        "interval_s": 0.5,
-    },
-    "qlxd": {
-        "enabled": True,
-        "source": "device",  # device (real receivers on the network) | demo
-        "interface": "",     # NIC for discovery; "" = first with a 169.254.x.x address
-        "hosts": [],         # receivers to always monitor, "ip" or "ip:port"
-        "state_file": "qlxd_state.json",  # UI-edited interface/hosts, overrides the two above
-        "meter_poll_s": 1.0,
-        "full_poll_s": 10.0,
-    },
-    "ring": {
-        # Ring / feedback detection on every analyzed input (always Main L/R).
-        "enabled": True,
-        "sensitivity": "normal",  # low | normal | high
-        "fmin": 80.0,             # Hz, detection range
-        "fmax": 12000.0,
-        "mains_hz": 60.0,         # skip mains hum harmonics up to 1 kHz (50 in Europe; 0 = off)
-    },
-    "vocal": {
-        # Vocal EQ assist for mic checks (suggestions only; never changes the desk).
-        "enabled": False,
-        "inputs": [],        # 0-based inputs that are vocal mics; [] = any input
-        "listen_s": 20.0,    # seconds of speech to collect
-        "max_cut_db": 6.0,
-        "max_boost_db": 3.0,
-    },
-    "tf5": {
-        # Read channel names (and settings) from the mixer over the network.
-        "host": "",          # console IP; "" = don't connect
-        "port": 49280,       # Yamaha remote control protocol
-        "username": "",      # the TF5's protocol has no login; kept for completeness, not sent
-        "password": "",
-        "poll_s": 30.0,      # full re-read period (changes on the desk are pushed in between)
-        "usb_patch": [],     # per USB capture channel: "InCh N", "St L", "St R" or ""; [] = TF default
-        "usb_post_fader": False,  # USB feeds taken after the fader? (ring attribution adds the fader if not)
-        "eq": False,         # also read the EQ (TF Editor protocol, read-only) for the spectrum overlay
-        "eq_port": 50368,
-        "eq_write": False,   # let a person apply suggested EQ to the desk (vocal assist "Apply to desk")
-    },
-    "update": {
-        # Where the /config page's Update button pulls from.
-        "remote": "https://github.com/hcs-auditoriums/tf-daemon.git",
-        "branch": "main",
-    },
-    # The TF's default USB patch puts the stereo bus on USB 33/34; every other
-    # input can be named from the console ([tf5]).
-    "channels": [
-        {"index": 32, "label": "Main L"},
-        {"index": 33, "label": "Main R"},
-    ],
-}
+DEVICE_SOURCES = ("device", "demo", "off")
+AUDIO_SOURCES = ("device", "synth", "wav")
 
 
 class ConfigError(ValueError):
     pass
 
 
+# --------------------------------------------------------------------- sections
+
+
+@dataclass(frozen=True)
+class Section:
+    """A ``[table]`` of config.toml. Subclasses declare fields with defaults and
+    check their values in ``validate``."""
+
+    NAME: ClassVar[str] = ""
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Section:
+        if not isinstance(d, dict):
+            raise ConfigError(f"[{cls.NAME}] must be a table")
+        d = cls._prepare(dict(d))
+        known = {f.name: f for f in fields(cls)}
+        for key in sorted(set(d) - set(known)):
+            log.warning("Ignoring unknown config key %s.%s", cls.NAME, key)
+        return cls(**{k: _coerce(cls.NAME, k, known[k].default, v) for k, v in d.items() if k in known})
+
+    @classmethod
+    def _prepare(cls, d: dict[str, Any]) -> dict[str, Any]:
+        """Hook for keys renamed or reshaped since earlier versions."""
+        return d
+
+    def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        pass
+
+
+def _coerce(section: str, key: str, default: Any, value: Any) -> Any:
+    """``value`` as the type of the field's default, or ConfigError naming the key."""
+    where = f"{section}.{key}"
+    if isinstance(default, bool):
+        if not isinstance(value, bool):
+            raise ConfigError(f"{where} must be true or false, got {value!r}")
+        return value
+    if isinstance(default, int):
+        if isinstance(value, bool) or not isinstance(value, int | float) or value != int(value):
+            raise ConfigError(f"{where} must be a whole number, got {value!r}")
+        return int(value)
+    if isinstance(default, float):
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ConfigError(f"{where} must be a number, got {value!r}")
+        return float(value)
+    if isinstance(default, str):
+        if not isinstance(value, str):
+            raise ConfigError(f"{where} must be a string, got {value!r}")
+        return value
+    if isinstance(default, tuple):
+        if not isinstance(value, list | tuple):
+            raise ConfigError(f"{where} must be a list, got {value!r}")
+        return tuple(value)
+    raise AssertionError(f"no coercion for {where}")
+
+
+def _upgrade(data: dict[str, Any]) -> dict[str, Any]:
+    """Keys from earlier versions, in their current form. Applied to the file only,
+    before overrides, so a source given on the command line still wins."""
+    data = copy.deepcopy(data)
+    for section in ("rf", "qlxd"):  # ``enabled = false`` turned these off; now ``source = "off"``
+        d = data.get(section)
+        if isinstance(d, dict) and "enabled" in d:
+            enabled = d.pop("enabled")
+            if not isinstance(enabled, bool):
+                raise ConfigError(f"{section}.enabled must be true or false, got {enabled!r}")
+            if not enabled:
+                d["source"] = "off"
+    return data
+
+
+def _check_source(section: str, source: str, choices: tuple[str, ...]) -> None:
+    if source not in choices:
+        raise ConfigError(f"{section}.source must be {', '.join(choices[:-1])} or {choices[-1]}, got {source!r}")
+
+
+@dataclass(frozen=True)
+class ServerConfig(Section):
+    NAME: ClassVar[str] = "server"
+    host: str = "0.0.0.0"
+    port: int = 8080
+
+    def validate(self) -> None:
+        if not 1 <= self.port <= 65535:
+            raise ConfigError(f"server.port must be 1..65535, got {self.port}")
+
+
+@dataclass(frozen=True)
+class AudioConfig(Section):
+    NAME: ClassVar[str] = "audio"
+    source: str = "device"    # device (capture) | synth (test signal) | wav (loop a file)
+    wav: str = ""             # file for source = "wav"
+    device: str = "TF"        # case-insensitive substring of the capture device name
+    channels: int = 34        # capture channels (TF5: 32 + St L/R); a device with fewer is zero-padded
+    samplerate: int = REQUIRED_SAMPLERATE
+    blocksize: int = 1200
+    buffer_seconds: float = 2.0
+
+    def validate(self) -> None:
+        _check_source("audio", self.source, AUDIO_SOURCES)
+        if self.source == "wav" and not self.wav:
+            raise ConfigError("audio.source = \"wav\" needs a file (audio.wav, or --source wav PATH)")
+        if self.samplerate != REQUIRED_SAMPLERATE:
+            raise ConfigError(f"audio.samplerate must be {REQUIRED_SAMPLERATE} (TF5 is fixed at 48 kHz), "
+                              f"got {self.samplerate}")
+        if not 1 <= self.channels <= 128:
+            raise ConfigError("audio.channels must be between 1 and 128")
+        if self.blocksize < 1:
+            raise ConfigError("audio.blocksize must be >= 1")
+
+
+@dataclass(frozen=True)
+class DspConfig(Section):
+    NAME: ClassVar[str] = "dsp"
+    fft_size: int = 32768     # ~1.46 Hz bins at 48 kHz
+    hop: int = 2400           # ~20 updates/s
+    average_tau: float = 3.0
+    display_fmin: float = 50.0
+    display_fmax: float = 16000.0
+    display_bands_per_octave: int = 48
+    db_floor: float = -140.0
+
+    def validate(self) -> None:
+        n = self.fft_size
+        if n < 1024 or n & (n - 1):
+            raise ConfigError(f"dsp.fft_size must be a power of two >= 1024, got {n}")
+        if not 1 <= self.hop <= n:
+            raise ConfigError(f"dsp.hop must be between 1 and fft_size, got {self.hop}")
+        if self.average_tau <= 0:
+            raise ConfigError("dsp.average_tau must be > 0")
+        if not 0 < self.display_fmin < self.display_fmax <= REQUIRED_SAMPLERATE / 2:
+            raise ConfigError(f"need 0 < display_fmin < display_fmax <= {REQUIRED_SAMPLERATE / 2}")
+
+
+@dataclass(frozen=True)
+class SynthConfig(Section):
+    """The synthetic test signal (audio.source = "synth"). Levels are AES17 dBFS."""
+
+    NAME: ClassVar[str] = "synth"
+    speech_db: float = -20.0
+    noise_db: float = -50.0
+    tone_hz: float = 2500.0   # the steady "ring" the feedback detector should find
+    tone_db: float = -15.0    # relative to speech_db
+    seed: int = 1
+
+
+@dataclass(frozen=True)
+class RFConfig(Section):
+    NAME: ClassVar[str] = "rf"
+    source: str = "device"    # device (tinySA) | demo | off
+    auto_connect: bool = True  # keep the tinySA connected and sweeping (range: the QLX-D receivers)
+    start_hz: int = 88_000_000
+    stop_hz: int = 108_000_000
+    points: int = 290
+    rbw: str = "auto"
+    interval_s: float = 0.5
+
+    @classmethod
+    def _prepare(cls, d: dict[str, Any]) -> dict[str, Any]:
+        if isinstance(d.get("rbw"), int) and not isinstance(d["rbw"], bool):
+            d["rbw"] = str(d["rbw"])  # rbw = 100 means "100" (kHz)
+        return d
+
+    def validate(self) -> None:
+        _check_source("rf", self.source, DEVICE_SOURCES)
+        try:
+            _ = self.sweep
+        except ValueError as e:
+            raise ConfigError(f"[rf] {e}") from None
+
+    @property
+    def sweep(self) -> SweepSettings:
+        return SweepSettings.from_dict({"start_hz": self.start_hz, "stop_hz": self.stop_hz, "points": self.points,
+                                        "rbw": self.rbw, "interval_s": self.interval_s})
+
+
+@dataclass(frozen=True)
+class QLXDConfig(Section):
+    NAME: ClassVar[str] = "qlxd"
+    source: str = "device"    # device (receivers on the network) | demo | off
+    interface: str = ""       # NIC for discovery; "" = first with a 169.254.x.x address
+    hosts: tuple[str, ...] = ()  # receivers to always monitor, "ip" or "ip:port"
+    state_file: str = "qlxd_state.json"  # UI-edited interface/hosts, overrides the two above
+    meter_poll_s: float = 1.0
+    full_poll_s: float = 10.0
+
+    def validate(self) -> None:
+        _check_source("qlxd", self.source, DEVICE_SOURCES)
+        if not all(isinstance(h, str) for h in self.hosts):
+            raise ConfigError("qlxd.hosts must be a list of \"ip\" or \"ip:port\" strings")
+        for key in ("meter_poll_s", "full_poll_s"):
+            if not 0.2 <= getattr(self, key) <= 300:
+                raise ConfigError(f"qlxd.{key} must be between 0.2 and 300")
+
+
+@dataclass(frozen=True)
+class RingConfig(Section):
+    """Ring / feedback detection on every analyzed input (always Main L/R)."""
+
+    NAME: ClassVar[str] = "ring"
+    enabled: bool = True
+    sensitivity: str = "normal"  # low | normal | high
+    fmin: float = 80.0           # Hz, detection range
+    fmax: float = 12000.0
+    mains_hz: float = 60.0       # skip mains hum harmonics up to 1 kHz (50 in Europe; 0 = off)
+
+    @classmethod
+    def _prepare(cls, d: dict[str, Any]) -> dict[str, Any]:
+        if isinstance(d.get("sensitivity"), str):
+            d["sensitivity"] = d["sensitivity"].lower()
+        return d
+
+    def validate(self) -> None:
+        if self.sensitivity not in ("low", "normal", "high"):
+            raise ConfigError(f"ring.sensitivity must be low, normal or high, got {self.sensitivity!r}")
+        if not 20 <= self.fmin < self.fmax <= 20000:
+            raise ConfigError("ring.fmin / ring.fmax must satisfy 20 <= fmin < fmax <= 20000")
+        if self.mains_hz not in (0.0, 50.0, 60.0):
+            raise ConfigError("ring.mains_hz must be 50, 60 or 0")
+
+
+@dataclass(frozen=True)
+class VocalConfig(Section):
+    """Vocal EQ assist for mic checks (suggestions; the desk changes only on a click)."""
+
+    NAME: ClassVar[str] = "vocal"
+    enabled: bool = False
+    inputs: tuple[int, ...] = ()  # 0-based inputs that are vocal mics; () = any input
+    listen_s: float = 20.0        # seconds of speech to collect
+    max_cut_db: float = 6.0
+    max_boost_db: float = 3.0
+
+    def validate(self) -> None:
+        if not all(isinstance(i, int) and not isinstance(i, bool) and i >= 0 for i in self.inputs):
+            raise ConfigError("vocal.inputs must be a list of input indices (0-based)")
+        if not 6 <= self.listen_s <= 120:
+            raise ConfigError("vocal.listen_s must be between 6 and 120")
+        if not 1 <= self.max_cut_db <= 12 or not 0 <= self.max_boost_db <= 6:
+            raise ConfigError("vocal.max_cut_db must be 1..12 and vocal.max_boost_db 0..6")
+
+
+@dataclass(frozen=True)
+class TF5Config(Section):
+    """The mixer over the network: names and settings (RCP), EQ (TF Editor protocol)."""
+
+    NAME: ClassVar[str] = "tf5"
+    source: str = "device"    # device (the console at host; off while host is "") | demo | off
+    host: str = ""            # console IP
+    port: int = 49280         # Yamaha remote control protocol
+    username: str = ""        # the TF5's protocol has no login; kept for completeness, not sent
+    password: str = ""
+    poll_s: float = 30.0      # full re-read period (changes on the desk are pushed in between)
+    usb_patch: tuple[str, ...] = ()  # per USB capture channel: "InCh N", "St L", "St R" or ""; () = TF default
+    usb_post_fader: bool = False     # USB feeds taken after the fader? (ring attribution adds the fader if not)
+    eq: bool = False          # also read the EQ (TF Editor protocol, read-only) for the spectrum overlay
+    eq_port: int = 50368
+    eq_write: bool = False    # let a person apply suggested EQ to the desk (vocal assist "Apply to desk")
+
+    def validate(self) -> None:
+        _check_source("tf5", self.source, DEVICE_SOURCES)
+        for key in ("port", "eq_port"):
+            if not 1 <= getattr(self, key) <= 65535:
+                raise ConfigError(f"tf5.{key} must be 1..65535, got {getattr(self, key)}")
+        if not 1 <= self.poll_s <= 3600:
+            raise ConfigError("tf5.poll_s must be between 1 and 3600")
+        from .tf5 import parse_patch_entry  # local: tf5 imports flask, config shouldn't at import time
+        for entry in self.usb_patch:
+            if not isinstance(entry, str):
+                raise ConfigError(f"tf5.usb_patch entries must be strings, got {entry!r}")
+            try:
+                parse_patch_entry(entry)
+            except ValueError as e:
+                raise ConfigError(f"[tf5] {e}") from None
+        if self.eq_write and not self.eq:
+            raise ConfigError("tf5.eq_write needs tf5.eq = true (EQ is written over the same connection)")
+
+    @property
+    def active_source(self) -> str:
+        """``source``, except that a device without a host is off."""
+        return "off" if self.source == "device" and not self.host.strip() else self.source
+
+
+@dataclass(frozen=True)
+class UpdateConfig(Section):
+    """Where the /config page's Update button pulls from."""
+
+    NAME: ClassVar[str] = "update"
+    remote: str = "https://github.com/hcs-auditoriums/tf-daemon.git"
+    branch: str = "main"
+
+
 @dataclass(frozen=True)
 class Channel:
+    """A ``[[channels]]`` entry: a named input, always analyzed."""
+
     index: int
-    label: str
+    label: str | None = None  # None: the console's name, else "Ch N"
+
+    @property
+    def name(self) -> str:
+        return self.label or f"Ch {self.index + 1}"
 
 
-def _merge(base: dict, override: dict) -> dict:
+# The TF's default USB patch puts the stereo bus on USB 33/34; every other
+# input can be named from the console ([tf5]).
+DEFAULT_CHANNELS = (Channel(32, "Main L"), Channel(33, "Main R"))
+
+
+@dataclass(frozen=True)
+class Config:
+    server: ServerConfig = field(default_factory=ServerConfig)
+    audio: AudioConfig = field(default_factory=AudioConfig)
+    dsp: DspConfig = field(default_factory=DspConfig)
+    synth: SynthConfig = field(default_factory=SynthConfig)
+    rf: RFConfig = field(default_factory=RFConfig)
+    qlxd: QLXDConfig = field(default_factory=QLXDConfig)
+    ring: RingConfig = field(default_factory=RingConfig)
+    vocal: VocalConfig = field(default_factory=VocalConfig)
+    tf5: TF5Config = field(default_factory=TF5Config)
+    update: UpdateConfig = field(default_factory=UpdateConfig)
+    channels: tuple[Channel, ...] = DEFAULT_CHANNELS
+
+    def __post_init__(self) -> None:
+        if not self.channels:
+            raise ConfigError("at least one [[channels]] entry is required")
+        seen: set[int] = set()
+        for c in self.channels:
+            if c.index < 0:
+                raise ConfigError(f"channel index must be >= 0, got {c.index}")
+            if c.index in seen:
+                raise ConfigError(f"channel index {c.index} listed twice")
+            seen.add(c.index)
+        if self.audio.buffer_seconds * self.audio.samplerate < self.dsp.fft_size + self.dsp.hop:
+            raise ConfigError("audio.buffer_seconds is too short to hold one FFT frame plus a hop")
+
+
+SECTIONS: dict[str, type[Section]] = {
+    "server": ServerConfig, "audio": AudioConfig, "dsp": DspConfig, "synth": SynthConfig, "rf": RFConfig,
+    "qlxd": QLXDConfig, "ring": RingConfig, "vocal": VocalConfig, "tf5": TF5Config, "update": UpdateConfig,
+}
+
+
+def _channels_from(value: Any) -> tuple[Channel, ...]:
+    if not isinstance(value, list):
+        raise ConfigError("[[channels]] must be a list of tables")
+    out = []
+    for c in value:
+        if not isinstance(c, dict) or "index" not in c:
+            raise ConfigError(f"[[channels]] entry missing 'index': {c}")
+        for key in sorted(set(c) - {"index", "label"}):
+            log.warning("Ignoring unknown config key channels.%s", key)
+        index = _coerce("channels", "index", 0, c["index"])
+        label = _coerce("channels", "label", "", c["label"]) if "label" in c else None
+        out.append(Channel(index, label))
+    return tuple(out)
+
+
+def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     out = copy.deepcopy(base)
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(out.get(key), dict):
@@ -126,8 +404,18 @@ def _merge(base: dict, override: dict) -> dict:
     return out
 
 
-def load_config(path: str | Path | None) -> dict[str, Any]:
-    """Load ``path`` (if it exists) over DEFAULTS and validate the result."""
+def config_from(data: dict[str, Any]) -> Config:
+    """A validated Config from TOML-shaped ``data``; missing keys take the defaults."""
+    for key in sorted(set(data) - set(SECTIONS) - {"channels"}):
+        log.warning("Ignoring unknown config section [%s]", key)
+    kwargs: dict[str, Any] = {name: cls.from_dict(data[name]) for name, cls in SECTIONS.items() if name in data}
+    if "channels" in data:
+        kwargs["channels"] = _channels_from(data["channels"])
+    return Config(**kwargs)
+
+
+def load_config(path: str | Path | None, overrides: dict[str, Any] | None = None) -> Config:
+    """Read ``path`` (if given and it exists), apply ``overrides``, validate."""
     user: dict[str, Any] = {}
     if path is not None:
         p = Path(path)
@@ -137,113 +425,4 @@ def load_config(path: str | Path | None) -> dict[str, Any]:
             log.info("Loaded config from %s", p)
         else:
             log.warning("Config file %s not found; using defaults", p)
-    cfg = _merge(DEFAULTS, user)
-    _validate(cfg)
-    return cfg
-
-
-def channels_from(cfg: dict[str, Any]) -> list[Channel]:
-    return [Channel(int(c["index"]), str(c.get("label", f"Ch {int(c['index']) + 1}"))) for c in cfg["channels"]]
-
-
-def _validate(cfg: dict[str, Any]) -> None:
-    sr = int(cfg["audio"]["samplerate"])
-    if sr != REQUIRED_SAMPLERATE:
-        raise ConfigError(f"audio.samplerate must be {REQUIRED_SAMPLERATE} (TF5 is fixed at 48 kHz), got {sr}")
-
-    dsp = cfg["dsp"]
-    n = int(dsp["fft_size"])
-    if n < 1024 or n & (n - 1):
-        raise ConfigError(f"dsp.fft_size must be a power of two >= 1024, got {n}")
-    hop = int(dsp["hop"])
-    if not 1 <= hop <= n:
-        raise ConfigError(f"dsp.hop must be between 1 and fft_size, got {hop}")
-    if float(dsp["average_tau"]) <= 0:
-        raise ConfigError("dsp.average_tau must be > 0")
-    fmin, fmax = float(dsp["display_fmin"]), float(dsp["display_fmax"])
-    if not 0 < fmin < fmax <= sr / 2:
-        raise ConfigError(f"need 0 < display_fmin < display_fmax <= {sr / 2}")
-
-    if not 1 <= int(cfg["audio"]["channels"]) <= 128:
-        raise ConfigError("audio.channels must be between 1 and 128")
-
-    buf_frames = float(cfg["audio"]["buffer_seconds"]) * sr
-    if buf_frames < n + hop:
-        raise ConfigError("audio.buffer_seconds is too short to hold one FFT frame plus a hop")
-
-    chans = cfg["channels"]
-    if not isinstance(chans, list) or not chans:
-        raise ConfigError("at least one [[channels]] entry is required")
-    seen = set()
-    for c in chans:
-        if "index" not in c:
-            raise ConfigError(f"[[channels]] entry missing 'index': {c}")
-        idx = int(c["index"])
-        if idx < 0:
-            raise ConfigError(f"channel index must be >= 0, got {idx}")
-        if idx in seen:
-            raise ConfigError(f"channel index {idx} listed twice")
-        seen.add(idx)
-
-    rf = cfg["rf"]
-    if str(rf["source"]).lower() not in ("device", "demo"):
-        raise ConfigError(f"rf.source must be 'device' or 'demo', got {rf['source']!r}")
-    try:
-        SweepSettings.from_dict(rf)
-    except ValueError as e:
-        raise ConfigError(f"[rf] {e}") from None
-
-    r = cfg["ring"]
-    if str(r["sensitivity"]).lower() not in ("low", "normal", "high"):
-        raise ConfigError(f"ring.sensitivity must be low, normal or high, got {r['sensitivity']!r}")
-    if not 20 <= float(r["fmin"]) < float(r["fmax"]) <= 20000:
-        raise ConfigError("ring.fmin / ring.fmax must satisfy 20 <= fmin < fmax <= 20000")
-    if float(r["mains_hz"]) not in (0.0, 50.0, 60.0):
-        raise ConfigError("ring.mains_hz must be 50, 60 or 0")
-
-    v = cfg["vocal"]
-    if not isinstance(v["enabled"], bool):
-        raise ConfigError("vocal.enabled must be true or false")
-    if not isinstance(v["inputs"], list) or not all(isinstance(i, int) and i >= 0 for i in v["inputs"]):
-        raise ConfigError("vocal.inputs must be a list of input indices (0-based)")
-    if not 6 <= float(v["listen_s"]) <= 120:
-        raise ConfigError("vocal.listen_s must be between 6 and 120")
-    if not 1 <= float(v["max_cut_db"]) <= 12 or not 0 <= float(v["max_boost_db"]) <= 6:
-        raise ConfigError("vocal.max_cut_db must be 1..12 and vocal.max_boost_db 0..6")
-
-    t = cfg["tf5"]
-    if not isinstance(t["host"], str):
-        raise ConfigError("tf5.host must be a string (IP address or hostname)")
-    if not 1 <= int(t["port"]) <= 65535:
-        raise ConfigError(f"tf5.port must be 1..65535, got {t['port']}")
-    if not isinstance(t["username"], str) or not isinstance(t["password"], str):
-        raise ConfigError("tf5.username and tf5.password must be strings")
-    if not 1 <= float(t["poll_s"]) <= 3600:
-        raise ConfigError("tf5.poll_s must be between 1 and 3600")
-    if not isinstance(t["usb_post_fader"], bool):
-        raise ConfigError("tf5.usb_post_fader must be true or false")
-    if not isinstance(t["usb_patch"], list):
-        raise ConfigError("tf5.usb_patch must be a list of strings")
-    from .tf5 import parse_patch_entry  # local: tf5 imports flask, config shouldn't at import time
-    for entry in t["usb_patch"]:
-        try:
-            parse_patch_entry(entry)
-        except ValueError as e:
-            raise ConfigError(f"[tf5] {e}") from None
-    if not isinstance(t["eq"], bool):
-        raise ConfigError("tf5.eq must be true or false")
-    if not 1 <= int(t["eq_port"]) <= 65535:
-        raise ConfigError(f"tf5.eq_port must be 1..65535, got {t['eq_port']}")
-    if not isinstance(t["eq_write"], bool):
-        raise ConfigError("tf5.eq_write must be true or false")
-    if t["eq_write"] and not t["eq"]:
-        raise ConfigError("tf5.eq_write needs tf5.eq = true (EQ is written over the same connection)")
-
-    q = cfg["qlxd"]
-    if str(q["source"]).lower() not in ("device", "demo"):
-        raise ConfigError(f"qlxd.source must be 'device' or 'demo', got {q['source']!r}")
-    if not isinstance(q["hosts"], list):
-        raise ConfigError("qlxd.hosts must be a list of \"ip\" or \"ip:port\" strings")
-    for key in ("meter_poll_s", "full_poll_s"):
-        if not 0.2 <= float(q[key]) <= 300:
-            raise ConfigError(f"qlxd.{key} must be between 0.2 and 300")
+    return config_from(_merge(_upgrade(user), overrides or {}))

@@ -533,8 +533,6 @@ class SimConsole:
     49280 / 50368 to stand in for a console at ``tf5.host``.
     """
 
-    name = "tf5sim"
-
     def __init__(self, host: str = "127.0.0.1", rcp_port: int = 0, eq_port: int = 0, drift_s: float = 4.0) -> None:
         self.host = host
         self.rcp = SimRCP(host=host, port=rcp_port, drift_s=drift_s)
@@ -545,16 +543,6 @@ class SimConsole:
     def close(self) -> None:
         self.rcp.close()
         self.editor.close()
-
-    # Module interface, so the app can own the simulator in demo mode.
-    def register(self, app, sock) -> None:
-        pass
-
-    def start(self) -> None:
-        pass
-
-    def stop(self) -> None:
-        self.close()
 
     def status(self) -> dict:
         return {"host": self.host, "rcp_port": self.rcp_port, "eq_port": self.eq_port,

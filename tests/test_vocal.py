@@ -4,6 +4,7 @@ import time
 
 import numpy as np
 import pytest
+from helpers import make_config
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError, load_config
@@ -128,9 +129,8 @@ def test_not_enough_speech_or_not_a_voice(voice):
 # ---------------------------------------------------------------- module
 
 def _engine_and_module(**vocal):
-    cfg = load_config(None)
-    cfg["vocal"].update(enabled=True, listen_s=10.0, **vocal)
-    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="off")
+    cfg = make_config(vocal={"enabled": True, "listen_s": 10.0, **vocal})
+    modules = build_modules(cfg)
     return cfg, modules, modules[0].engine, next(m for m in modules if m.name == "vocal")
 
 
@@ -174,9 +174,9 @@ def test_only_listed_inputs():
 
 
 def test_routes_and_off_by_default():
-    cfg = load_config(None)
-    assert cfg["vocal"]["enabled"] is False
-    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="off")
+    cfg = make_config()
+    assert cfg.vocal.enabled is False
+    modules = build_modules(cfg)
     assert "vocal" not in [m.name for m in modules]
     app = create_app(cfg, modules)
     try:
@@ -208,8 +208,8 @@ def test_config_validation(tmp_path):
 
 
 def test_engine_taps_see_analyzed_inputs():
-    cfg = load_config(None)
-    modules = build_modules(cfg, "synth", rf_source="off", qlxd_source="off")
+    cfg = make_config()
+    modules = build_modules(cfg)
     seen = set()
     modules[0].engine.add_tap(lambda i, samples, t: seen.add((i, len(samples))))
     app = create_app(cfg, modules)

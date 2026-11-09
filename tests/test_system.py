@@ -1,10 +1,10 @@
 import time
 
 import pytest
+from helpers import make_config
 
 from tf_daemon import system
 from tf_daemon.app import build_modules, create_app
-from tf_daemon.config import load_config
 
 
 @pytest.fixture
@@ -12,8 +12,8 @@ def client_for(tmp_path):
     apps = []
 
     def make(config_path):
-        cfg = load_config(None)
-        app = create_app(cfg, build_modules(cfg, "synth", rf_source="off", qlxd_source="off"), config_path=config_path)
+        cfg = make_config()
+        app = create_app(cfg, build_modules(cfg), config_path=config_path)
         apps.append(app)
         return app.test_client()
 
