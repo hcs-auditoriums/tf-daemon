@@ -17,6 +17,7 @@ import time
 import wave
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -89,7 +90,7 @@ class DeviceSource(Source):
             except (OSError, ImportError) as e:  # PortAudio shared library (or the package) missing
                 self._load_error = f"Could not load PortAudio ({e}). On Raspberry Pi OS: sudo apt install libportaudio2"
         self.device_name: str | None = None
-        self._stream = None
+        self._stream: Any = None
         self._open_channels = 0
         self._pad = np.zeros((blocksize, channels), dtype=np.float32)
         self._sink: Sink | None = None

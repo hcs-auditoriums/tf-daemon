@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import itertools
 import math
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -73,7 +74,7 @@ BOOST_NAMES = [(0, 5000, "presence (clarity)"), (5000, 20000, "air")]
 SLOTS = [("L", 0, 400), ("1", 250, 1600), ("2", 1000, 5000), ("H", 3500, 20000)]
 
 
-def _name(table: list[tuple[float, float, str]], f: float) -> str:
+def _name(table: Sequence[tuple[float, float, str]], f: float) -> str:
     return next(n for lo, hi, n in table if lo <= f < hi)
 
 
@@ -303,10 +304,10 @@ def _assign_slots(moves: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     best, best_cost = None, math.inf
     for combo in itertools.combinations(range(len(SLOTS)), len(moves)):
-        cost = sum(outside(s, m["freq"]) for s, m in zip(combo, moves))
+        cost = sum(outside(s, m["freq"]) for s, m in zip(combo, moves, strict=True))
         if cost < best_cost:
             best, best_cost = combo, cost
-    for s, m in zip(best or (), moves):
+    for s, m in zip(best or (), moves, strict=False):  # best is None when nothing fits
         m["band"] = SLOTS[s][0]
     return moves
 
@@ -332,6 +333,7 @@ def analyze(collector: VoiceCollector, rings: list[dict[str, Any]] | None = None
         # Where the fundamental's energy concentrates: from just under the lowest
         # pitch to a little above the typical one.
         f0_high = float(np.percentile(collector.f0s, 90))
+        assert f0 is not None  # set under the same condition as f0_low
         fundamental = (POINTS >= 0.85 * f0_low) & (POINTS <= max(1.25 * f0, f0_high))
     diff = _difference(collector)
     ref = (POINTS >= NORM_LO) & (POINTS <= NORM_HI) & ~fundamental
@@ -363,7 +365,7 @@ def analyze(collector: VoiceCollector, rings: list[dict[str, Any]] | None = None
         off = new_off
     moves = _assign_slots(broad + notches)
 
-    hpf = None
+    hpf: dict[str, Any] | None = None
     if f0_low:
         freq = _round_hpf(min(max(0.75 * f0_low, 60.0), 180.0))
         hpf = {"band": "HPF", "type": "hpf", "freq": freq,

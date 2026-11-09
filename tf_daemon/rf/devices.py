@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 import numpy as np
 
@@ -80,7 +81,7 @@ class TinySADevice(RFDevice):
     name = "tinysa"
 
     def __init__(self) -> None:
-        self._tsa = None
+        self._tsa: Any = None
         self.ultra = False
 
     def open(self) -> str:

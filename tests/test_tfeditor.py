@@ -17,19 +17,65 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import tf_editor_reference as ref
+from tfeditor_fakes import (
+    PASSWORD,
+    C,
+    FakeEditorConsole,
+    build_dump,
+    default_mixing_values,
+    dump_message,
+    mixing_tree,
+    set_param,
+    wait_until,
+    wire_address,
+)
 
 import tf_daemon.tfeditor as tfe
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError, load_config
-from tf_daemon.tfeditor import (ALLOWED_PARAM_CMDS, CLIENT_TYPE, CURVE_FREQS, DESC_MD5, DUMP, EVENT, EVENT_REPLY,
-                                HASH_COMPARE, SET_PARAM, SUBSCRIBE, SYNC_CLOSE, SYNC_OPEN, T_S8, T_S16, T_S32,
-                                T_STR, T_U8, T_U16, T_U32, Dump, Element, FrameReader, ProtocolError,
-                                ReadOnlyViolation, TFEditorClient, biquad, channel_eq, check_outbound, dump_blob,
-                                element, eq_curve, event, frame, hash_compare, message, parse_elements,
-                                parse_message, section_db, subscribe, sync)
-import tf_editor_reference as ref
-from tfeditor_fakes import (PASSWORD, C, FakeEditorConsole, build_dump, default_mixing_values, dump_message,
-                            mixing_tree, set_param, wait_until, wire_address)
+from tf_daemon.tfeditor import (
+    ALLOWED_PARAM_CMDS,
+    CLIENT_TYPE,
+    CURVE_FREQS,
+    DESC_MD5,
+    DUMP,
+    EVENT,
+    EVENT_REPLY,
+    HASH_COMPARE,
+    SET_PARAM,
+    SUBSCRIBE,
+    SYNC_CLOSE,
+    SYNC_OPEN,
+    T_S8,
+    T_S16,
+    T_S32,
+    T_STR,
+    T_U8,
+    T_U16,
+    T_U32,
+    Dump,
+    Element,
+    FrameReader,
+    ProtocolError,
+    ReadOnlyViolation,
+    TFEditorClient,
+    biquad,
+    channel_eq,
+    check_outbound,
+    dump_blob,
+    element,
+    eq_curve,
+    event,
+    frame,
+    hash_compare,
+    message,
+    parse_elements,
+    parse_message,
+    section_db,
+    subscribe,
+    sync,
+)
 
 RE_DIR = Path.home() / "yamaha-tf-re" / "capture"   # the reverse-engineering workspace, if present
 REAL_DUMP = RE_DIR / "dump_MMIX.bin"
@@ -82,7 +128,7 @@ def assert_read_only(fake):
         assert cmd in ALLOWED_PARAM_CMDS | {EVENT, EVENT_REPLY}
         assert cmd not in (SET_PARAM, DUMP)
         assert tag in ("MPRO", "MMIX", "EEVT")
-    for cmd, name, args in fake.events_from_client():
+    for _cmd, name, args in fake.events_from_client():
         if name == "SetClientType":
             assert args == "TYPE:StageMix SYNCDIR:2"
 
@@ -300,7 +346,8 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
     calls: dict[str, list[str]] = {}
     for p in pkg.rglob("*.py"):
         code = "\n".join(line.split("#", 1)[0] for line in p.read_text(encoding="utf-8").splitlines())
-        for name, pattern in (("write", r"(\beq_client|\bec|TFEditorClient\b.*)\.write\("), ("write_eq", r"\.write_eq\("),
+        for name, pattern in (("write", r"(\beq_client|\bec|TFEditorClient\b.*)\.write\("),
+                              ("write_eq", r"\.write_eq\("),
                               ("apply_suggestion", r"\.apply_suggestion\("), ("undo", r"\.undo\(")):
             for _ in re.finditer(pattern, code):
                 calls.setdefault(name, []).append(p.name)
@@ -308,7 +355,8 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
     assert "ec = self.eq_client" in (pkg / "tf5.py").read_text(encoding="utf-8")
     assert sorted(calls.get("write_eq", [])) == ["vocal.py", "vocal.py"]
     vocal_src = (pkg / "vocal.py").read_text(encoding="utf-8")
-    assert re.search(r"desk_write\(self\.apply_suggestion\)", vocal_src) and re.search(r"desk_write\(self\.undo\)", vocal_src)
+    assert re.search(r"desk_write\(self\.apply_suggestion\)", vocal_src)
+    assert re.search(r"desk_write\(self\.undo\)", vocal_src)
     assert "apply_suggestion" not in calls and "undo" not in calls   # never called, only handed to desk_write
     assert '.get("confirm") is not True' in vocal_src
 
@@ -737,7 +785,7 @@ def test_captured_board_pushes_resolve(mixing):
     assert len(pushes) == 393
     for push in pushes:
         name, _, prm = mixing.resolve(push["path"], push["idx"])
-        expect = "InputChannel:{0}/".format(push["idx"][0]) + CAPTURED_NAMES[tuple(push["path"])].format(*push["idx"])
+        expect = "InputChannel:{}/".format(push["idx"][0]) + CAPTURED_NAMES[tuple(push["path"])].format(*push["idx"])
         assert name == expect
         assert (prm.type == 1) == (push["type"] == T_S32)          # signed values land on signed params
         assert push["origin"] == 0xA1

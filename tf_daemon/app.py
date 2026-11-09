@@ -69,7 +69,8 @@ def build_modules(cfg: dict[str, Any], source_kind: str, wav_path: str | None = 
     set), ``"demo"`` (a simulated TF5 in-process, EQ read and write on) or ``"off"``.
     """
     source = build_source(cfg, source_kind, wav_path)
-    modules: list[Module] = [AudioModule(AudioEngine(cfg, source))]
+    audio = AudioEngine(cfg, source)
+    modules: list[Module] = [AudioModule(audio)]
 
     qlxd_kind = (qlxd_source or str(cfg["qlxd"]["source"])).lower()
     if qlxd_kind not in ("device", "demo", "off"):
@@ -91,11 +92,11 @@ def build_modules(cfg: dict[str, Any], source_kind: str, wav_path: str | None = 
         modules.append(sim)
         demo = {**cfg["tf5"], "host": sim.host, "port": sim.rcp_port, "eq_port": sim.eq_port,
                 "eq": True, "eq_write": True}
-        modules.append(TF5Module({**cfg, "tf5": demo}, modules[0].engine))
+        modules.append(TF5Module({**cfg, "tf5": demo}, audio))
     elif tf5_kind == "device":
-        modules.append(TF5Module(cfg, modules[0].engine))
+        modules.append(TF5Module(cfg, audio))
     if cfg["vocal"]["enabled"]:
-        modules.append(VocalModule(cfg, modules[0].engine))
+        modules.append(VocalModule(cfg, audio))
     return modules
 
 

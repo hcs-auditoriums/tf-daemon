@@ -1,0 +1,34 @@
+# Lint, type-check and test in the dev container (compose.yaml), the same
+# environment as `./dev test` locally, with the demo server running for
+# tests/test_live.py.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DEV_UID: "1001"   # the runner's user, so the container can write to the checkout
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the dev container
+        run: docker compose up -d --build --wait
+
+      - name: Lint (ruff)
+        run: docker compose exec -T app ruff check --output-format github .
+
+      - name: Type-check (mypy)
+        run: docker compose exec -T app mypy
+
+      - name: Tests
+        run: docker compose exec -T app pytest -q
+
+      - name: Server log
+        if: always()
+        run: docker compose logs app

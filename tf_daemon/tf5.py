@@ -30,11 +30,11 @@ from __future__ import annotations
 
 import logging
 import re
-from collections import deque
 import shlex
 import socket
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any

@@ -78,7 +78,7 @@ class AudioEngine:
         self.hop = int(dsp["hop"])
         capacity = int(float(cfg["audio"]["buffer_seconds"]) * fs)
         self.ring = RingBuffer(range(source.channels), capacity)
-        self._analyzer_args = dict(
+        self._analyzer_args: dict[str, Any] = dict(
             channels=1,
             samplerate=fs,
             n_fft=self.n_fft,

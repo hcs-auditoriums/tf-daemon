@@ -100,7 +100,8 @@ def test_update_runs_one_at_a_time_and_reports_state(client_for, update_files, m
 
 def test_update_that_dies_is_reported_failed(client_for, update_files, monkeypatch):
     script = update_files / "update.sh"
-    script.write_text(f'printf \'{{"state": "running", "message": "x", "pid": %d, "time": 0}}\' $$ > {system.UPDATE_STATE}\n')
+    state = '{"state": "running", "message": "x", "pid": %d, "time": 0}'
+    script.write_text(f"printf '{state}' $$ > {system.UPDATE_STATE}\n")
     monkeypatch.setattr(system, "UPDATE_SCRIPT", script)
     client = client_for(None)
     assert client.post("/api/system/update").status_code == 202

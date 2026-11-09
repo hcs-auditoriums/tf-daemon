@@ -137,7 +137,8 @@ def test_config_validation(tmp_path):
             load_config(p)
     p.write_text('[tf5]\nhost = "192.168.1.50"\nusername = "admin"\npassword = "secret"\nusb_patch = ["St L", ""]\n')
     t = load_config(p)["tf5"]
-    assert (t["host"], t["username"], t["password"], t["usb_patch"]) == ("192.168.1.50", "admin", "secret", ["St L", ""])
+    assert (t["host"], t["username"], t["password"]) == ("192.168.1.50", "admin", "secret")
+    assert t["usb_patch"] == ["St L", ""]
 
 
 @pytest.fixture

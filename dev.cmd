@@ -3,6 +3,7 @@ rem Dev container shortcuts (Windows; ./dev is the macOS / Linux twin). Each sta
 rem   dev shell            bash in the container
 rem   dev test [ARGS]      all tests in parallel; ARGS go to pytest (dev test -k reconnects)
 rem   dev logs             follow the server log
+rem   dev lint             ruff + mypy (what CI runs besides the tests)
 rem   dev up ^| down        start (rebuilding if needed) / stop
 rem   dev open [PAGE]      open the running app in the browser (dev open rf)
 rem   dev help             list these commands
@@ -25,6 +26,7 @@ if /i "%CMD%"=="down"  (docker compose down & goto :eof)
 if /i "%CMD%"=="shell" (docker compose up -d && docker compose exec app bash & goto :eof)
 if /i "%CMD%"=="test"  (docker compose up -d && docker compose exec app pytest%ARGS% & goto :eof)
 if /i "%CMD%"=="logs"  (docker compose up -d && docker compose logs -f app & goto :eof)
+if /i "%CMD%"=="lint"  (docker compose up -d && docker compose exec app ruff check . && docker compose exec app mypy & goto :eof)
 if /i "%CMD%"=="open"  goto open
 if /i "%CMD%"=="help"  goto help
 if /i "%CMD%"=="-h"    goto help
@@ -66,6 +68,7 @@ echo   dev test [ARGS]      all tests, in parallel; ARGS go to pytest
 echo                        e.g. dev test tests/test_tf5.py -k reconnects
 echo                             dev test -n 0 --pdb     (serial, debugger)
 echo   dev logs             follow the server log (Ctrl+C to stop following)
+echo   dev lint             ruff (style, bugs) and mypy (types), as CI runs them
 echo   dev open [PAGE]      open the running app in the browser
 echo                        PAGE: rf ^| qlxd ^| config (default: the audio page)
 echo   dev up               start, rebuilding the image if pyproject.toml changed

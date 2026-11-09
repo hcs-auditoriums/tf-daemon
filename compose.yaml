@@ -14,6 +14,10 @@ services:
     build:
       context: .
       dockerfile: .devcontainer/Dockerfile
+      args:
+        # Match your user on Linux so files the container writes stay yours:
+        # DEV_UID=$(id -u) docker compose up -d --build. (macOS / Windows: not needed.)
+        USER_UID: ${DEV_UID:-1000}
     image: tf-daemon-dev
     volumes:
       - .:/workspace

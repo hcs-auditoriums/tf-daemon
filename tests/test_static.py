@@ -91,7 +91,8 @@ def undefined_constants(js: str) -> set[str]:
     declared = set(re.findall(r"\bfunction\s+([A-Z][A-Z0-9_]{2,})\b", code))
     for stmt in re.findall(r"\b(?:const|let|var)\s+([^;]+)", code):  # incl. "const A = 1, B = 2"
         declared |= set(re.findall(r"(?:^|,)\s*([A-Z][A-Z0-9_]{2,})\s*=(?!=)", stmt))
-    declared |= {n for group in re.findall(r"\b(?:const|let|var)\s*\{([^}]*)\}", code) for n in re.findall(r"\w+", group)}
+    destructured = re.findall(r"\b(?:const|let|var)\s*\{([^}]*)\}", code)
+    declared |= {n for group in destructured for n in re.findall(r"\w+", group)}
     return used - declared - BROWSER_GLOBALS
 
 

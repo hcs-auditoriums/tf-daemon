@@ -4,8 +4,19 @@ from __future__ import annotations
 
 import time
 
-from tf_daemon.tf5sim import (PASSWORD, C, FakeEditorConsole, build_dump, console_hash, default_mixing_values,
-                              dump_message, mixing_tree, property_tree, set_param, wire_address)
+from tf_daemon.tf5sim import (
+    PASSWORD,
+    C,
+    FakeEditorConsole,
+    build_dump,
+    console_hash,
+    default_mixing_values,
+    dump_message,
+    mixing_tree,
+    property_tree,
+    set_param,
+    wire_address,
+)
 from tf_daemon.tfeditor import EVENT_REPLY, SUBSCRIBE
 
 

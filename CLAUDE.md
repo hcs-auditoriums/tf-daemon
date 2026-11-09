@@ -14,7 +14,9 @@ write ad-hoc fakes or plan how to test against real devices; this is the recipe:
    `curl -s localhost:8080/api/status` (and `/api/tf5/status`, `/api/qlxd/state`,
    `/api/rf/state`, `/api/audio/meta`, `/api/tf5/eq/<n>`).
    `docker compose logs --tail 50 app` shows the server log.
-4. For a new feature, add a unit test next to the existing ones, and a check in
+4. Before committing: `docker compose exec -T app ruff check .` and
+   `docker compose exec -T app mypy` (CI runs both, plus the tests).
+5. For a new feature, add a unit test next to the existing ones, and a check in
    `tests/test_live.py` if it shows up in the running app.
 
 Test doubles live in `tf_daemon/tf5sim.py` (TF5 RCP + TF Editor), `tf_daemon/qlxd/simulator.py`,
