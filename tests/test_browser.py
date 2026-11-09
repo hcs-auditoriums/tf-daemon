@@ -329,3 +329,54 @@ def test_vocal_panel_keeps_its_controls_between_polls_and_polls_once(page):
     page.wait_for_timeout(3000)  # ~6 polls at 500 ms while open
     assert len(seen) - n <= 9, len(seen) - n  # one loop, not five
     assert page.evaluate("window.__pick.isConnected")  # the same dropdown: nothing changed, nothing rebuilt
+
+
+def test_sidebar_fader_and_on_set_the_desk(page):
+    import json
+    import urllib.request
+
+    def fader():
+        with urllib.request.urlopen(URL + "/api/tf5/channels", timeout=5) as r:
+            p = json.loads(r.read())["channels"][0]["params"]
+        return p["Fader/Level"]["value"], p["Fader/On"]["value"]
+
+    def put(body):
+        req = urllib.request.Request(
+            URL + "/api/tf5/fader/0",
+            method="PUT",
+            headers={"Content-Type": "application/json"},
+            data=json.dumps({**body, "confirm": True}).encode(),
+        )
+        urllib.request.urlopen(req, timeout=10).read()
+
+    _open(page, "/")
+    page.wait_for_function("document.querySelectorAll('#channels button').length >= 1", timeout=8000)
+    page.locator("#channels button", has_text="Pastor").click()
+    track = page.locator("#console-panel .cp-track.writable")
+    track.wait_for(timeout=8000)  # writable: the demo desk allows faders
+    level0, on0 = fader()
+    try:
+        box = page.locator("#console-panel .cp-cap").bounding_box()
+        x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        page.mouse.move(x, y)
+        page.mouse.down()
+        for i in range(1, 6):
+            page.mouse.move(x, y + 8 * i)  # down: quieter
+        page.mouse.up()
+        wait = 0
+        while (fader()[0] or -200) >= (level0 if level0 is not None else -200) and wait < 50:
+            page.wait_for_timeout(100)
+            wait += 1
+        assert fader()[0] is None or fader()[0] < (level0 if level0 is not None else 10), (level0, fader())
+        page.locator("#console-panel button.cp-on").click()
+        wait = 0
+        while fader()[1] == on0 and wait < 50:
+            page.wait_for_timeout(100)
+            wait += 1
+        assert fader()[1] != on0
+        page.wait_for_function(  # and the button shows it
+            f"document.querySelector('#console-panel button.cp-on').textContent === '{'OFF' if on0 else 'ON'}'",
+            timeout=4000,
+        )
+    finally:  # leave the shared demo desk as it was
+        put({"level": -32768 if level0 is None else round(level0 * 100), "on": on0})

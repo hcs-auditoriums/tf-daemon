@@ -5,7 +5,8 @@ import { profileBar } from "./profiles.js";
 import { $, C, el, loadInt, save, state } from "./shared.js";
 
 // Sidebar with the TF5 channel feeding the shown input: name, on, fader,
-// pan and its sends. The desk's state arrives over /ws/audio: a snapshot on
+// pan and its sends. With tf5.fader_write, an input channel's ON button and
+// fader work: a click / drag here sets them on the desk (PUT /api/tf5/fader). The desk's state arrives over /ws/audio: a snapshot on
 // connect ("tf5"), then each change as it happens on the desk ("tf5-changes");
 // nothing arrives when tf5.host isn't set, and the sidebar stays hidden.
 let tf5 = null;   // null = no TF5 module; {connected, channels, mixes} otherwise
@@ -38,7 +39,7 @@ export function onConsoleChanges(msg) {
 
 // Many changes can arrive per frame while a fader moves: render once per frame.
 let panelQueued = false;
-function schedulePanel() {
+export function schedulePanel() {
   if (panelQueued) return;
   panelQueued = true;
   requestAnimationFrame(() => { panelQueued = false; renderPanel(); });
@@ -62,6 +63,15 @@ function faderPos(db) {
   }
   return 0;
 }
+function posToDb(pos) {  // the inverse: null below the bottom
+  if (pos <= 0.004) return null;
+  if (pos >= 1) return LAW[0][0];
+  for (let i = 1; i < LAW.length; i++) {
+    const [d1, p1] = LAW[i - 1], [d0, p0] = LAW[i];
+    if (pos >= p0) return d0 + (pos - p0) / (p1 - p0) * (d1 - d0);
+  }
+  return null;
+}
 const fmtDb = (db) => (db === null || db === undefined ? "−∞" : `${db > 0 ? "+" : ""}${db.toFixed(1)}`);
 const fmtPan = (v) => (v === 0 ? "C" : v < 0 ? `L${-v}` : `R${v}`);
 
@@ -84,6 +94,125 @@ function sendRows(p, mixes) {
   return rows;
 }
 
+// ------------------------------------------------------------------ fader / ON from the page
+
+// Writable when the desk lets faders be written and this input carries an input channel
+// (told with the channel's EQ, "tf5-eq").
+function faderWritable() {
+  return !!(state.eq && state.eq.index === state.input && state.eq.fader_writable);
+}
+
+// What a person just set here wins over the desk's (older) values while they drag, and for a
+// moment after, so the cap doesn't jump back while the desk catches up.
+let local = null;   // {usb, level?, on?, until}
+let dragging = null;  // {startY, startPos, height, fine}
+const HOLD_MS = 800;
+
+function localFor(usb) {
+  if (!local || local.usb !== usb) return null;
+  if (!dragging && performance.now() > local.until) { local = null; return null; }
+  return local;
+}
+
+function setLocal(usb, values) {
+  local = { ...(local && local.usb === usb ? local : { usb }), ...values, until: performance.now() + HOLD_MS };
+}
+
+// One request at a time; while one is out, the newest value waits (a drag sends many).
+let faderOut = null, faderBusy = false;
+function sendFader(usb, body) {
+  faderOut = { usb, body: { ...(faderOut && faderOut.usb === usb ? faderOut.body : {}), ...body } };
+  if (!faderBusy) flushFader();
+}
+
+async function flushFader() {
+  if (!faderOut) return;
+  const { usb, body } = faderOut;
+  faderOut = null;
+  faderBusy = true;
+  let error = null;
+  try {
+    const r = await fetch(`/api/tf5/fader/${usb}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, confirm: true }),
+    });
+    const d = await r.json();
+    if (!d.ok) error = d.error || "not set";
+    else if (d.results.some((x) => !x.confirmed)) error = "the desk didn't confirm it";
+  } catch { error = "server unreachable"; }
+  faderBusy = false;
+  if (refs && refs.faderErr) {
+    refs.faderErr.textContent = error ? `Not set: ${error}` : "";
+    refs.faderErr.hidden = !error;
+  }
+  if (error) local = null;  // show the desk's value again
+  flushFader();
+}
+
+const dbToRaw = (db) => (db === null || db < -138 ? -32768 : Math.round(Math.min(db, 10) * 10) * 10);
+
+function setLevel(ch, db) {
+  const raw = dbToRaw(db);
+  setLocal(ch.index, { level: raw <= -32768 ? null : raw / 100 });
+  updatePanel(ch);
+  sendFader(ch.index, { level: raw });
+}
+
+function currentLevel(ch) {
+  const l = localFor(ch.index);
+  return l && "level" in l ? l.level : ch.params["Fader/Level"]?.value ?? null;
+}
+
+function wireFader(ch, track) {
+  track.tabIndex = 0;
+  track.setAttribute("role", "slider");
+  track.setAttribute("aria-label", "Fader (drag; arrow keys: 1 dB, with Shift 0.1 dB)");
+  track.classList.add("writable");
+  // Relative drag: a press doesn't jump the fader to the pointer (a live mic), it moves with it.
+  track.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    track.focus();
+    track.setPointerCapture(e.pointerId);
+    dragging = {
+      startY: e.clientY, startPos: faderPos(currentLevel(ch)), height: track.getBoundingClientRect().height,
+      fine: e.shiftKey,
+    };
+  });
+  track.addEventListener("pointermove", (e) => {
+    if (!dragging || !track.hasPointerCapture(e.pointerId)) return;
+    const scale = e.shiftKey ? 0.2 : 1;  // Shift: fine
+    const pos = Math.min(1, Math.max(0, dragging.startPos + (dragging.startY - e.clientY) / dragging.height * scale));
+    if (e.shiftKey !== dragging.fine) {  // re-anchor when Shift changes, so the cap doesn't jump
+      Object.assign(dragging, { startY: e.clientY, startPos: faderPos(currentLevel(ch)), fine: e.shiftKey });
+      return;
+    }
+    setLevel(ch, posToDb(pos));
+  });
+  const end = () => { if (dragging) { dragging = null; setLocal(ch.index, {}); } };
+  track.addEventListener("pointerup", end);
+  track.addEventListener("pointercancel", end);
+  track.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 0.1 : 1;
+    const now = currentLevel(ch);
+    let next;
+    if (e.key === "ArrowUp" || e.key === "ArrowRight") next = now === null ? -60 : now + step;
+    else if (e.key === "ArrowDown" || e.key === "ArrowLeft") next = now === null || now <= -60 ? null : now - step;
+    else return;
+    e.preventDefault();
+    setLevel(ch, next);
+  });
+}
+
+function wireOn(ch, button) {
+  button.onclick = () => {
+    const l = localFor(ch.index);
+    const isOn = (l && "on" in l ? l.on : ch.params["Fader/On"]?.value) !== 0;
+    setLocal(ch.index, { on: isOn ? 0 : 1 });
+    updatePanel(ch);
+    sendFader(ch.index, { on: isOn ? 0 : 1 });
+  };
+}
+
 // The sidebar is rebuilt only when its structure changes (another input, a
 // send appearing, ...); otherwise values are updated in place, so a fader
 // moving on the desk moves smoothly here (with a short CSS transition).
@@ -99,17 +228,23 @@ function panelStructure(ch) {
   if (!tf5.connected || !ch || !ch.source) return JSON.stringify([state.input, tf5.connected, ch && ch.source]);
   const p = ch.params, rows = p["ToMix/Level"] ? sendRows(p, tf5.mixes || []) : [];
   const shown = (state.allSends ? rows : rows.filter((r) => r.on && r.db !== null)).map((r) => r.name);
-  return JSON.stringify([state.input, ch.source, !!eqAvailable, p["Label/Name"]?.value, p["Label/Color"]?.value,
+  return JSON.stringify([state.input, ch.source, !!eqAvailable, faderWritable(), p["Label/Name"]?.value, p["Label/Color"]?.value,
                          !!p["ToStereo/Pan"], !!p["Out/Balance"], !!p["ToMix/Level"], state.allSends, shown,
                          Object.keys(p).sort()]);
 }
 
 function updatePanel(ch) {
   const p = ch.params, v = (k) => p[k]?.value;
-  const isOn = v("Fader/On") !== 0;
-  refs.on.className = `cp-on ${isOn ? "on" : "off"}`;
+  const l = localFor(ch.index);
+  const isOn = (l && "on" in l ? l.on : v("Fader/On")) !== 0;
+  refs.on.className = `cp-on ${isOn ? "on" : "off"}${refs.onWritable ? " writable" : ""}`;
   refs.on.textContent = isOn ? "ON" : "OFF";
-  const level = v("Fader/Level"), pos = `${faderPos(level) * 100}%`;
+  if (refs.onWritable) refs.on.setAttribute("aria-pressed", String(isOn));
+  const level = l && "level" in l ? l.level : v("Fader/Level"), pos = `${faderPos(level) * 100}%`;
+  if (refs.track && refs.track.classList.contains("writable")) {
+    refs.track.setAttribute("aria-valuetext", `${fmtDb(level)} dB`);
+  }
+  refs.cap.classList.toggle("dragging", !!dragging);
   refs.level.textContent = `${fmtDb(level)} dB`;
   refs.fill.style.height = pos;
   refs.cap.style.bottom = pos;
@@ -162,7 +297,14 @@ export function renderPanel() {
     head.append(sw, title);
     items.push(head);
 
-    refs.on = el("div", "cp-on");
+    const writable = faderWritable();
+    refs.onWritable = writable;
+    refs.on = el(writable ? "button" : "div", "cp-on");
+    if (writable) {
+      refs.on.type = "button";
+      refs.on.title = "Turn the channel on / off on the desk";
+      wireOn(ch, refs.on);
+    }
     items.push(refs.on);
 
     const section = (title) => {
@@ -209,6 +351,13 @@ export function renderPanel() {
     track.append(refs.fill, refs.cap);
     fader.append(scale, track);
     faderSec.append(fader);
+    refs.track = track;
+    if (writable) {
+      wireFader(ch, track);
+      refs.faderErr = el("p", "cp-note cp-err");
+      refs.faderErr.hidden = true;
+      faderSec.append(refs.faderErr);
+    }
     items.push(faderSec);
 
     // Pan (balance for ST) below the fader: a full-width, centre-detented bar.

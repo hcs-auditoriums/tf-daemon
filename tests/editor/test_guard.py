@@ -206,8 +206,9 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
       * vocal AutoEQ: its tick (only channels a person turned on: POST /api/vocal/auto with
         "confirm": true, and only when vocal.auto_allowed is set) and its undo (confirmed), or
       * vocal RingOut (notches, and putting the EQ back on Mute & cancel).
-    write() <- TF5Module.write_fader (input faders; needs tf5.fader_write) <- vocal RingOut only:
-    its loop (started only by start() <- POST /api/vocal/ringout/start with "confirm": true, and
+    write() <- TF5Module.write_fader (input faders; needs tf5.fader_write) <- either
+      * TF5Module's fader_set <- PUT /api/tf5/fader/<usb> ("confirm": true): the sidebar's fader / ON, or
+      * vocal RingOut: its loop (started only by start() <- POST /api/vocal/ringout/start with "confirm": true, and
     RingOut exists only when the desk's faders are writable), abort (Mute & cancel: mutes, never
     needs a confirmation) and unmute.
     Nothing else in tf-daemon calls them."""
@@ -240,7 +241,10 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
         "vocal/ringout.py",
         "vocal/ringout.py",
     ]
-    assert calls.get("write_fader") == ["vocal/ringout.py"] * 4
+    assert sorted(calls.get("write_fader", [])) == ["console/module.py"] + ["vocal/ringout.py"] * 4
+    # The sidebar's fader / ON: PUT /api/tf5/fader/<usb>, refused without "confirm": true before any write.
+    fader_set = console_src[console_src.index("def fader_set(usb: int):") :]
+    assert fader_set.index('.get("confirm") is not True') < fader_set.index("self.write_fader(")
     # The page's EQ editing: PUT /api/tf5/eq/<usb>, refused without "confirm": true before any write.
     eq_set = console_src[console_src.index("def eq_set(usb: int):") :]
     assert eq_set.index('.get("confirm") is not True') < eq_set.index("self.write_eq(")

@@ -1,6 +1,6 @@
 // The console's EQ for the shown input, overlaid on the spectrum (editing: eqedit.js).
 
-import { drawPanelEq, rebuildPanel } from "./console.js";
+import { drawPanelEq, rebuildPanel, schedulePanel } from "./console.js";
 import { eqEditReset } from "./eqedit.js";
 import { H, PAD, W, xOf } from "./plot.js";
 import { $, C, ctx, loadInt, save, state } from "./shared.js";
@@ -24,7 +24,7 @@ export function onConsoleEq(msg) {
   }
   $("eq-toggle").hidden = false;
   state.dirty = true;
-  if (first) rebuildPanel(); else drawPanelEq();
+  if (first) rebuildPanel(); else { drawPanelEq(); schedulePanel(); }  // (may make the fader writable)
 }
 
 $("show-eq").checked = state.showEq;

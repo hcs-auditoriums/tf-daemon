@@ -287,6 +287,14 @@ main.page {
 }
 .cp-on.on { color: #06131d; background: var(--ok); border-color: var(--ok); }
 .cp-on.off { color: var(--bad); border-color: var(--bad); }
+button.cp-on { font: inherit; font-weight: 700; letter-spacing: 0.08em; width: 100%; cursor: pointer; background: none; }
+button.cp-on.on { background: var(--ok); }
+button.cp-on:hover { filter: brightness(1.12); }
+button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px solid var(--avg); outline-offset: 2px; }
+.cp-track.writable { cursor: ns-resize; touch-action: none; }
+.cp-track.writable .cp-cap { cursor: grab; }
+.cp-cap.dragging { cursor: grabbing; transition: none; box-shadow: 0 0 0 2px var(--avg), 0 1px 3px rgba(0, 0, 0, 0.5); }
+.cp-err { color: var(--bad); }
 
 .cp-section { display: flex; flex-direction: column; gap: 8px; }
 .cp-sechead { display: flex; justify-content: space-between; align-items: baseline; }
