@@ -26,9 +26,13 @@ analyze() then:
      most 1/8 octave wide, 500 Hz-8 kHz, not harmonics of the voice) and adds
      rings the detector reported on the input, as narrow cuts;
   4. suggests a high-pass just under the voice's lowest pitch;
-  5. names each move after the usual vocal descriptors (boomy, boxy, woody,
+  5. adds the EQ style's character (presence, air, body: targets.py) on bands
+     still free, away from rings and the other moves, within the mic type's
+     boost limits and the feedback headroom;
+  6. names each move after the usual vocal descriptors (boomy, boxy, woody,
      nasal, tinny, harsh, sibilant; presence, air) and assigns it to a TF5
-     PEQ band (L, LM, HM, H) by frequency.
+     PEQ band (L, LM, HM, H), all bands (reserved ones included) in frequency
+     order (bands.py).
 
 The descriptors are a vocabulary for where an issue sits, not a diagnosis:
 "nasal" and "honky" overlap, and part of nasality is how a person talks. For
@@ -38,7 +42,6 @@ build-up shows where the harmonics are and its label there is approximate.
 
 from __future__ import annotations
 
-import itertools
 import math
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -46,6 +49,7 @@ from typing import Any
 import numpy as np
 
 from ..dsp.eq import BUTTERWORTH_Q, FS, section_db
+from . import bands
 from .voice import VoiceCollector
 
 # ANSI S3.5-1997 Table 3: standard speech spectrum level, normal vocal effort
@@ -108,6 +112,11 @@ def _name(table: Sequence[tuple[float, float, str]], f: float) -> str:
 def bell_db(freqs: np.ndarray, f0: float, gain_db: float, q: float) -> np.ndarray:
     """The TF5's peaking EQ band: magnitude (dB) at ``freqs``."""
     return section_db("bell", f0, gain_db, q, np.asarray(freqs, dtype=float), FS)
+
+
+def move_db(freqs: np.ndarray, m: dict[str, Any]) -> np.ndarray:
+    """A suggested band (a bell or a shelf) at ``freqs``, dB."""
+    return section_db(m.get("type", "bell"), m["freq"], m["gain"], m["q"], np.asarray(freqs, dtype=float), FS)
 
 
 def hpf_db(freqs: np.ndarray, f0: float) -> np.ndarray:
@@ -281,24 +290,29 @@ def _resonances(collector: VoiceCollector, f0: float | None, limit: int = 2) -> 
     ]
 
 
-def _assign_slots(moves: list[dict[str, Any]], free: Sequence[str] | None = None) -> list[dict[str, Any]]:
-    """Give each move a TF5 PEQ band, keeping frequency order, preferring each band's home
-    range. ``free``: the bands that may be used (default: all)."""
-    moves = sorted(moves, key=lambda m: m["freq"])
-    slots = [sl for sl in SLOTS if free is None or sl[0] in free]
-
-    def outside(s: int, f: float) -> float:  # octaves outside the band's home range
-        lo, hi = slots[s][1], slots[s][2]
-        return 0.0 if lo <= f <= hi else abs(math.log2(f / (lo if f < lo else hi)))
-
-    best, best_cost = None, math.inf
-    for combo in itertools.combinations(range(len(slots)), len(moves)):
-        cost = sum(outside(s, m["freq"]) for s, m in zip(combo, moves, strict=True))
-        if cost < best_cost:
-            best, best_cost = combo, cost
-    for s, m in zip(best or (), moves, strict=False):  # best is None when nothing fits
-        m["band"] = slots[s][0]
-    return moves
+def _assign_slots(
+    moves: list[dict[str, Any]], free: Sequence[str] | None = None, reserved: Sequence[dict[str, Any]] = ()
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Give each move a TF5 PEQ band so that all bands, ``reserved`` ones (fixed) included, are
+    in frequency order, each near its home range. ``free``: the bands that may be used
+    (default: all but the reserved). Moves that can't be placed in order are dropped, the
+    smallest first, never a notch while anything else can go. Returns (placed, dropped)."""
+    keep = [dict(r) for r in reserved]
+    labels = [b for b in bands.LABELS if free is None or b in free or any(r["band"] == b for r in reserved)]
+    ranked = sorted(moves, key=lambda m: (m.get("kind") == "notch", abs(m["gain"])))  # least important first
+    dropped: list[dict[str, Any]] = []
+    while True:
+        placed = bands.layout([*keep, *ranked], labels)
+        if placed is not None:
+            break
+        if not ranked:  # the reserved bands themselves are out of order on the desk: nothing more fits
+            placed = {}
+            break
+        dropped.append(ranked.pop(0))
+    for label, m in placed.items():
+        if any(m is r for r in ranked):
+            m["band"] = label
+    return sorted(ranked, key=lambda m: m["freq"]), dropped
 
 
 def _round_hpf(f: float) -> float:
@@ -321,11 +335,13 @@ def analyze(
     hpf_ratio: float = 0.75,
     hpf_min_hz: float = 60.0,
     reserved: Sequence[dict[str, Any]] = (),
+    character: Sequence[tuple[str, float, float, float, str]] = (),
 ) -> dict[str, Any]:
     """Suggestions from a finished mic check (see the module docstring).
 
     ``target_db`` (dB at POINTS), ``cut_scale``, ``boost_range``, ``hpf_ratio``,
-    ``hpf_min_hz``: the mic type's and EQ style's settings (targets.tone_options).
+    ``hpf_min_hz``, ``character``: the mic type's and EQ style's settings (targets.tone_options);
+    ``hpf_min_hz`` is also where a ring-out put the high-pass to keep a low ring down.
     ``reserved``: bands already in use that must stay as they are (ring-out notches:
     ``{"band", "freq", "gain", "q"}``). The suggestion uses the other bands only,
     boosts nothing near them, and counts them in its predicted curve.
@@ -416,16 +432,39 @@ def analyze(
             cut_scale=cut_scale,
             boost_range=boost_range,
         )
-        eq = sum((bell_db(POINTS, b["freq"], b["gain"], b["q"]) for b in [*broad, *reserved]), np.zeros(len(POINTS)))
+        eq = sum((move_db(POINTS, b) for b in [*broad, *reserved]), np.zeros(len(POINTS)))
         new_off = float(np.median((diff + eq)[ref]))
         if abs(new_off - off) < 0.1:
             break
         off = new_off
-    moves = _assign_slots(broad + notches, free)
+    # Character: on top of the correction, where a band is free and nothing else (or a ring) is.
+    for kind, f, g, q, name in character:
+        if len(free) - len(broad) - len(notches) <= 0:
+            break
+        if any(abs(math.log2(f / m["freq"])) < 1 / 2 for m in [*broad, *notches]) or near_reserved(f, 1 / 3):
+            continue
+        if g > 0 and boost_cap is not None:
+            limit = boost_cap(f)
+            if limit < g:
+                g = math.floor(limit * 2) / 2
+        if abs(g) < 0.5:
+            continue
+        broad.append(
+            {
+                "type": kind,
+                "freq": f,
+                "gain": g,
+                "q": q,
+                "issue": f"character: {name}",
+                "deviation_db": None,
+                "kind": "character",
+            }
+        )
+    moves, dropped = _assign_slots(broad + notches, free, reserved)
 
     hpf: dict[str, Any] | None = None
     if f0_low:
-        freq = _round_hpf(min(max(hpf_ratio * f0_low, hpf_min_hz), 180.0))
+        freq = _round_hpf(min(max(hpf_ratio * f0_low, hpf_min_hz), max(180.0, hpf_min_hz)))
         hpf = {
             "band": "HPF",
             "type": "hpf",
@@ -436,13 +475,15 @@ def analyze(
     curve = np.zeros(len(CURVE))
     after = dev_raw.copy()
     for m in [*moves, *reserved]:
-        curve += bell_db(CURVE, m["freq"], m["gain"], m["q"])
-        after += bell_db(POINTS, m["freq"], m["gain"], m["q"])
+        curve += move_db(CURVE, m)
+        after += move_db(POINTS, m)
     if hpf:
         curve += hpf_db(CURVE, hpf["freq"])
 
     snr = collector.snr_db
     notes = list(dict.fromkeys(capped))
+    for m in dropped:
+        notes.append(f"Left out {m['issue']} at {m['freq']:.0f} Hz: no band free for it in frequency order.")
     if collector.speech_s < 15:
         notes.append(f"Only {collector.speech_s:.0f} s of speech: treat these as rough.")
     if snr is not None and snr < 20:

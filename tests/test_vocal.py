@@ -69,6 +69,7 @@ def voice():
 
 def only_move(r):
     assert r["ok"], r.get("error")
+    r = {**r, "bands": [b for b in r["bands"] if b["kind"] != "character"]}  # the style's own touch aside
     assert len(r["bands"]) == 1, r["bands"]
     return r["bands"][0]
 
@@ -164,7 +165,7 @@ def test_session_listens_then_suggests(voice):
     feed(vm, 5, shape(voice, lambda f: bell_db(f, 350, 6, 1.4)))
     s = vm.snapshot()["sessions"]["5"]
     assert s["state"] == "done" and s["result"]["ok"]  # finished itself at listen_s of speech
-    assert s["speech_s"] >= 10 and [b["issue"] for b in s["result"]["bands"]] == ["boxy"]
+    assert s["speech_s"] >= 10 and [b["issue"] for b in s["result"]["bands"] if b["kind"] != "character"] == ["boxy"]
     assert s["current_eq"] is None  # no TF5 EQ reader configured
     assert 5 not in engine.active_inputs()  # released when done
     vm.checks.clear(5)
@@ -294,7 +295,8 @@ def run_with(x, **kw):
 
 def test_head_worn_mics_get_no_presence_boost(voice):
     dull = shape(voice, lambda f: -6 / (1 + (3000 / f) ** 2))
-    generic = only_move(run_with(dull))
+    r = run_with(dull)
+    generic = only_move({**r, "bands": [b for b in r["bands"] if b["kind"] != "character"]})
     assert generic["kind"] == "boost" and generic["gain"] > 1
     wig = run_with(dull, mic="wig")
     assert all(b["kind"] != "boost" or b["gain"] <= 1.0 for b in wig["bands"]), wig["bands"]
@@ -310,14 +312,37 @@ def test_singing_cuts_more_gently_than_speech(voice):
 
 def test_reserved_bands_are_left_alone_and_counted(voice):
     boxy = shape(voice, lambda f: bell_db(f, 350, 6, 1.4))
-    notch = {"band": "L", "freq": 2480.0, "gain": -6.0, "q": 10.0}
+    notch = {"band": "HM", "freq": 2480.0, "gain": -6.0, "q": 10.0}
     r = run_with(boxy, reserved=[notch], rings=[{"freq": 2490.0, "count": 4}])
-    assert all(b["band"] != "L" for b in r["bands"])  # the boxiness goes on another band
+    assert all(b["band"] != "HM" for b in r["bands"])  # the boxiness goes on another band
     assert any(b["kind"] == "cut" and abs(np.log2(b["freq"] / 350)) < 0.3 for b in r["bands"])
     assert not any(b["kind"] == "notch" for b in r["bands"])  # the ring is notched already
     assert r["reserved"] == [notch]
     i = int(np.argmin(np.abs(np.array(r["curve_freqs"]) - 2480)))
     assert r["curve"][i] < -3  # the curve shows the notch that stays
+    order = sorted([*r["bands"], notch], key=lambda b: ["L", "LM", "HM", "H"].index(b["band"]))
+    assert [b["freq"] for b in order] == sorted(b["freq"] for b in order)  # bands in frequency order
+
+
+def test_bands_stay_in_frequency_order_around_a_reserved_band(voice):
+    # A boxy voice and a notch kept low on LM: the cut can't go on L (it's above LM's notch).
+    boxy = shape(voice, lambda f: bell_db(f, 350, 6, 1.4))
+    notch = {"band": "LM", "freq": 300.0, "gain": -6.0, "q": 10.0}
+    r = run_with(boxy, reserved=[notch], style="singing")
+    order = sorted([*r["bands"], notch], key=lambda b: ["L", "LM", "HM", "H"].index(b["band"]))
+    assert [b["freq"] for b in order] == sorted(b["freq"] for b in order), r["bands"]
+
+
+def test_each_style_adds_its_character_within_the_mic_types_limits(voice):
+    sing = run_with(voice, style="singing", mic="wig")
+    character = {b["issue"]: b for b in sing["bands"] if b["kind"] == "character"}
+    assert "character: air" in character and character["character: air"]["type"] == "high_shelf"
+    assert character["character: air"]["band"] == "H" and 0 < character["character: air"]["gain"] <= 2.0
+    assert all(b["gain"] <= 1.0 for b in character.values() if b["freq"] < 8000)  # a wig: 1 dB in the feedback range
+    speech = run_with(voice, style="speech", mic="handheld")
+    assert [b["issue"] for b in speech["bands"]] == ["character: presence"]  # a neutral voice: just the touch
+    near_ring = run_with(voice, style="speech", reserved=[{"band": "HM", "freq": 2900.0, "gain": -6.0, "q": 10.0}])
+    assert not any(b["kind"] == "character" for b in near_ring["bands"])  # nothing boosted next to a ring
 
 
 def test_plan_keeps_notches():
@@ -361,3 +386,25 @@ def test_mic_type_and_style_routes(tmp_path):
         p.write_text(bad)
         with pytest.raises(ConfigError, match="vocal"):
             load_config(p)
+
+
+def test_band_layout_keeps_frequency_order_and_shelves_on_the_ends():
+    from tf_daemon.vocal import bands
+
+    placed = bands.layout(
+        [
+            {"type": "bell", "freq": 620.0, "gain": -3},
+            {"type": "high_shelf", "freq": 10000.0, "gain": 2},
+            {"type": "bell", "freq": 320.0, "gain": -3},
+        ]
+    )
+    assert {k: v["freq"] for k, v in placed.items()} == {"L": 320.0, "LM": 620.0, "H": 10000.0}
+    assert (
+        bands.layout([{"type": "low_shelf", "freq": 300.0, "gain": 2}, {"type": "bell", "freq": 100.0, "gain": -3}])
+        is None
+    )
+    kept, dropped = bands.fit(
+        [{"type": "bell", "freq": 5000.0, "gain": 1}, {"type": "bell", "freq": 4000.0, "gain": 3}],
+        keep=[{"type": "bell", "freq": 300.0, "gain": -6, "band": "HM"}],  # a notch that can't move
+    )
+    assert kept["HM"]["freq"] == 300.0 and kept["H"]["freq"] == 4000.0 and dropped[0]["freq"] == 5000.0

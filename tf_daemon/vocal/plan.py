@@ -42,15 +42,16 @@ def eq_plan(result: dict[str, Any], current: dict[str, Any]) -> tuple[list[tuple
     for b in current["bands"]:
         label, base, m = b["label"], _band_path(b["label"]), suggested.get(b["label"])
         if m is not None:
-            if label in ("L", "H"):
-                changes.append((f"{base}/Type", 0))  # bell
+            if label in ("L", "H"):  # a bell, or the shelf a character move asks for
+                changes.append((f"{base}/Type", 1 if m.get("type") in ("low_shelf", "high_shelf") else 0))
             q = min(max(float(m["q"]), 0.1), 10.0)
             changes += [
                 (f"{base}/Frequency", round(m["freq"] * 10)),
                 (f"{base}/Gain", round(m["gain"] * 10) * 10),
                 (f"{base}/Q", round(q * 1000)),
             ]
-            lines.append(f"{label}: bell {m['gain']:+.1f} dB @ {m['freq']:g} Hz, Q {q:g}")
+            kind = "shelf" if m.get("type") in ("low_shelf", "high_shelf") else "bell"
+            lines.append(f"{label}: {kind} {m['gain']:+.1f} dB @ {m['freq']:g} Hz, Q {q:g}")
         elif b["type"] in ("hpf", "lpf"):
             lines.append(f"{label}: {b['type'].upper()} left as it is")
         elif label in reserved:

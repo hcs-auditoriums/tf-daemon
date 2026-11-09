@@ -78,6 +78,7 @@ class _Session:
         self.live = live
         self.mic, self.style = mic, style
         self.reserved: list[dict[str, Any]] = list(reserved or [])  # bands to leave alone (ring-out notches)
+        self.hpf_floor = 0.0  # Hz: the suggested high-pass never goes below this (a ring-out's)
         memory = LIVE_MEMORY_S if live else None
         self.collector = VoiceCollector(samplerate, memory_s=memory)
         self.mains = Transfer(samplerate, max_delay_s=0.1, memory_s=memory) if live else None
@@ -236,12 +237,29 @@ class MicChecks:
             return None
         return s.result
 
-    def set_reserved(self, index: int, reserved: list[dict[str, Any]]) -> None:
-        """Bands of ``index`` the suggestion must leave alone from now on (ring-out notches)."""
+    def set_reserved(self, index: int, reserved: list[dict[str, Any]], hpf_floor: float = 0.0) -> None:
+        """Bands of ``index`` the suggestion must leave alone from now on (ring-out notches), and
+        the lowest high-pass it may suggest."""
         with self._lock:
             s = self._sessions.get(index)
             if s is not None:
                 s.reserved = [dict(r) for r in reserved]
+                s.hpf_floor = hpf_floor
+
+    def analyze_now(self, index: int) -> dict[str, Any] | None:
+        """A live session's suggestion from everything heard so far, now (and kept as its latest);
+        None without a live session."""
+        with self._lock:
+            s = self._sessions.get(index)
+        if s is None or not s.live or not s.running:
+            return None
+        result = self._analyze(index, s)
+        if result.get("ok"):
+            s.revise(result, self._eq_curve(index, POINTS))
+            with self._lock:
+                if self._sessions.get(index) is s and s.state == "live":
+                    s.result = result
+        return result
 
     def sessions(self) -> list[tuple[int, _Session]]:
         with self._lock:
@@ -334,7 +352,7 @@ class MicChecks:
                 tilt_db_oct=self.tilt_db_oct,
                 boost_cap=boost_cap(fb) if fb else None,
                 reserved=list(s.reserved),
-                **tone_options(s.mic, s.style, POINTS, max_cut_db=self.max_cut_db, max_boost_db=self.max_boost_db),
+                **self._options(s),
             )
             result["mic"], result["style"] = s.mic, s.style
             if fb is not None:
@@ -347,6 +365,11 @@ class MicChecks:
         if room is not None:
             result["room"] = room
         return result
+
+    def _options(self, s: _Session) -> dict[str, Any]:
+        opts = tone_options(s.mic, s.style, POINTS, max_cut_db=self.max_cut_db, max_boost_db=self.max_boost_db)
+        opts["hpf_min_hz"] = max(opts["hpf_min_hz"], s.hpf_floor)
+        return opts
 
     def _finish(self, index: int, s: _Session) -> None:
         result = self._analyze(index, s)

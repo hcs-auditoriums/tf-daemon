@@ -236,16 +236,69 @@ def test_watch_finds_a_growing_tone_but_not_a_steady_one():
     assert c is not None and abs(c[1] - 2000) < 10
 
 
-def test_then_live_tone_eq_leaves_the_notches_alone():
-    desk, eng, r = rig(colour=[(240.0, 8.0, 1.2)])  # a boomy talker: the tone loop has something to cut
+def in_order(desk):
+    used = [
+        desk.raw[f"{b}/Frequency"]
+        for b in ("PEQ/Bank/BandL", "PEQ/Bank/Band:0", "PEQ/Bank/Band:1", "PEQ/Bank/BandH")
+        if desk.raw[f"{b}/Gain"] != 0
+    ]
+    return used == sorted(used)
+
+
+def test_sets_the_high_pass_and_a_vocal_curve_then_live_tone_eq_leaves_the_notches_alone():
+    desk, eng, r = rig(colour=[(240.0, 8.0, 1.2)])  # a boomy talker: the vocal curve has something to cut
     r.start([(0, "wig", "speech")], tone=True)
     wait_until(lambda: r.phase == "tone", timeout=120)
+    assert desk.raw["PEQ/Bank/HPF/On"] == 1 and desk.raw["PEQ/Bank/HPF/Frequency"] >= 1000  # the wig floor
+    m = r.status()["mics"][0]
+    assert m["shaped"], r.status()["log"]  # the voice heard while it rang out gave a curve
+    boom = [
+        b
+        for b in ("PEQ/Bank/BandL", "PEQ/Bank/Band:0")
+        if desk.raw[f"{b}/Gain"] < 0 and 150 <= desk.raw[f"{b}/Frequency"] / 10 <= 400
+    ]
+    assert boom, desk.raw  # the boom, cut
+    assert in_order(desk)
     notches = {b: (desk.raw[f"{b}/Frequency"], desk.raw[f"{b}/Gain"], desk.raw[f"{b}/Q"]) for b in r.mics[0].notches}
     assert notches
     session = dict(r.checks.sessions())[0]
-    assert session.live and session.mic == "wig" and session.reserved
-    wait_until(lambda: any(e["action"] == "eq" for e in r.auto.state(0)["log"]), timeout=240)
-    for b, v in notches.items():  # tone EQ moved other bands, never the notches
+    assert session.live and session.mic == "wig" and session.reserved and session.hpf_floor >= 100
+    eng.run(30.0)  # live tone EQ: whatever it does, the notches stay
+    for b, v in notches.items():
         assert (desk.raw[f"{b}/Frequency"], desk.raw[f"{b}/Gain"], desk.raw[f"{b}/Q"]) == v
     st = r.finish()
     assert st["phase"] == "finished" and not r.auto.state(0)["on"]
+
+
+def _mic_on(desk, r):
+    raw = desk.eq_raw(0, PATHS)
+    m = ro._Mic(0, "In 1", "wig", "speech", -1000, 1, dict(raw), level=-1000, on=1, known_eq=dict(raw))
+    r.mics = [m]
+    return m
+
+
+def test_notches_keep_the_bands_in_frequency_order():
+    desk, eng, r = rig()
+    desk.raw.update({"PEQ/Bank/Band:1/Frequency": 30000, "PEQ/Bank/Band:1/Gain": 200})  # the desk's own +2 dB at 3 kHz
+    m = _mic_on(desk, r)
+    for f in (620.0, 320.0, 1800.0):  # rung in this order, as on stage
+        assert r._notch(m, f, -3.0)
+        assert in_order(desk), desk.raw
+    assert sorted(n["freq"] for n in m.notches.values()) == [320.0, 620.0, 1800.0]
+    # The desk's 3 kHz band moved along (to H) instead of being lost, still a bell.
+    assert desk.raw["PEQ/Bank/BandH/Frequency"] == 30000 and desk.raw["PEQ/Bank/BandH/Gain"] == 200
+    assert desk.raw["PEQ/Bank/BandH/Type"] == 0
+
+
+def test_a_low_ring_raises_the_high_pass_instead_of_a_notch():
+    desk, eng, r = rig()
+    m = _mic_on(desk, r)
+    r._lowest_pitch = lambda index: 180.0  # a higher voice: room under it
+    r._hpf_on(m)
+    assert desk.raw["PEQ/Bank/HPF/On"] == 1 and desk.raw["PEQ/Bank/HPF/Frequency"] == 1000
+    assert r._notch(m, 120.0, -2.0)
+    assert desk.raw["PEQ/Bank/HPF/Frequency"] == 1550 and not m.notches  # 1.3 x the ring
+    assert m.hpf_floor == 155.0 and m.rings[-1]["band"] == "HPF"
+    r._lowest_pitch = lambda index: 100.0  # a low voice: the high-pass can't go over its fundamental
+    m2 = _mic_on(desk, r)
+    assert r._notch(m2, 125.0, -2.0) and m2.notches  # so a notch instead

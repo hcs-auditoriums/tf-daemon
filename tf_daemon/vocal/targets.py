@@ -9,9 +9,12 @@ should be pushed towards average speech, so the page picks, per channel:
   boost limits keep it away from the region where that kind of mic feeds back
   first. Head-worn mics (wig / hairline, lav) are the ones that ring at
   2-8 kHz, so they get little or no boost there.
-* an **EQ style**: what the voice should end up like. Speech aims at the
-  reference for intelligibility; singing keeps more warmth and the singer's
-  2.5-3.5 kHz "ring", and cuts more gently.
+* an **EQ style**: what the voice should end up like. Its ``target`` says what to
+  accept rather than correct (speech aims at the reference for intelligibility;
+  singing keeps more warmth and the singer's 2.5-3.5 kHz "ring", and cuts more
+  gently), and its ``character`` adds a little of what that style wants on top of
+  the correction (presence, air, body), when a band is free, nothing rings near it,
+  and the mic type allows the boost.
 
 These are starting points drawn from common placement guidance (forehead mics
 sound fairly natural with a slightly softer top; chest lavs pick up a chest
@@ -31,6 +34,7 @@ import numpy as np
 from ..dsp.eq import FS, section_db
 
 Shape = tuple[tuple[str, float, float, float], ...]  # (kind, freq, gain dB, Q) sections
+Character = tuple[tuple[str, float, float, float, str], ...]  # the same, with what it's for
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,7 @@ class MicType:
     boost_range: tuple[float, float] = (2000.0, 8000.0)  # where a boost may go
     hpf_min_hz: float = 60.0  # lowest suggested high-pass
     notch_q: float = 8.0  # ring-out notch width
+    air_boost_db: float = 3.0  # cap on a character high shelf from 8 kHz up (above the feedback range)
 
 
 @dataclass(frozen=True)
@@ -52,6 +57,7 @@ class EQStyle:
     cut_scale: float = 1.0  # share of an excess a cut takes out (x 0.8, tone.py)
     max_cut_db: float = 12.0  # cap on cuts (the config's max_cut_db still applies)
     hpf_ratio: float = 0.75  # high-pass at this x the lowest pitch
+    character: Character = ()  # added on top of the correction, in order of importance
 
 
 MIC_TYPES: dict[str, MicType] = {
@@ -63,6 +69,7 @@ MIC_TYPES: dict[str, MicType] = {
         max_boost_db=1.0,
         hpf_min_hz=100.0,
         notch_q=10.0,
+        air_boost_db=2.0,
     ),
     "lav": MicType(
         "Lavalier (chest)",
@@ -71,12 +78,14 @@ MIC_TYPES: dict[str, MicType] = {
         max_boost_db=2.0,
         hpf_min_hz=100.0,
         notch_q=10.0,
+        air_boost_db=2.0,
     ),
     "headset": MicType(
         "Headset / boom",
         "cheek boom near the mouth: close to the reference; breath and pops kept out by the high-pass",
         max_boost_db=2.0,
         hpf_min_hz=100.0,
+        air_boost_db=2.0,
     ),
     "handheld": MicType(
         "Handheld / podium",
@@ -87,11 +96,16 @@ MIC_TYPES: dict[str, MicType] = {
 }
 
 EQ_STYLES: dict[str, EQStyle] = {
-    "speech": EQStyle("Speech", "the reference speech spectrum: clarity first"),
+    "speech": EQStyle(
+        "Speech",
+        "the reference speech spectrum: clarity first, a touch of presence",
+        character=(("bell", 3000.0, 1.5, 1.2, "presence"),),
+    ),
     "projected": EQStyle(
         "Projected speech",
         "a stage voice: keeps the extra upper mids that projecting brings instead of cutting them",
         target=(("bell", 2500.0, 3.0, 0.7),),
+        character=(("bell", 400.0, -2.0, 1.0, "clarity (less box)"),),
     ),
     "speech_singing": EQStyle(
         "Speech & singing",
@@ -100,6 +114,7 @@ EQ_STYLES: dict[str, EQStyle] = {
         cut_scale=0.75,
         max_cut_db=4.0,
         hpf_ratio=0.7,
+        character=(("bell", 3000.0, 1.5, 1.2, "presence"), ("high_shelf", 10000.0, 2.0, 0.7, "air")),
     ),
     "singing": EQStyle(
         "Singing",
@@ -108,6 +123,11 @@ EQ_STYLES: dict[str, EQStyle] = {
         cut_scale=0.6,
         max_cut_db=3.0,
         hpf_ratio=0.6,
+        character=(
+            ("bell", 3000.0, 1.5, 1.4, "singer's ring"),
+            ("high_shelf", 10000.0, 2.0, 0.7, "air"),
+            ("bell", 220.0, 1.5, 1.0, "body"),
+        ),
     ),
 }
 
@@ -130,6 +150,16 @@ def tone_options(mic: str, style: str, freqs: np.ndarray, *, max_cut_db: float, 
         "boost_range": m.boost_range,
         "hpf_ratio": s.hpf_ratio,
         "hpf_min_hz": m.hpf_min_hz,
+        "character": tuple(
+            (
+                kind,
+                f,
+                g if g <= 0 else min(g, m.air_boost_db if f >= 8000 else min(m.max_boost_db, max_boost_db)),
+                q,
+                name,
+            )
+            for kind, f, g, q, name in s.character
+        ),
     }
 
 

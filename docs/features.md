@@ -111,6 +111,9 @@ dashed curve on the same scale as the desk's EQ overlay (green), so the two can
 be compared directly; **Compare with desk EQ** turns that overlay on. A faint thin
 line shows the voice's difference from reference speech.
 
+A change to a value the desk already has isn't sent (the TF5 doesn't echo a set that
+changes nothing) and counts as confirmed.
+
 **Apply to desk** (needs `tf5.eq = true` and `tf5.eq_write = true`): sets the
 input channel's EQ on the TF5 to the suggestion. A confirmation lists every
 change first: the EQ switched on if it was off, the HPF on at the suggested
@@ -186,6 +189,16 @@ measured 1 m in front of a mouth, which no mic on a person hears, so:
   cuts at most 4 dB), **Singing** (keeps the body and the 2.5–3.5 kHz singer's ring,
   cuts at most 3 dB, lower HPF).
 
+Each EQ type also adds a little **character** on top of the correction, on a band
+that's free, away from rings and the other moves: *Speech* a touch of presence
+(3 kHz), *Projected speech* less box (400 Hz cut), *Speech & singing* presence and
+air (a 10 kHz shelf), *Singing* the singer's ring (3 kHz), air and body (220 Hz).
+Boosts stay within the mic type's limits (a wig mic: 1 dB in the 2–8 kHz feedback
+range, 2 dB of air) and the measured feedback headroom.
+
+All bands are kept **in frequency order** (L ≤ LM ≤ HM ≤ H), notches included, so
+the desk and TF Editor read the way you'd expect.
+
 These are starting points from common placement guidance, not measurements of a
 particular microphone.
 
@@ -195,15 +208,20 @@ by hand. A popup stays on top the whole time with **Mute & cancel** (or Esc): it
 mutes every ring-out channel at once, then puts their faders and EQ back as they
 were; they stay muted until you press **Unmute**.
 
-1. One mic at a time, the others in the ring-out muted: the fader starts 10 dB
-   under its level and rises 1 dB a second, never above `ringout_ceiling_db`. When it
+1. One mic at a time, the others in the ring-out muted. The high-pass goes on at the
+   mic type's floor (100 Hz for head-worn mics; a higher one stays). The fader starts
+   10 dB under its level and rises 1 dB a second, never above `ringout_ceiling_db`. When it
    starts to ring, the fader drops 6 dB at once. If the ring then falls clearly
    further than the fader did (and further than everything else), it was feedback:
    a narrow notch (−3 dB, the mic type's Q) goes on a free PEQ band, and the ramp
    carries on from just under where it rang. A ring right beside an existing notch is
    the same resonance (the loop's delay makes it ring at one of several frequencies)
    and widens and deepens that notch instead, to at most −9 dB. A steady tone (hum,
-   a held note) falls only as far as the fader and is ignored. Each mic is done at the
+   a held note) falls only as far as the fader and is ignored. A ring under 170 Hz is
+   taken out with the high-pass instead (raised to 1.3 × the ring, never past the
+   voice's lowest pitch or 200 Hz). Placing a notch keeps every band in frequency
+   order: the channel's other bands move along (same settings), and when there's no
+   room the one doing least gives way. Each mic is done at the
    ceiling, after 3 notches (one band stays for tone), or when new frequencies ring
    as soon as the last was notched: the system's limit.
 2. All of them together at their safe levels, raised together up to the margin:
@@ -215,7 +233,13 @@ were; they stay muted until you press **Unmute**.
    it rings now (the gain the notches bought) and the notches. A frequency that rang
    on two or more mics is named: the system rings there (PA, room, or the capsules'
    shared peak), and one narrow cut on the stereo bus PEQ would serve them all.
-4. Optionally (on by default), **live tone EQ**: auto EQ on each mic with its mic
+4. **The vocal curve**: from the voice heard during the ring-out (the analysis taps
+   are before the fader, so the ramp doesn't skew it), the suggestion for the mic type
+   and EQ type goes on in one step: the high-pass under the voice (never below what a
+   ring needed), cuts where the voice builds up, and the EQ type's character, on the
+   bands the notches left. Have each person talk and sing while their mic is rung out;
+   without enough voice it says so and live tone EQ does it later.
+5. Optionally (on by default), **live tone EQ**: auto EQ on each mic with its mic
    type and EQ style, the notches reserved (never moved), while each person talks or
    sings, until you press **Done**.
 
