@@ -2,6 +2,7 @@
 # The repo is bind-mounted at /workspace (see compose.yaml), so the code that
 # runs is always the code on your disk; only the dependencies live in the image.
 FROM python:3.13-slim-trixie
+LABEL org.opencontainers.image.source=https://github.com/hcs-auditoriums/tf-daemon
 
 # libportaudio2: sounddevice imports it even when the audio source is synthetic.
 # git / procps: for working inside the container (VS Code, `ps`).
@@ -19,11 +20,18 @@ print("\n".join(p["dependencies"] + p["optional-dependencies"]["dev"] + p["optio
 EOF
 RUN pip install --no-cache-dir -r /tmp/requirements.txt watchfiles
 
-# Headless Chromium for tests/test_browser.py (the pages in a real browser).
+# Headless Chromium for tests/test_browser.py (the pages in a real browser). Only the
+# libraries chrome-headless-shell links against (from ldd) and one font for canvas
+# text: playwright's --with-deps would add ~330 MB, mostly fonts for other scripts.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
-RUN python -m playwright install --with-deps --only-shell chromium \
- && chmod -R a+rX /opt/playwright \
- && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libasound2t64 libatk1.0-0t64 libatspi2.0-0t64 libdbus-1-3 libexpat1 libgbm1 libglib2.0-0t64 \
+      libnspr4 libnss3 libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 \
+      libxrandr2 fonts-dejavu-core \
+ && rm -rf /var/lib/apt/lists/* \
+ && python -m playwright install --only-shell chromium \
+ && chmod -R a+rX /opt/playwright
 
 ARG USERNAME=dev
 ARG USER_UID=1000
