@@ -42,7 +42,7 @@ class ConsoleFeed(Protocol):
     def eq_available(self) -> bool: ...
 
     @property
-    def eq_version(self) -> int: ...   # changes whenever any channel's EQ may have
+    def eq_version(self) -> int: ...  # changes whenever any channel's EQ may have
 
     def snapshot(self) -> tuple[int, dict[str, Any]]: ...
 
@@ -101,7 +101,7 @@ class AudioModule:
         def rings_ignore():
             freq = (request.get_json(silent=True) or {}).get("freq")
             if not isinstance(freq, (int, float)) or not 20 <= freq <= 20000:
-                return jsonify({"error": "body must be {\"freq\": <Hz>}"}), 400
+                return jsonify({"error": 'body must be {"freq": <Hz>}'}), 400
             engine.rings.ignore(float(freq))
             return jsonify({"ok": True})
 

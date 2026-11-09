@@ -110,6 +110,7 @@ class AudioEngine:
         # are the pinned inputs until the TF5 patch says otherwise.
         self._bus_inputs: frozenset[int] = self._pinned
         self._taps: list[Any] = []  # add_tap(): optional modules that see each analyzed input's samples
+        self._frame_taps: list[Any] = []  # add_frame_tap(): the same, all inputs of a hop at once
         self._console_gains: dict[int, float | None] = {}  # input -> fader dB, None = off / -inf
         self._usb_post_fader = cfg.tf5.usb_post_fader
         self._attr_n = self._ring_settings.n_fft if self._ring_settings else 0
@@ -133,11 +134,19 @@ class AudioEngine:
     def start(self) -> None:
         if self._thread is not None:
             return
-        log.info("%d input(s); always analyzing %s, others on demand", len(self.inputs),
-                 ", ".join(f"{c.index}={c.name}" for c in self.channels))
-        log.info("FFT %d (%.2f Hz/bin), hop %d (%.1f updates/s), %d display bins",
-                 self.n_fft, self.analyzer.samplerate / self.n_fft, self.hop,
-                 self.analyzer.update_rate, self.analyzer.bins.count)
+        log.info(
+            "%d input(s); always analyzing %s, others on demand",
+            len(self.inputs),
+            ", ".join(f"{c.index}={c.name}" for c in self.channels),
+        )
+        log.info(
+            "FFT %d (%.2f Hz/bin), hop %d (%.1f updates/s), %d display bins",
+            self.n_fft,
+            self.analyzer.samplerate / self.n_fft,
+            self.hop,
+            self.analyzer.update_rate,
+            self.analyzer.bins.count,
+        )
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name="analysis", daemon=True)
         self._thread.start()
@@ -158,6 +167,7 @@ class AudioEngine:
     def _build_inputs(self, count: int) -> list[Channel]:
         def label(i: int) -> str:
             return self._config_labels.get(i) or self._console_names.get(i) or f"Ch {i + 1}"
+
         return [Channel(i, label(i)) for i in range(count)]
 
     def set_console_names(self, names: dict[int, str]) -> None:
@@ -179,6 +189,12 @@ class AudioEngine:
         """
         self._taps.append(fn)
 
+    def add_frame_tap(self, fn: Any) -> None:
+        """Call ``fn(frames, stream_t)`` once per hop with ``{input: samples}`` for every
+        analyzed input, all from the same moment (for comparing inputs, e.g. a mic with
+        the mains). Same rules as add_tap."""
+        self._frame_taps.append(fn)
+
     def set_console_gains(self, gains: dict[int, float | None]) -> None:
         """Fader level (dB) per input from the mixer; None = channel off or fader at -inf (thread-safe)."""
         with self._lock:
@@ -190,7 +206,7 @@ class AudioEngine:
             with self._lock:
                 self._bus_inputs = frozenset(i for i in indices if 0 <= i < len(self.inputs))
 
-    ATTRIBUTE_EVERY = 5      # hops (4 per second at the default hop)
+    ATTRIBUTE_EVERY = 5  # hops (4 per second at the default hop)
     ATTRIBUTE_MIN_DB = -100.0  # an input quieter than this at the ring frequency isn't ranked
 
     def _attribute(self) -> None:
@@ -203,7 +219,7 @@ class AudioEngine:
         sources = [i for i in range(len(self.inputs)) if i not in bus]
         if not sources:
             return
-        buf = self._attr_buf[:len(sources)]
+        buf = self._attr_buf[: len(sources)]
         self.ring.read_latest(buf, sources)
         freqs = sorted({f for _, f in rings})
         levels = narrowband_levels(buf, freqs, self.analyzer.samplerate, self._attr_window)
@@ -292,8 +308,7 @@ class AudioEngine:
             "average_tau": self.cfg.dsp.average_tau,
             "db_floor": self.cfg.dsp.db_floor,
             "source": self.source.name,
-            "channels": [{"index": c.index, "label": c.label, "pinned": c.index in self._pinned}
-                         for c in self.inputs],
+            "channels": [{"index": c.index, "label": c.label, "pinned": c.index in self._pinned} for c in self.inputs],
             "freqs": [round(float(f), 2) for f in a.bins.centers],
         }
 
@@ -324,17 +339,21 @@ class AudioEngine:
                 with self._lock:
                     active = sorted(self._analyzers.items())
                     detectors = dict(self._detectors)
-                frame = self._frame[:len(active)]
+                frame = self._frame[: len(active)]
                 self.ring.read_latest(frame, [i for i, _ in active])
                 stream_t, wall_t = written / self.analyzer.samplerate, time.time()
                 for row, (index, an) in enumerate(active):
-                    an.process(frame[row:row + 1])
+                    an.process(frame[row : row + 1])
                     det = detectors.get(index)
                     if det is not None:
                         rings = det.process(frame[row], stream_t)
                         self.rings.update(index, self.inputs[index].name, rings, wall_t)
                     for tap in self._taps:
                         tap(index, frame[row], stream_t)
+                if self._frame_taps:
+                    frames = {index: frame[row] for row, (index, _) in enumerate(active)}
+                    for ftap in self._frame_taps:
+                        ftap(frames, stream_t)
                 self._publish(active)
                 if detectors and self._frames % self.ATTRIBUTE_EVERY == 0:
                     self._attribute()
@@ -363,8 +382,9 @@ class AudioEngine:
         for k, (index, an) in enumerate(active):
             off = _HEADER.size + k * rec_size
             _RECORD.pack_into(payload, off, index, 0)
-            data = np.frombuffer(payload, dtype="<i2", offset=off + _RECORD.size,
-                                 count=TRACES * n_bins).reshape(TRACES, n_bins)
+            data = np.frombuffer(payload, dtype="<i2", offset=off + _RECORD.size, count=TRACES * n_bins).reshape(
+                TRACES, n_bins
+            )
             for slot, src in ((0, an.avg_db[0]), (1, an.peak_db[0]), (2, an.live_db[0])):
                 np.multiply(src, np.float32(100.0), out=self._scaled)
                 np.rint(self._scaled, out=self._scaled)

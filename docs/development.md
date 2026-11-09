@@ -9,10 +9,18 @@ pip install -e '.[dev]'
 python -m tf_daemon --demo --config config.dev.toml
 ```
 
-`--demo` simulates all the hardware: synthetic audio, a demo tinySA, four QLX-D
+`--demo` simulates all the hardware: a stage, a demo tinySA, four QLX-D
 receivers and a TF5 console (names, faders, EQ read and EQ write). It is short for
-`--source synth --rf-source demo --qlxd-source demo --tf5-source demo`; each flag
-also works on its own. `config.dev.toml` turns on every feature and names a few
+`--source stage --rf-source demo --qlxd-source demo --tf5-source demo`; each flag
+also works on its own.
+
+The simulated stage (`tf_daemon/audio/stage.py`) is a closed loop: the named
+inputs are talkers taking turns, each channel goes through the simulated desk's
+current EQ and fader into the mains (USB 33/34), the PA leaks back into the mics
+after ~17 ms through a couple of resonances, and a house mic hears the mains
+through a reverberant room. So an EQ change on the desk is heard in the mains and
+the house mic, and too much gain really rings (at 820 Hz and 2.48 kHz first). The
+plain `synth` source (same voice, no desk, no loop) is still there for tests. `config.dev.toml` turns on every feature and names a few
 inputs. Or use the dev container (next section), which needs only Docker.
 
 Open <http://localhost:8080> (audio), <http://localhost:8080/rf> (RF) or
@@ -81,14 +89,20 @@ The full `docker compose` commands they run:
 | Rebuild after a dependency change | `docker compose up -d --build` |
 
 Inside the container, `pytest` runs on every core (`PYTEST_ADDOPTS` in
-`compose.yaml`) and includes `tests/test_live.py`, which checks the running
+`compose.yaml`) and includes `tests/test_live.py`, which checks a running
 server end to end: every simulated device up, the pages, the console's names
 and EQ, and the WebSockets. `tests/test_browser.py` loads the pages in headless
 Chromium (Playwright, in the dev image) and fails on any script error, a plot
-that stops drawing, or a control that no longer works. Outside the container
-these tests skip, unless you point `TF_DAEMON_URL` at a server started with
-`--demo` (and, for the browser ones, `pip install playwright && playwright install
-chromium`). If you've just saved a file, they wait for the server to come back.
+that stops drawing, or a control that no longer works. Both run against a
+private demo server that `tests/conftest.py` starts for the run (a free port,
+throwaway state files), not the dev server on :8080: saving a file doesn't
+restart it mid-test, and the tests can't change your demo. It only starts when
+the run includes those tests, so `pytest tests/test_dsp.py` stays instant. Set
+`TF_DAEMON_URL` to use a server of your own instead (outside the container the
+browser tests also need `pip install playwright && playwright install chromium`).
+
+Run the tests for what you changed first (`pytest tests/test_x.py` or `-k name`)
+and the whole suite once at the end; failures print short tracebacks.
 
 CI (`.github/workflows/ci.yml`) runs `ruff`, `mypy` and the tests in this same
 container image on every pull request and push to `main` (changes to Markdown

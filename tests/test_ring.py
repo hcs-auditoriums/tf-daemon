@@ -19,8 +19,16 @@ FS, HOP, BLOCK = 48000, 2400, 1200
 
 def speech(seconds, tone_db=-200.0, tone_hz=2500.0, seed=3):
     """The synth's voice: gliding harmonics in syllables (plus an optional steady tone)."""
-    src = SynthSource(channels=1, active=[0], blocksize=BLOCK, speech_db=-20, noise_db=-60,
-                      tone_hz=tone_hz, tone_db=tone_db, seed=seed)
+    src = SynthSource(
+        channels=1,
+        active=[0],
+        blocksize=BLOCK,
+        speech_db=-20,
+        noise_db=-60,
+        tone_hz=tone_hz,
+        tone_db=tone_db,
+        seed=seed,
+    )
     blk = np.zeros((BLOCK, 1), np.float32)
     out = []
     for _ in range(int(seconds * FS / BLOCK)):
@@ -60,7 +68,7 @@ def reverb(x, rt60=1.0, seed=7):
     t = np.arange(n) / FS
     ir = np.random.default_rng(seed).standard_normal(n) * 10 ** (-3 * t / rt60)
     ir[0] = 1.0
-    ir /= np.sqrt(np.sum(ir ** 2))
+    ir /= np.sqrt(np.sum(ir**2))
     size = 1 << (len(x) + n - 1).bit_length()
     return np.fft.irfft(np.fft.rfft(x, size) * np.fft.rfft(ir, size), size)[: len(x)]
 
@@ -70,7 +78,7 @@ def detect(x, settings=RingSettings()):
     det = RingDetector(FS, HOP, settings)
     first = {}
     for end in range(settings.n_fft, len(x) + 1, HOP):
-        for r in det.process(x[end - settings.n_fft:end], end / FS):
+        for r in det.process(x[end - settings.n_fft : end], end / FS):
             first.setdefault((round(r["freq"] / 10) * 10, r["kind"]), end / FS)
     return first
 
@@ -80,6 +88,7 @@ def found_near(first, f, within_s, kinds=("tail", "sustained", "growing")):
 
 
 # ---------------------------------------------------------------- must detect
+
 
 @pytest.mark.parametrize("tone_db", [-5, -15, -25])
 def test_steady_ring_quieter_than_the_voice(tone_db):
@@ -116,6 +125,7 @@ def test_speech_through_a_loop_just_below_feedback():
 
 # ---------------------------------------------------------------- must not detect
 
+
 @pytest.mark.parametrize("seed", [3, 11])
 def test_speech_alone(seed):
     assert detect(speech(12, seed=seed)) == {}
@@ -131,8 +141,9 @@ def test_notes_that_die_with_the_room():
     on = (t % 1.5) < 0.4
     since_off = np.where(on, 0.0, (t % 1.5) - 0.4)
     room = np.where(on, 1.0, 10 ** (-120 * since_off / 20))
-    notes = np.concatenate([tone(1.5, 600 + 137 * i, lambda tt: np.where(tt < 0.4, -30, -30 - 120 * (tt - 0.4)))
-                            for i in range(6)])
+    notes = np.concatenate(
+        [tone(1.5, 600 + 137 * i, lambda tt: np.where(tt < 0.4, -30, -30 - 120 * (tt - 0.4))) for i in range(6)]
+    )
     assert detect(noise(9, -20) * room + notes + noise(9, -80, 5)) == {}
 
 
@@ -145,8 +156,9 @@ def test_sung_note_with_vibrato():
 
 def test_steady_organ_chord():
     t = np.arange(int(8 * FS)) / FS
-    chord = sum((0.05 / k) * np.sin(2 * np.pi * k * 220 * t) for k in range(1, 6)) + \
-        sum((0.04 / k) * np.sin(2 * np.pi * k * 277.2 * t) for k in range(1, 6))
+    chord = sum((0.05 / k) * np.sin(2 * np.pi * k * 220 * t) for k in range(1, 6)) + sum(
+        (0.04 / k) * np.sin(2 * np.pi * k * 277.2 * t) for k in range(1, 6)
+    )
     assert detect(chord + noise(8, -60)) == {}
 
 
@@ -160,21 +172,22 @@ def test_mains_hum_is_skipped():
 
 # ---------------------------------------------------------------- event log
 
+
 def test_ringlog_counts_comebacks_and_ignores():
     log = RingLog()
     ring = [{"freq": 2500.0, "level": -30.0, "prominence": 20.0, "kind": "tail"}]
     log.update(0, "Main L", ring, 100.0)
-    log.update(0, "Main L", [], 100.5)               # a flicker: still live (grace period)
+    log.update(0, "Main L", [], 100.5)  # a flicker: still live (grace period)
     assert log.snapshot()["events"][0]["active"]
     log.update(0, "Main L", ring, 101.0)
     assert log.snapshot()["events"][0]["count"] == 1
-    log.update(0, "Main L", [], 103.0)               # gone for good
+    log.update(0, "Main L", [], 103.0)  # gone for good
     ev = log.snapshot()["events"][0]
     assert not ev["active"] and ev["geq"] == 2500
     log.update(0, "Main L", [{**ring[0], "freq": 2510.0, "kind": "sustained"}], 110.0)  # back, within 1%
     ev = log.snapshot()["events"][0]
     assert (ev["count"], ev["kind"], ev["active"]) == (2, "sustained", True)
-    log.update(1, "Main R", ring, 110.0)             # same frequency, other input: its own event
+    log.update(1, "Main R", ring, 110.0)  # same frequency, other input: its own event
     assert len(log.snapshot()["events"]) == 2
 
     log.ignore(2500.0)
@@ -196,13 +209,14 @@ def test_config(tmp_path):
     cfg = load_config(None)
     assert cfg.ring.enabled and cfg.ring.sensitivity == "normal"
     p = tmp_path / "c.toml"
-    for bad in ('[ring]\nsensitivity = "max"\n', '[ring]\nfmin = 5000\nfmax = 100\n', '[ring]\nmains_hz = 55\n'):
+    for bad in ('[ring]\nsensitivity = "max"\n', "[ring]\nfmin = 5000\nfmax = 100\n", "[ring]\nmains_hz = 55\n"):
         p.write_text(bad)
         with pytest.raises(ConfigError, match="ring"):
             load_config(p)
 
 
 # ---------------------------------------------------------------- in the app
+
 
 def test_engine_detects_the_synth_ring_and_routes_work():
     cfg = make_config()  # the synth carries a steady 2.5 kHz tone 15 dB under its voice
@@ -242,6 +256,7 @@ def test_ring_detection_can_be_turned_off():
 
 
 # ---------------------------------------------------------------- which input feeds a ring on the mains
+
 
 class _StageSource(_PacedSource):
     """Two mics hearing a ring at different levels, a third with only noise, and a Main mix.
@@ -284,6 +299,7 @@ def _wait_sources(engine, pred, timeout=8.0):
 
 def test_ring_on_the_mains_is_traced_to_its_inputs():
     from tf_daemon.audio.engine import AudioEngine
+
     cfg = make_config(channels=[{"index": 3, "label": "Main"}])  # the bus: always analyzed, rings get attributed
     engine = AudioEngine(cfg, _StageSource())
     engine.set_console_names({0: "Mic A", 1: "Mic B", 2: "Spare"})
@@ -298,8 +314,12 @@ def test_ring_on_the_mains_is_traced_to_its_inputs():
         # With the console's faders: level + fader. Mic B pushed up beats Mic A pulled down.
         engine.set_console_gains({0: -10.0, 1: 5.0, 2: 0.0})
         # (Contributions are smoothed over ~1 s so one measurement can't reorder the list.)
-        e = _wait_sources(engine, lambda e: e["sources"][0]["label"] == "Mic B"
-                          and len(e["sources"]) == 2 and e["sources"][1]["rel_db"] <= -6.0)
+        e = _wait_sources(
+            engine,
+            lambda e: (
+                e["sources"][0]["label"] == "Mic B" and len(e["sources"]) == 2 and e["sources"][1]["rel_db"] <= -6.0
+            ),
+        )
         assert e["sources_basis"] == "fader"
         assert e["sources"][1]["rel_db"] == pytest.approx(-7.0, abs=1.5)  # (-30-10) - (-38+5)
 
@@ -313,6 +333,7 @@ def test_ring_on_the_mains_is_traced_to_its_inputs():
 def test_narrowband_levels():
     from tf_daemon.dsp.ring import narrowband_levels
     from tf_daemon.dsp.spectrum import blackman_harris
+
     n = 16384
     t = np.arange(n) / FS
     frames = np.stack([0.5 * np.sin(2 * np.pi * 1000 * t), 0.05 * np.sin(2 * np.pi * 3000 * t)])

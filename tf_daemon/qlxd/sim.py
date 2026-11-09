@@ -23,9 +23,17 @@ _GET = re.compile(r"GET\s+(?:(\d+)\s+)?(\S+)")
 
 
 class SimReceiver:
-    def __init__(self, name: str, freq_khz: int, group_chan: str = "1,1", batt_type: str = "LION",
-                 run_min: float = 300.0, tx: str | None = "QLXD2_SM58", rf_base: float = -55.0,
-                 seed: int = 0) -> None:
+    def __init__(
+        self,
+        name: str,
+        freq_khz: int,
+        group_chan: str = "1,1",
+        batt_type: str = "LION",
+        run_min: float = 300.0,
+        tx: str | None = "QLXD2_SM58",
+        rf_base: float = -55.0,
+        seed: int = 0,
+    ) -> None:
         self.name, self.freq_khz, self.group_chan = name, freq_khz, group_chan
         self.batt_type, self.run_min, self.tx = batt_type, run_min, tx
         self.rf_base = rf_base

@@ -13,8 +13,11 @@ state_file = ".dev/qlxd_state.json"   # keep dev edits out of the real state fil
 [vocal]
 enabled = true
 inputs = [0, 1]
+house_mic = 31        # the simulated stage's house mic (see [[channels]] below)
+auto_allowed = true   # the auto EQ toggle shows up (still off until turned on per channel)
+profiles_file = ".dev/eq_profiles.json"   # keep dev profiles out of the real file
 
-# Synth audio plays voice + a ring tone on every listed input.
+# --demo: the named inputs are talkers on the simulated stage (they take turns).
 [[channels]]
 index = 0
 label = "Pastor"
@@ -22,6 +25,11 @@ label = "Pastor"
 [[channels]]
 index = 1
 label = "Lead Vox"
+
+# The simulated stage (--demo) puts a house mic here: the voice as the room hears it.
+[[channels]]
+index = 31
+label = "House mic"
 
 [[channels]]
 index = 32

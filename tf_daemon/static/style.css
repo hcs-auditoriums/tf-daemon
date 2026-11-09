@@ -416,6 +416,13 @@ main.page {
 .vp-bar { height: 8px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
 .vp-bar span { display: block; height: 100%; background: var(--vocal); transition: width 0.4s linear; }
 .vp-note { color: var(--muted); }
+.vp-live { color: var(--vocal); font-weight: 600; }
+.cp-profiles { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.cp-profiles[hidden] { display: none; }
+.cp-prow { display: flex; gap: 6px; align-items: center; }
+.cp-pick { flex: 1; min-width: 0; font: inherit; font-size: 12px; padding: 3px 4px; }
+.cp-btn { font: inherit; font-size: 12px; padding: 3px 8px; }
+.vp-sub { margin: 10px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .vp-error { color: var(--bad); }
 .vp-foot { color: var(--muted); font-size: 11px; border-top: 1px solid var(--border); padding-top: 6px; }
 .vp-check { display: flex; align-items: center; gap: 6px; color: var(--muted); }
@@ -425,3 +432,13 @@ main.page {
 .vp-table td:first-child { font-weight: 700; color: var(--text); width: 30px; }
 .vp-table tr.boost td:nth-child(2) { color: var(--eq); }
 .vp-table tr.notch td:nth-child(3) { color: var(--peak); }
+
+/* EQ editing on the spectrum (eqedit.js) */
+.eq-pop { position: absolute; z-index: 5; min-width: 180px; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--panel); box-shadow: 0 6px 20px rgba(0,0,0,.4); font-size: 12px; }
+.eqp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.eqp-x { background: none; border: 0; color: inherit; font-size: 16px; cursor: pointer; }
+.eqp-row { display: grid; grid-template-columns: 70px 1fr 24px; gap: 6px; align-items: center; margin: 4px 0; }
+.eqp-row input[type=number], .eqp-row select { width: 100%; font: inherit; }
+.eqp-row input[type=checkbox] { justify-self: start; }
+.eqp-unit, .eqp-note { color: var(--muted); }

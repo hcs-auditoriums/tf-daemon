@@ -22,7 +22,9 @@ from .network import Interface, bind_to_interface
 log = logging.getLogger(__name__)
 
 FULL_QUERY = (
-    p.get("DEVICE_ID", None), p.get("MODEL", None), p.get("FW_VER", None),
+    p.get("DEVICE_ID", None),
+    p.get("MODEL", None),
+    p.get("FW_VER", None),
     p.get("ALL", 1),
 )
 METER_QUERY = (p.get("RX_RF_LVL"), p.get("RF_ANTENNA"), p.get("AUDIO_LVL"))
@@ -31,19 +33,42 @@ IDLE_TIMEOUT_S = 10.0  # no bytes for this long -> assume the link is dead
 
 def blank_state() -> dict[str, Any]:
     return {
-        "mac": None, "device_id": None, "model": None, "fw_ver": None, "name": None,
-        "frequency_mhz": None, "group_chan": None, "audio_gain_db": None,
-        "interference": False, "encryption_warning": False,
-        "tx_type": None, "tx_rf_power": None, "tx_muted": False,
-        "batt_type": None, "batt_bars": None, "batt_charge": None,
-        "batt_run_min": None, "batt_calculating": False,
-        "rf_dbm": None, "ant_a": False, "ant_b": False, "audio_dbfs": None,
+        "mac": None,
+        "device_id": None,
+        "model": None,
+        "fw_ver": None,
+        "name": None,
+        "frequency_mhz": None,
+        "group_chan": None,
+        "audio_gain_db": None,
+        "interference": False,
+        "encryption_warning": False,
+        "tx_type": None,
+        "tx_rf_power": None,
+        "tx_muted": False,
+        "batt_type": None,
+        "batt_bars": None,
+        "batt_charge": None,
+        "batt_run_min": None,
+        "batt_calculating": False,
+        "rf_dbm": None,
+        "ant_a": False,
+        "ant_b": False,
+        "audio_dbfs": None,
     }
 
 
 class Receiver:
-    def __init__(self, host: str, port: int, iface: Interface | None, on_change: Callable[[], None],
-                 meter_poll_s: float = 1.0, full_poll_s: float = 10.0, connect_timeout_s: float = 3.0) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        iface: Interface | None,
+        on_change: Callable[[], None],
+        meter_poll_s: float = 1.0,
+        full_poll_s: float = 10.0,
+        connect_timeout_s: float = 3.0,
+    ) -> None:
         self.host, self.port, self.iface = host, port, iface
         self.on_change = on_change
         self.meter_poll_s, self.full_poll_s, self.connect_timeout_s = meter_poll_s, full_poll_s, connect_timeout_s
@@ -52,7 +77,7 @@ class Receiver:
         self.state = blank_state()
         self.online = False
         self.ever_online = False  # answered at least once: it is a receiver
-        self.failures = 0         # consecutive failed connection attempts
+        self.failures = 0  # consecutive failed connection attempts
         self.error: str | None = None
         self.last_seen: float | None = None
 
@@ -86,8 +111,15 @@ class Receiver:
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            return {"key": self.key, "host": self.host, "port": self.port, "online": self.online,
-                    "error": self.error, "last_seen": self.last_seen, **self.state}
+            return {
+                "key": self.key,
+                "host": self.host,
+                "port": self.port,
+                "online": self.online,
+                "error": self.error,
+                "last_seen": self.last_seen,
+                **self.state,
+            }
 
     # ------------------------------------------------------------------ thread
 

@@ -44,8 +44,9 @@ def test_config_rejects_other_samplerates(tmp_path):
 
 def _run_synth(tone_db, seconds=6):
     fs, n = 48000, 32768
-    src = SynthSource(channels=2, active=[0, 1], blocksize=1200, speech_db=-20, noise_db=-50,
-                      tone_hz=2500, tone_db=tone_db, seed=3)
+    src = SynthSource(
+        channels=2, active=[0, 1], blocksize=1200, speech_db=-20, noise_db=-50, tone_hz=2500, tone_db=tone_db, seed=3
+    )
     an = SpectrumAnalyzer(2, fs, n, 2400, 3.0, 50, 16000, 48)
     block = np.zeros((1200, 2), np.float32)
     frame = np.zeros((2, n), np.float32)
@@ -74,9 +75,9 @@ def test_wav_source_reads_and_rejects_rate(tmp_path):
         w.setnchannels(2)
         w.setsampwidth(3)
         w.setframerate(48000)
-        v = (np.array([[1 << 22, -(1 << 22)]] * 2400, dtype=np.int32))
+        v = np.array([[1 << 22, -(1 << 22)]] * 2400, dtype=np.int32)
         b = v.astype("<i4").tobytes()
-        w.writeframes(b"".join(b[i:i + 3] for i in range(0, len(b), 4)))
+        w.writeframes(b"".join(b[i : i + 3] for i in range(0, len(b), 4)))
     src = WavSource(good, 1200)
     blk = np.zeros((1200, 2), np.float32)
     src._fill(blk)
@@ -138,9 +139,11 @@ def _next_frame(engine, seq, timeout=5.0):
 
 def test_unlisted_inputs_are_analyzed_only_while_viewed():
     from tf_daemon.audio.engine import AudioEngine
+
     cfg = make_config(channels=[{"index": 1, "label": "Vox"}])
-    src = SynthSource(channels=4, active=[0, 1, 2, 3], blocksize=1200, speech_db=-20, noise_db=-50,
-                      tone_hz=2500, tone_db=-15)
+    src = SynthSource(
+        channels=4, active=[0, 1, 2, 3], blocksize=1200, speech_db=-20, noise_db=-50, tone_hz=2500, tone_db=-15
+    )
     engine = AudioEngine(cfg, src)
     nb = engine.analyzer.bins.count
     assert [(c.index, c.label) for c in engine.inputs] == [(0, "Ch 1"), (1, "Vox"), (2, "Ch 3"), (3, "Ch 4")]
@@ -174,6 +177,7 @@ def test_unlisted_inputs_are_analyzed_only_while_viewed():
 def test_engine_rejects_missing_channel():
     cfg = make_config(channels=[{"index": 0, "label": "A"}, {"index": 3, "label": "B"}])
     from tf_daemon.audio.engine import AudioEngine
+
     src = SynthSource(channels=1, active=[0], blocksize=1200, speech_db=-20, noise_db=-50, tone_hz=2500, tone_db=-15)
     src.channels = 1
     with pytest.raises(SourceError, match="3 \\(B\\)"):

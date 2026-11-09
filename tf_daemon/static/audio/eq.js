@@ -1,13 +1,14 @@
-// The console's EQ for the shown input, overlaid on the spectrum (read-only).
+// The console's EQ for the shown input, overlaid on the spectrum (editing: eqedit.js).
 
 import { drawPanelEq, rebuildPanel } from "./console.js";
+import { eqEditReset } from "./eqedit.js";
 import { H, PAD, W, xOf } from "./plot.js";
 import { $, C, ctx, loadInt, save, state } from "./shared.js";
 
 // The EQ set on the console for the channel on the shown input (pushed as
-// "tf5-eq" over /ws/audio; only when tf5.eq is on). Read-only: this page
-// never changes the console. Drawn at the spectrum's own dB scale (the View
-// range), with EQ 0 dB at the middle of the plot: a 70 dB range shows ±35 dB.
+// "tf5-eq" over /ws/audio; only when tf5.eq is on). Drawn at the spectrum's own
+// dB scale (the View range), with EQ 0 dB at the middle of the plot: a 70 dB
+// range shows ±35 dB. With tf5.eq_write its handles can be dragged (eqedit.js).
 state.showEq = loadInt("tf.eq", 0) === 1;
 state.eq = null;         // last "tf5-eq" message for state.input
 export let eqAvailable = null;  // null = not known yet, false = tf5.eq off (404)
@@ -17,7 +18,10 @@ export let eqAvailable = null;  // null = not known yet, false = tf5.eq off (404
 export function onConsoleEq(msg) {
   const first = !eqAvailable;
   eqAvailable = true;
-  if (msg.index === state.input) state.eq = msg;
+  if (msg.index === state.input) {
+    if (state.eqEditing) state.eqPushed = msg;   // a drag is showing its own preview: apply when it ends
+    else state.eq = msg;
+  }
   $("eq-toggle").hidden = false;
   state.dirty = true;
   if (first) rebuildPanel(); else drawPanelEq();
@@ -27,6 +31,7 @@ $("show-eq").checked = state.showEq;
 $("show-eq").onchange = (e) => {
   state.showEq = e.target.checked;
   save("tf.eq", state.showEq ? 1 : 0);
+  if (!state.showEq) eqEditReset();
   state.dirty = true;
 };
 
@@ -57,6 +62,27 @@ function eqNote(d) {
 // following the View range, so they can be compared directly.
 export const eqHalf = () => (state.dbMax - state.dbMin) / 2;     // EQ dB shown above / below 0
 export const eqY = (db) => (PAD.t + H - PAD.b) / 2 - db / eqHalf() * (H - PAD.b - PAD.t) / 2;
+
+// Where the handles are: a band at its own frequency and gain (bells, shelves: what you grab
+// to move it), the HPF and filter bands on the curve at their frequency. ``key`` names the
+// band for editing ("HPF", "L", "LM", "HM", "H").
+export function eqHandles() {
+  const d = state.eq, eq = d && d.eq;
+  if (!eq || !d.freqs || !d.freqs.length) return [];
+  const yEq = (db) => eqY(Math.max(-eqHalf(), Math.min(eqHalf(), db)));
+  const out = [];
+  if (eq.hpf) {
+    out.push({ key: "HPF", label: "HPF", kind: "hpf", f: eq.hpf.freq, x: xOf(eq.hpf.freq), y: yEq(eqAt(eq.hpf.freq) ?? 0),
+               active: eq.hpf.on });
+  }
+  for (const b of eq.bands) {
+    const filter = b.type === "hpf" || b.type === "lpf";
+    const y = filter ? yEq(eqAt(b.freq) ?? 0) : yEq(b.gain);
+    out.push({ key: b.label, label: filter ? b.type.toUpperCase() : b.label, kind: filter ? "filter" : b.type,
+               f: b.freq, x: xOf(b.freq), y, active: filter ? b.on !== false : b.gain !== 0 });
+  }
+  return out;
+}
 
 export function drawEq() {
   const d = state.eq;
@@ -109,21 +135,14 @@ export function drawEq() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // A handle per band (filled when it does something) and the HPF, on the curve at
-  // its frequency (overlapping bands add up, so that's rarely the band's own gain).
+  // A handle per band (filled when it does something) and the HPF (eqHandles).
   ctx.lineWidth = 1.5;
   ctx.textAlign = "center"; ctx.textBaseline = "bottom";
-  const handle = (f, label, active) => {
-    const x = xOf(f), y = yEq(eqAt(f));
-    ctx.beginPath(); ctx.arc(x, y, 4, 0, 2 * Math.PI);
-    if (active) ctx.fill(); else ctx.stroke();
-    ctx.fillText(label, x, y - 6);
-  };
-  if (eq.hpf && eq.hpf.on) handle(eq.hpf.freq, "HPF", true);
-  for (const b of eq.bands) {
-    const filter = b.type === "hpf" || b.type === "lpf";
-    const on = b.on !== false;
-    handle(b.freq, filter ? b.type.toUpperCase() : b.label, filter ? on : b.gain !== 0);
+  for (const h of eqHandles()) {
+    const big = h.key === state.eqSelected;
+    ctx.beginPath(); ctx.arc(h.x, h.y, big ? 6 : 4, 0, 2 * Math.PI);
+    if (h.active) ctx.fill(); else ctx.stroke();
+    ctx.fillText(h.label, h.x, h.y - (big ? 8 : 6));
   }
   ctx.globalAlpha = 1; ctx.lineWidth = 1;
 }

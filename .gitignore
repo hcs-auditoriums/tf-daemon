@@ -12,6 +12,7 @@ dist/
 .DS_Store
 config.local.toml
 qlxd_state.json
+eq_profiles.json
 *.json.tmp
 .claude/settings.local.json
 # written on the server by deploy.sh / update.sh

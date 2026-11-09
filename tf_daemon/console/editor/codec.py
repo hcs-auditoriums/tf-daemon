@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .dump import Prm
 
-MAX_FRAME = 4 * 1024 * 1024      # the Mixing dump is 67 kB; anything near this is garbage
+MAX_FRAME = 4 * 1024 * 1024  # the Mixing dump is 67 kB; anything near this is garbage
 
 # Element types: high nibble kind (1 unsigned, 2 signed, 3 string), low nibble width.
 T_U8, T_U16, T_U32 = 0x11, 0x12, 0x14
@@ -27,8 +27,8 @@ SUBSCRIBE = (0x01, 0x01, 0x01)
 HASH_COMPARE = (0x01, 0x10, 0x01)
 SYNC_OPEN = (0x01, 0x04, 0x01)
 SYNC_CLOSE = (0x01, 0x04, 0x10)
-SET_PARAM = (0x01, 0x11, 0x01)   # received; sent only by write() (see the module docstring)
-DUMP = (0x01, 0x14, 0x01)        # received only; NEVER sent
+SET_PARAM = (0x01, 0x11, 0x01)  # received; sent only by write() (see the module docstring)
+DUMP = (0x01, 0x14, 0x01)  # received only; NEVER sent
 EVENT = (0x03, 0x01, 0x01)
 EVENT_REPLY = (0x03, 0x01, 0x10)
 
@@ -38,8 +38,8 @@ EVENT_TAG = "EEVT"
 # Descriptor MD5s of the TF5 the protocol was read from (firmware specific).
 # Sent in the hash compare; a console with other firmware answers with its own.
 DESC_MD5 = {"Property": "3a7c8d4c85f89f1eaa834f96630cec3d", "Mixing": "8d0d0bdd394a9abb80ab12ed1500eddc"}
-CLIENT_TYPE = "TYPE:StageMix SYNCDIR:2"   # SYNCDIR 2 = console -> client. NEVER 1.
-ORIGIN_SELF = 0xA0   # "the sender's own change": the console applies and echoes it (guide 4.4)
+CLIENT_TYPE = "TYPE:StageMix SYNCDIR:2"  # SYNCDIR 2 = console -> client. NEVER 1.
+ORIGIN_SELF = 0xA0  # "the sender's own change": the console applies and echoes it (guide 4.4)
 
 
 class ProtocolError(ValueError):
@@ -48,10 +48,11 @@ class ProtocolError(ValueError):
 
 # ---------------------------------------------------------------------- elements / messages
 
+
 @dataclass(frozen=True)
 class Element:
     type: int
-    value: Any   # list[int] for 0x12/0x14/0x2x, bytes for 0x11, str for 0x31
+    value: Any  # list[int] for 0x12/0x14/0x2x, bytes for 0x11, str for 0x31
 
 
 def element(t: int, value: Any) -> bytes:
@@ -82,7 +83,7 @@ def parse_elements(buf: bytes, n: int) -> list[Element]:
         size = count * (width or 1)
         if i + size > len(buf):
             raise ProtocolError("element data past end of message")
-        raw = buf[i:i + size]
+        raw = buf[i : i + size]
         i += size
         if t == T_STR:
             out.append(Element(t, raw.split(b"\0", 1)[0].decode("utf-8", errors="replace")))
@@ -112,7 +113,7 @@ def parse_message(payload: bytes) -> Message:
     n = struct.unpack_from(">I", payload, 1)[0]
     if 5 + n > len(payload) or n < 4:
         raise ProtocolError("message length past end of frame")
-    body = payload[5:5 + n]
+    body = payload[5 : 5 + n]
     return Message((body[0], body[1], body[2]), parse_elements(body[4:], body[3]))
 
 
@@ -141,12 +142,13 @@ class FrameReader:
                 raise ProtocolError(f"frame of {n} bytes")
             if len(self._buf) < 8 + n:
                 break
-            out.append((tag_raw.decode("ascii"), bytes(self._buf[8:8 + n])))
-            del self._buf[:8 + n]
+            out.append((tag_raw.decode("ascii"), bytes(self._buf[8 : 8 + n])))
+            del self._buf[: 8 + n]
         return out
 
 
 # ---------------------------------------------------------------------- the only messages we build
+
 
 def subscribe(func: str) -> bytes:
     return message(SUBSCRIBE, [element(T_STR, func), element(T_U8, b"\x80")])
@@ -154,8 +156,15 @@ def subscribe(func: str) -> bytes:
 
 def hash_compare(func: str) -> bytes:
     """Our descriptor MD5 and an all-zero data hash: never matches, so the console dumps."""
-    return message(HASH_COMPARE, [element(T_U8, b"\0"), element(T_STR, func),
-                                  element(T_U8, bytes.fromhex(DESC_MD5[func])), element(T_U8, bytes(16))])
+    return message(
+        HASH_COMPARE,
+        [
+            element(T_U8, b"\0"),
+            element(T_STR, func),
+            element(T_U8, bytes.fromhex(DESC_MD5[func])),
+            element(T_U8, bytes(16)),
+        ],
+    )
 
 
 def sync(close: bool) -> bytes:
@@ -163,13 +172,25 @@ def sync(close: bool) -> bytes:
 
 
 def event(name: str, args: str = "", reply: bool = False) -> bytes:
-    return message(EVENT_REPLY if reply else EVENT,
-                   [element(T_U32, [0]), element(T_U32, [0]), element(T_STR, name), element(T_STR, args)])
+    return message(
+        EVENT_REPLY if reply else EVENT,
+        [element(T_U32, [0]), element(T_U32, [0]), element(T_STR, name), element(T_STR, args)],
+    )
 
 
 def set_param_message(path: list[int], idx: list[int], prm: Prm, value: int) -> bytes:
     """A Mixing set-param as TF Editor sends it (guide 4.4); used only by TFEditorClient.write."""
     v = element(T_S32 if prm.type == 1 else T_U32, [value])
-    return message(SET_PARAM, [element(T_U8, b"\0"), element(T_STR, "Mixing"), element(T_STR, "Mixing"),
-                               element(T_U16, [len(path)]), element(T_U32, path), element(T_U32, idx),
-                               element(T_U32, [ORIGIN_SELF]), v])
+    return message(
+        SET_PARAM,
+        [
+            element(T_U8, b"\0"),
+            element(T_STR, "Mixing"),
+            element(T_STR, "Mixing"),
+            element(T_U16, [len(path)]),
+            element(T_U32, path),
+            element(T_U32, idx),
+            element(T_U32, [ORIGIN_SELF]),
+            v,
+        ],
+    )

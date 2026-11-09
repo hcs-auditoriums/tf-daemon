@@ -24,8 +24,6 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # tests/test_live.py exercises this server; unset, those tests skip.
-      TF_DAEMON_URL: http://127.0.0.1:8080
       # pytest in the container runs on every core (pytest-xdist); `-n 0` for serial / pdb.
       PYTEST_ADDOPTS: -n auto --dist worksteal
     # watchfiles restarts the server (a whole new process, so the "open the

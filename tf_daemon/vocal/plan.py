@@ -9,7 +9,8 @@ def _band_path(label: str) -> str:
     """Suggestion / console band label -> PEQ path relative to the channel."""
     if label in ("L", "H"):
         return f"PEQ/Bank/Band{label}"
-    return f"PEQ/Bank/Band:{int(label) - 1}"
+    mid = {"LM": 0, "HM": 1}.get(label)
+    return f"PEQ/Bank/Band:{mid if mid is not None else int(label) - 1}"
 
 
 def eq_plan(result: dict[str, Any], current: dict[str, Any]) -> tuple[list[tuple[str, int]], list[str]]:
@@ -34,10 +35,13 @@ def eq_plan(result: dict[str, Any], current: dict[str, Any]) -> tuple[list[tuple
         label, base, m = b["label"], _band_path(b["label"]), suggested.get(b["label"])
         if m is not None:
             if label in ("L", "H"):
-                changes.append((f"{base}/Type", 0))   # bell
+                changes.append((f"{base}/Type", 0))  # bell
             q = min(max(float(m["q"]), 0.1), 10.0)
-            changes += [(f"{base}/Frequency", round(m["freq"] * 10)), (f"{base}/Gain", round(m["gain"] * 10) * 10),
-                        (f"{base}/Q", round(q * 1000))]
+            changes += [
+                (f"{base}/Frequency", round(m["freq"] * 10)),
+                (f"{base}/Gain", round(m["gain"] * 10) * 10),
+                (f"{base}/Q", round(q * 1000)),
+            ]
             lines.append(f"{label}: bell {m['gain']:+.1f} dB @ {m['freq']:g} Hz, Q {q:g}")
         elif b["type"] in ("hpf", "lpf"):
             lines.append(f"{label}: {b['type'].upper()} left as it is")

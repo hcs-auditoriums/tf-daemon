@@ -22,8 +22,8 @@ class RingBuffer:
         # Channel-major so each analyzed channel is one contiguous row.
         self._data = np.zeros((len(self.columns), self.capacity), dtype=np.float32)
         self._cond = threading.Condition(threading.Lock())
-        self._pos = 0          # next write index
-        self._written = 0      # total frames ever written
+        self._pos = 0  # next write index
+        self._written = 0  # total frames ever written
         self._closed = False
 
     @property
@@ -38,7 +38,7 @@ class RingBuffer:
         """
         frames = block.shape[0]
         if frames > self.capacity:
-            block = block[-self.capacity:]
+            block = block[-self.capacity :]
             frames = self.capacity
         with self._cond:
             pos = self._pos
@@ -46,7 +46,7 @@ class RingBuffer:
             rest = frames - first
             data = self._data
             for row, col in enumerate(self.columns):
-                data[row, pos:pos + first] = block[:first, col]
+                data[row, pos : pos + first] = block[:first, col]
                 if rest:
                     data[row, :rest] = block[first:, col]
             self._pos = (pos + frames) % self.capacity
@@ -75,14 +75,14 @@ class RingBuffer:
             start = (self._pos - n) % self.capacity
             first = min(n, self.capacity - start)
             if rows is None:
-                out[:, :first] = self._data[:, start:start + first]
+                out[:, :first] = self._data[:, start : start + first]
                 if first < n:
-                    out[:, first:] = self._data[:, :n - first]
+                    out[:, first:] = self._data[:, : n - first]
             else:
                 for i, r in enumerate(rows):
-                    out[i, :first] = self._data[r, start:start + first]
+                    out[i, :first] = self._data[r, start : start + first]
                     if first < n:
-                        out[i, first:] = self._data[r, :n - first]
+                        out[i, first:] = self._data[r, : n - first]
             return self._written
 
     def close(self) -> None:

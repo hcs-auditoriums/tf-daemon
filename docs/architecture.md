@@ -9,9 +9,14 @@ tf_daemon/
   modules.py       Module protocol: register(app, sock) / start / stop / status
   hub.py           FrameHub: latest-value broadcast shared by the modules
   system.py        /config page: config.toml editing, restart, self-update
-  vocal/           ── vocal EQ assist ──
-    module.py      mic-check sessions, /api/vocal routes, Apply to desk / Undo
+  vocal/           ── vocal EQ assist (everything it does lives here) ──
+    voice.py       the voice on a mic: speech activity, pitch, long-term spectrum
+    tone.py        EQ suggestions from that spectrum, against reference speech
     plan.py        the desk changes that make a channel's EQ the suggestion
+    session.py     mic checks: listen while the person talks, then analyze
+    desk.py        apply / undo on the desk, only on a confirmed request
+    ports.py       what it needs from audio and the console (Protocols)
+    module.py      VocalModule: wiring, /api/vocal routes
   audio/           ── the audio analysis module ──
     sources.py     DeviceSource (PortAudio), SynthSource, WavSource
     ringbuffer.py  lock-protected per-channel ring buffers
@@ -20,7 +25,6 @@ tf_daemon/
   dsp/             ── signal processing, no I/O ──
     spectrum.py    windowed FFT, averaging, peak hold, log display bins
     ring.py        ring / feedback detection and attribution
-    vocal.py       vocal EQ suggestions from a mic check
     eq.py          the console EQ's response curve (TF Editor's maths)
   console/         ── the Yamaha TF5 over the network ──
     patch.py       which console source each USB capture channel carries
@@ -78,7 +82,7 @@ the vocal assist. All of them are built and wired together in one place,
 small `Protocol` next to its own code, and receives it there; nothing reaches
 into another module's objects. The audio page gets the console as a
 `ConsoleFeed` (`audio/module.py`), the vocal assist gets `AudioInputs` and a
-`DeskEQ` (`vocal/module.py`), and the TF5 module reports channel names and
+`DeskEQ` (`vocal/ports.py`), and the TF5 module reports channel names and
 faders through callbacks. mypy checks that the real objects fit.
 
 RF data flow: the **sweep thread** calls the tinySA's `scan` (blocking, one

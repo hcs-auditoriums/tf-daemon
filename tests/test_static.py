@@ -98,8 +98,14 @@ def undefined_constants(js: str) -> set[str]:
     return used - declared - BROWSER_GLOBALS
 
 
-SCRIPTS = ["app.js", "rf.js", "qlxd.js", "config.js", "nav.js",
-           *sorted(f"audio/{p.name}" for p in (STATIC / "audio").glob("*.js"))]
+SCRIPTS = [
+    "app.js",
+    "rf.js",
+    "qlxd.js",
+    "config.js",
+    "nav.js",
+    *sorted(f"audio/{p.name}" for p in (STATIC / "audio").glob("*.js")),
+]
 
 
 @pytest.mark.parametrize("name", SCRIPTS)
@@ -111,7 +117,7 @@ def test_no_undefined_constants(name):
 
 def test_the_check_catches_a_missing_constant():
     assert undefined_constants("const A_B = 1;\nfunction f() { return A_B + EQ_RANGE; }") == {"EQ_RANGE"}
-    assert undefined_constants("const X = `${EQ_RANGE}`;") == {"EQ_RANGE"}           # template code counts
+    assert undefined_constants("const X = `${EQ_RANGE}`;") == {"EQ_RANGE"}  # template code counts
     assert undefined_constants("const X = 'USB'; // the desk's FFT /* HPF */ `TF5 ${'X'}`") == set()
     assert undefined_constants("const r = /[A-Z]{2}OK/g; const Y = 1 / 2;") == set()
     assert undefined_constants("const AAA = 1, BBB = [1, 2], CCC = 3;\nf(AAA + BBB + CCC + JSON.x);") == set()

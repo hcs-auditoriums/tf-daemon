@@ -46,8 +46,9 @@ def _wait_state(engine, pred, timeout=5.0):
 
 
 def test_rf_module_end_to_end_with_demo():
-    cfg = make_config(rf={"source": "demo", "interval_s": 0.1,
-                          "auto_connect": False})  # manual: nothing happens until Connect
+    cfg = make_config(
+        rf={"source": "demo", "interval_s": 0.1, "auto_connect": False}
+    )  # manual: nothing happens until Connect
     modules = build_modules(cfg)
     app = create_app(cfg, modules)
     try:
@@ -185,8 +186,11 @@ def test_auto_mode_connects_and_sweeps_the_receiver_range(auto_cfg):
         wait_until(lambda: engine.status()["sweeps"] >= 2)
         st = engine.status()
         assert st["connected"] and st["scanning"] and st["auto"]
-        assert (st["settings"]["start_hz"], st["settings"]["stop_hz"], st["settings"]["points"]) == \
-            (480_000_000, 610_000_000, 290)
+        assert (st["settings"]["start_hz"], st["settings"]["stop_hz"], st["settings"]["points"]) == (
+            480_000_000,
+            610_000_000,
+            290,
+        )
 
         hint[0] = (470_000_000, 610_000_000)  # a receiver was added: auto range follows
         wait_until(lambda: engine.status()["settings"]["start_hz"] == 470_000_000)

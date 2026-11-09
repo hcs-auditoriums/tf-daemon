@@ -40,14 +40,14 @@ log = logging.getLogger(__name__)
 APP_DIR = Path(__file__).resolve().parent.parent
 UPDATE_SCRIPT = APP_DIR / "deploy" / "update.sh"
 UPDATE_LOG = APP_DIR / ".update.log"
-UPDATE_STATE = APP_DIR / ".update.json"   # written by update.sh
-UPDATE_ENV = APP_DIR / ".update.env"      # read by the tf-daemon-update unit
+UPDATE_STATE = APP_DIR / ".update.json"  # written by update.sh
+UPDATE_ENV = APP_DIR / ".update.env"  # read by the tf-daemon-update unit
 RESTART_CMD = ["sudo", "-n", "systemctl", "restart", "--no-block", "tf-daemon"]
 RESTART_CHECK_CMD = ["sudo", "-n", "-l", *RESTART_CMD[2:]]  # "may we?", without running it
 RESTART_DELAY_S = 0.5
 START_UPDATE_CMD = ["sudo", "-n", "systemctl", "start", "--no-block", "tf-daemon-update"]
 FINAL_STATES = {"done", "up_to_date", "failed", "rolled_back"}
-START_GRACE_S = 60     # time for update.sh to write its first state
+START_GRACE_S = 60  # time for update.sh to write its first state
 RESTART_GRACE_S = 180  # time for the restarted service to pick up the update
 
 
@@ -131,8 +131,12 @@ class Updater:
             with UPDATE_LOG.open("a") as logf:
                 # Own session so it isn't tied to a request thread.
                 self._proc = subprocess.Popen(
-                    ["bash", str(UPDATE_SCRIPT)], cwd=APP_DIR, env=env,
-                    stdout=logf, stderr=subprocess.STDOUT, start_new_session=True,
+                    ["bash", str(UPDATE_SCRIPT)],
+                    cwd=APP_DIR,
+                    env=env,
+                    stdout=logf,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
                 )
             log.info("Update started in-process (pid %d); tf-daemon-update unit not available", self._proc.pid)
             return True
@@ -155,8 +159,11 @@ class Updater:
             if self.running_revision and self.running_revision == st.get("to"):
                 return self._finish(st, "done", f"updated to {self.running_revision[:7]}")
             if age > RESTART_GRACE_S:
-                return self._finish(st, "failed", "the service was restarted but is not running the update; "
-                                                  "check journalctl -u tf-daemon")
+                return self._finish(
+                    st,
+                    "failed",
+                    "the service was restarted but is not running the update; check journalctl -u tf-daemon",
+                )
         elif state == "running" and not _pid_alive(st.get("pid")):
             if st.get("pid") is not None or age > START_GRACE_S:
                 return self._finish(st, "failed", "the update stopped unexpectedly; see the log")
@@ -217,14 +224,16 @@ def register_system(app: Flask, cfg: UpdateConfig, config_path: str | Path | Non
 
     @bp.get("/info")
     def info():
-        return jsonify({
-            "version": __version__,
-            "revision": running_revision,
-            "git_checkout": (APP_DIR / ".git").exists(),
-            "remote": updater.remote,
-            "branch": updater.branch,
-            "config_path": str(cfg_file) if cfg_file else None,
-        })
+        return jsonify(
+            {
+                "version": __version__,
+                "revision": running_revision,
+                "git_checkout": (APP_DIR / ".git").exists(),
+                "remote": updater.remote,
+                "branch": updater.branch,
+                "config_path": str(cfg_file) if cfg_file else None,
+            }
+        )
 
     @bp.post("/check")
     def check():
@@ -261,7 +270,7 @@ def register_system(app: Flask, cfg: UpdateConfig, config_path: str | Path | Non
             return jsonify({"ok": False, "error": "no config file in use"}), 404
         text = (request.get_json(silent=True) or {}).get("text")
         if not isinstance(text, str):
-            return jsonify({"ok": False, "error": "body must be {\"text\": \"...\"}"}), 400
+            return jsonify({"ok": False, "error": 'body must be {"text": "..."}'}), 400
         try:
             _validate_toml(text)
         except ValueError as e:
@@ -280,8 +289,13 @@ def register_system(app: Flask, cfg: UpdateConfig, config_path: str | Path | Non
         except (OSError, subprocess.TimeoutExpired) as e:
             return jsonify({"ok": False, "error": f"cannot restart: {e}"}), 500
         if out.returncode != 0:
-            return jsonify({"ok": False, "error": "not allowed to restart the service; "
-                                                  "run  sudo bash deploy/install-service.sh  on the server"}), 500
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "not allowed to restart the service; "
+                    "run  sudo bash deploy/install-service.sh  on the server",
+                }
+            ), 500
         threading.Timer(RESTART_DELAY_S, _restart_now).start()
         return jsonify({"ok": True})
 

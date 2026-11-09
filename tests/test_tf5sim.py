@@ -15,10 +15,10 @@ PATCH = [parse_patch_entry(e) for e in default_usb_patch()]
 
 def test_demo_mode_runs_the_tf5_module_against_the_simulator():
     cfg = make_config(tf5={"source": "demo"})
-    assert cfg.tf5.host == ""   # demo needs no console address, and turns EQ read / write on
+    assert cfg.tf5.host == ""  # demo needs no console address, and turns EQ read / write on
     modules = build_modules(cfg)
     by_name = {m.name: m for m in modules}
-    assert list(by_name) == ["audio", "tf5"]   # the simulator belongs to the tf5 module
+    assert list(by_name) == ["audio", "tf5"]  # the simulator belongs to the tf5 module
     app = create_app(cfg, modules)
     try:
         tf5 = by_name["tf5"]
@@ -27,7 +27,7 @@ def test_demo_mode_runs_the_tf5_module_against_the_simulator():
         assert tf5.client.names()[1] == DEMO_INPUTS[1][0]
         assert tf5.eq_writable
         eq = app.test_client().get("/api/tf5/eq/0").get_json()
-        assert eq["synced"] and eq["eq"]["hpf"]["freq"] == 200   # ch1: the EQ captured from a real TF5
+        assert eq["synced"] and eq["eq"]["hpf"]["freq"] == 200  # ch1: the EQ captured from a real TF5
 
         results = tf5.write_eq(0, [("PEQ/Bank/Band:0/Gain", -300)])
         assert results == [{"path": "PEQ/Bank/Band:0/Gain", "value": -300, "confirmed": True, "actual": -300}]
@@ -68,7 +68,7 @@ def test_rcp_replies():
         assert sim.reply(f"get {name} x 0") == "ERROR get UnknownCommand"
         assert sim.reply("prminfo 0").startswith(f'OK prminfo 0 "{name}" 40 0 ')
         assert sim.reply("prminfo 999") == "ERROR prminfo 999 UnknownIndex"
-        assert sim.reply(f"set {name} 0 0 \"x\"") == "ERROR set UnknownCommand"   # never changes the "desk"
+        assert sim.reply(f'set {name} 0 0 "x"') == "ERROR set UnknownCommand"  # never changes the "desk"
     finally:
         sim.close()
 

@@ -39,8 +39,14 @@ def test_parse_and_decode():
 def cfg(tmp_path, monkeypatch):
     # No real NIC in tests: receivers connect unbound, no SLP listener.
     monkeypatch.setattr(engine_mod, "find_interface", lambda name: None)
-    return make_config(qlxd={"source": "device", "state_file": str(tmp_path / "qlxd_state.json"),
-                             "meter_poll_s": 0.2, "full_poll_s": 1.0})
+    return make_config(
+        qlxd={
+            "source": "device",
+            "state_file": str(tmp_path / "qlxd_state.json"),
+            "meter_poll_s": 0.2,
+            "full_poll_s": 1.0,
+        }
+    )
 
 
 def _demo(cfg):
@@ -60,6 +66,7 @@ def test_manual_host_monitoring_persistence_and_offline(cfg):
 
         def rx():
             return eng.snapshot()["receivers"]
+
         wait_until(lambda: rx() and rx()[0]["online"] and rx()[0]["rf_dbm"] is not None)
         r = rx()[0]
         assert r["source"] == "manual" and r["name"] == "Lead Vox" and r["model"] == "QLXD4"
@@ -132,8 +139,14 @@ def test_known_receivers_persist_for_the_rf_page(cfg, monkeypatch):
         eng.update_settings({"hosts": [f"127.0.0.1:{sim.port}"]})
         wait_until(lambda: eng.frequencies() and eng.frequencies()[0]["online"])
         f = eng.frequencies()[0]
-        assert f == {"key": "00:0E:DD:00:00:BB", "name": "Lee", "device_id": "Lee", "frequency_mhz": 492.025,
-                     "online": True, "last_seen": f["last_seen"]}
+        assert f == {
+            "key": "00:0E:DD:00:00:BB",
+            "name": "Lee",
+            "device_id": "Lee",
+            "frequency_mhz": 492.025,
+            "online": True,
+            "last_seen": f["last_seen"],
+        }
         wait_until(lambda: "00:0E:DD:00:00:BB" in json.loads(open(cfg.qlxd.state_file).read())["known_receivers"])
 
         sim.stop()

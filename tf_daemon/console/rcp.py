@@ -42,20 +42,20 @@ log = logging.getLogger(__name__)
 DEFAULT_PORT = 49280
 TF_MIXES = 20
 TF_FX = 2
-PRMINFO_PROBE = 512   # prminfo indices asked for on connect
-NEG_INF = -32768      # fader/send level value meaning -inf dB
-SEND_CHUNK = 200      # request lines per write, so a full poll doesn't flood the console
+PRMINFO_PROBE = 512  # prminfo indices asked for on connect
+NEG_INF = -32768  # fader/send level value meaning -inf dB
+SEND_CHUNK = 200  # request lines per write, so a full poll doesn't flood the console
 
 _PREFIX = {"InCh": "MIXER:Current/InCh/", "St": "MIXER:Current/St/", "Mix": "MIXER:Current/Mix/"}
 
 
 @dataclass(frozen=True)
 class Param:
-    path: str            # part after the kind prefix, e.g. "Fader/Level"
-    scale: int = 1       # raw / scale = value in unit
+    path: str  # part after the kind prefix, e.g. "Fader/Level"
+    scale: int = 1  # raw / scale = value in unit
     unit: str = ""
     kind: str = "integer"  # integer | string
-    count: int = 1       # y indices (e.g. 20 for per-mix sends)
+    count: int = 1  # y indices (e.g. 20 for per-mix sends)
 
 
 NAME = Param("Label/Name", kind="string")
@@ -63,10 +63,19 @@ COLOR = Param("Label/Color", kind="string")
 LEVEL = Param("Fader/Level", 100, "dB")
 # Read for every patched source (and every mix). All are in the TF's parameter list.
 BASE_PARAMS: dict[str, list[Param]] = {
-    "InCh": [NAME, COLOR, LEVEL, Param("Fader/On"), Param("ToStereo/Pan"),
-             Param("ToMix/Level", 100, "dB", count=TF_MIXES), Param("ToMix/On", count=TF_MIXES),
-             Param("ToFx/Level", 100, "dB", count=TF_FX), Param("ToFx/On", count=TF_FX),
-             Param("ToMono/Level", 100, "dB"), Param("ToMono/On")],
+    "InCh": [
+        NAME,
+        COLOR,
+        LEVEL,
+        Param("Fader/On"),
+        Param("ToStereo/Pan"),
+        Param("ToMix/Level", 100, "dB", count=TF_MIXES),
+        Param("ToMix/On", count=TF_MIXES),
+        Param("ToFx/Level", 100, "dB", count=TF_FX),
+        Param("ToFx/On", count=TF_FX),
+        Param("ToMono/Level", 100, "dB"),
+        Param("ToMono/On"),
+    ],
     "St": [NAME, COLOR, LEVEL, Param("Fader/On"), Param("Out/Balance")],
     "Mix": [NAME],
 }
@@ -88,7 +97,7 @@ def parse_line(line: str) -> tuple[str, str, list[str]] | None:
 def _split_addr(addr: str) -> tuple[str, str] | None:
     for kind, prefix in _PREFIX.items():
         if addr.startswith(prefix):
-            return kind, addr[len(prefix):]
+            return kind, addr[len(prefix) :]
     return None
 
 
@@ -114,9 +123,15 @@ class TF5Client:
     switch changes.
     """
 
-    def __init__(self, host: str, port: int, patch: list[tuple[str, int] | None], poll_s: float,
-                 on_names: Callable[[dict[int, str]], None],
-                 on_gains: Callable[[dict[int, float | None]], None] | None = None) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        patch: list[tuple[str, int] | None],
+        poll_s: float,
+        on_names: Callable[[dict[int, str]], None],
+        on_gains: Callable[[dict[int, float | None]], None] | None = None,
+    ) -> None:
         self.host, self.port, self.patch, self.poll_s = host, port, patch, poll_s
         self.on_names = on_names
         self.on_gains = on_gains
@@ -129,7 +144,7 @@ class TF5Client:
         self._changes: deque[tuple[int, tuple[str, int, str, int] | None]] = deque(maxlen=4096)
         self._params: dict[str, dict[str, Param]] = {k: {p.path: p for p in ps} for k, ps in BASE_PARAMS.items()}
         self._values: dict[tuple[str, int, str, int], str] = {}  # (kind, x, path, y) -> raw value
-        self._discovered: list[str] = []                          # addresses from prminfo
+        self._discovered: list[str] = []  # addresses from prminfo
         self._probe_left = 0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -205,8 +220,11 @@ class TF5Client:
 
     def names(self) -> dict[int, str]:
         with self._lock:
-            return {i: self._values[(src[0], src[1], NAME.path, 0)] for i, src in enumerate(self.patch)
-                    if src is not None and (src[0], src[1], NAME.path, 0) in self._values}
+            return {
+                i: self._values[(src[0], src[1], NAME.path, 0)]
+                for i, src in enumerate(self.patch)
+                if src is not None and (src[0], src[1], NAME.path, 0) in self._values
+            }
 
     # ------------------------------------------------------------------ connection thread
 
@@ -273,17 +291,19 @@ class TF5Client:
 
     def _send(self, sock: socket.socket, lines: list[str]) -> None:
         for i in range(0, len(lines), SEND_CHUNK):
-            sock.sendall("".join(lines[i:i + SEND_CHUNK]).encode())
+            sock.sendall("".join(lines[i : i + SEND_CHUNK]).encode())
             if i + SEND_CHUNK < len(lines):
                 time.sleep(0.02)
 
     def _request_all(self, sock: socket.socket) -> None:
         sources = sorted({s for s in self.patch if s is not None}) + [("Mix", m) for m in range(TF_MIXES)]
         with self._lock:
-            reqs = [f"get {_PREFIX[kind]}{p.path} {x} {y}\n"
-                    for kind, x in sources
-                    for p in self._params[kind].values()
-                    for y in range(p.count)]
+            reqs = [
+                f"get {_PREFIX[kind]}{p.path} {x} {y}\n"
+                for kind, x in sources
+                for p in self._params[kind].values()
+                for y in range(p.count)
+            ]
         self._send(sock, reqs)
 
     def _handle(self, sock: socket.socket, line: str) -> bool:
@@ -390,8 +410,12 @@ class TF5Client:
                     if src == (kind, x):
                         yy = y if p.count > 1 else None
                         changes[(i, path, yy)] = {"i": i, "p": path, "y": yy, "v": format_value(p, raw), "u": p.unit}
-        return cur, {"type": "tf5-changes", "connected": self.connected, "changes": list(changes.values()),
-                     "mixes": mixes}
+        return cur, {
+            "type": "tf5-changes",
+            "connected": self.connected,
+            "changes": list(changes.values()),
+            "mixes": mixes,
+        }
 
     def gains(self) -> dict[int, float | None]:
         """Per USB input whose channel state is known: fader dB, or None if off or at -inf."""

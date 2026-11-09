@@ -99,7 +99,7 @@ moments they are actually talking, then suggests, in the TF5's terms:
 
 - an **HPF** just under the voice's lowest pitch (rumble, handling, proximity
   boom);
-- up to four **PEQ bands** (L, 1, 2, H) with frequency, gain and Q, each named
+- up to four **PEQ bands** (L, LM, HM, H) with frequency, gain and Q, each named
   for what it addresses: boomy / muddy, boxy, woody / hollow, nasal / honky,
   tinny / thin, harsh, sibilant, or presence / air for a gentle boost;
 - narrow **notches** for resonances in the mic or room, and for rings the ring
@@ -133,7 +133,56 @@ nasality is how a person talks), and the reference is an average voice, so treat
 the result as a starting point for your ears. It analyzes the mic before the EQ
 and dynamics, so compression isn't included.
 
+**Listen live** keeps listening while the person talks instead of stopping
+after 20 s: the suggestion follows the last minute of speech and updates every
+few seconds, and the panel says whether the voice reaches the **mains** (and at
+what gain re the mic), measured by comparing the mic with the mains. Rings that
+this mic causes (on the mic itself, or with it as the strongest source of a ring
+on the mains) become narrow cuts in the suggestion.
+
+**With a house mic** (`house_mic`: a measurement mic in the audience area on a
+desk input, patched to USB), the suggestion aims at the voice *as the room hears
+it*: the mic is compared with the house mic (like Smaart's transfer function,
+using the voice itself as the test signal), the channel EQ already on the desk is
+taken out, and what's left (the PA and the room) is added to the analysis. Only
+frequencies where the house mic clearly hears this voice count; if too few do, it
+says so and suggests from the mic alone.
+
+**Feedback headroom** (live): how far each frequency is from feedback, from
+150 Hz to 5 kHz. The loop is mic → channel → mains → PA → back into the mic:
+the first half is measured while the person talks (mic vs mains), the second
+while their mic is idle and the mains carry something else, like another talker
+or music (mains vs mic: the PA leaking back). The panel shows the frequency
+closest to feedback; suggested boosts are held to what keeps 6 dB of headroom.
+Until both halves have been heard, the headroom is unknown and only the usual
+boost limit applies.
+
+**Auto EQ** (optional, off by default): with `auto_allowed = true` in the config,
+the panel offers **Turn auto on…** for a channel (with a confirmation). From then
+on, while the person talks and the live suggestion has settled, it moves the
+channel's EQ towards the suggestion one small step at a time (at most 1 dB per
+band every few seconds; a band that has to move is faded out, moved and faded back
+in, so nothing jumps). Boosts only where the feedback headroom is measured (and
+keep 6 dB of it). A ring this mic causes gets a narrow notch within a second,
+deeper if it persists, and any boost near it is taken out. It **stops itself the
+moment anyone changes that channel's EQ on the desk**, or if the desk stops being
+writable or the EQ is turned off. **Undo auto changes** puts back the EQ from
+before it was turned on, and the panel lists what it did and why. It needs
+`tf5.eq_write` too.
+
+**EQ profiles** (in the console sidebar's EQ section): **Save as…** stores the
+shown channel's whole EQ (EQ on, the high-pass, every band's type, frequency, gain
+and Q) under a name, e.g. the actor's; pick a profile and **Recall** to put it on
+the channel you're looking at, on any channel; **Copy from…** copies another
+channel's EQ straight across. Recall and copy ask first and can be undone (Undo
+puts back the EQ from before the first change). Profiles are saved in
+`profiles_file` and survive restarts.
+
 `[vocal]`: `enabled`, `inputs` (0-based inputs that are vocal mics; `[]` = any),
-`listen_s` (20), `max_cut_db` (6), `max_boost_db` (3). API: `GET /api/vocal/status`,
-`POST /api/vocal/start|stop|clear` `{"channel": n}`, `POST /api/vocal/apply|undo`
-`{"channel": n, "confirm": true}`.
+`listen_s` (20), `max_cut_db` (6), `max_boost_db` (3), `house_mic` (-1 = none),
+`room_tilt_db_oct` (0: the in-room target is the reference speech spectrum; tilt
+it for taste), `auto_allowed` (false), `profiles_file` (`eq_profiles.json`). API: `GET /api/vocal/status`,
+`POST /api/vocal/start|stop|clear` `{"channel": n}` (start also takes `"live": true`),
+`POST /api/vocal/apply|undo` `{"channel": n, "confirm": true}`,
+`POST /api/vocal/auto` `{"channel": n, "on": true, "confirm": true}` (or `"on": false`),
+`POST /api/vocal/auto/undo` `{"channel": n, "confirm": true}`.

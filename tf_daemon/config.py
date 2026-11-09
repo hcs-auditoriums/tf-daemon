@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 REQUIRED_SAMPLERATE = 48000
 
 DEVICE_SOURCES = ("device", "demo", "off")
-AUDIO_SOURCES = ("device", "synth", "wav")
+AUDIO_SOURCES = ("device", "synth", "stage", "wav")
 
 
 class ConfigError(ValueError):
@@ -128,10 +128,10 @@ class ServerConfig(Section):
 @dataclass(frozen=True)
 class AudioConfig(Section):
     NAME: ClassVar[str] = "audio"
-    source: str = "device"    # device (capture) | synth (test signal) | wav (loop a file)
-    wav: str = ""             # file for source = "wav"
-    device: str = "TF"        # case-insensitive substring of the capture device name
-    channels: int = 34        # capture channels (TF5: 32 + St L/R); a device with fewer is zero-padded
+    source: str = "device"  # device (capture) | synth (test signal) | stage (simulated stage) | wav
+    wav: str = ""  # file for source = "wav"
+    device: str = "TF"  # case-insensitive substring of the capture device name
+    channels: int = 34  # capture channels (TF5: 32 + St L/R); a device with fewer is zero-padded
     samplerate: int = REQUIRED_SAMPLERATE
     blocksize: int = 1200
     buffer_seconds: float = 2.0
@@ -139,10 +139,11 @@ class AudioConfig(Section):
     def validate(self) -> None:
         _check_source("audio", self.source, AUDIO_SOURCES)
         if self.source == "wav" and not self.wav:
-            raise ConfigError("audio.source = \"wav\" needs a file (audio.wav, or --source wav PATH)")
+            raise ConfigError('audio.source = "wav" needs a file (audio.wav, or --source wav PATH)')
         if self.samplerate != REQUIRED_SAMPLERATE:
-            raise ConfigError(f"audio.samplerate must be {REQUIRED_SAMPLERATE} (TF5 is fixed at 48 kHz), "
-                              f"got {self.samplerate}")
+            raise ConfigError(
+                f"audio.samplerate must be {REQUIRED_SAMPLERATE} (TF5 is fixed at 48 kHz), got {self.samplerate}"
+            )
         if not 1 <= self.channels <= 128:
             raise ConfigError("audio.channels must be between 1 and 128")
         if self.blocksize < 1:
@@ -152,8 +153,8 @@ class AudioConfig(Section):
 @dataclass(frozen=True)
 class DspConfig(Section):
     NAME: ClassVar[str] = "dsp"
-    fft_size: int = 32768     # ~1.46 Hz bins at 48 kHz
-    hop: int = 2400           # ~20 updates/s
+    fft_size: int = 32768  # ~1.46 Hz bins at 48 kHz
+    hop: int = 2400  # ~20 updates/s
     average_tau: float = 3.0
     display_fmin: float = 50.0
     display_fmax: float = 16000.0
@@ -179,15 +180,27 @@ class SynthConfig(Section):
     NAME: ClassVar[str] = "synth"
     speech_db: float = -20.0
     noise_db: float = -50.0
-    tone_hz: float = 2500.0   # the steady "ring" the feedback detector should find
-    tone_db: float = -15.0    # relative to speech_db
+    tone_hz: float = 2500.0  # the steady "ring" the feedback detector should find
+    tone_db: float = -15.0  # relative to speech_db
     seed: int = 1
+    # audio.source = "stage" (audio/stage.py): the simulated venue.
+    house_mic: int = 31  # input the simulated house mic arrives on; -1 = none
+    pa_leak_db: float = -18.0  # PA level reaching an open vocal mic, re the mains
+    room_rt60: float = 0.8  # reverberation time of the simulated room, s
+
+    def validate(self) -> None:
+        if not -1 <= self.house_mic <= 127:
+            raise ConfigError("synth.house_mic must be an input index (0-based) or -1")
+        if not -60 <= self.pa_leak_db <= 0:
+            raise ConfigError("synth.pa_leak_db must be between -60 and 0")
+        if not 0.1 <= self.room_rt60 <= 4:
+            raise ConfigError("synth.room_rt60 must be between 0.1 and 4 s")
 
 
 @dataclass(frozen=True)
 class RFConfig(Section):
     NAME: ClassVar[str] = "rf"
-    source: str = "device"    # device (tinySA) | demo | off
+    source: str = "device"  # device (tinySA) | demo | off
     auto_connect: bool = True  # keep the tinySA connected and sweeping (range: the QLX-D receivers)
     start_hz: int = 88_000_000
     stop_hz: int = 108_000_000
@@ -210,15 +223,22 @@ class RFConfig(Section):
 
     @property
     def sweep(self) -> SweepSettings:
-        return SweepSettings.from_dict({"start_hz": self.start_hz, "stop_hz": self.stop_hz, "points": self.points,
-                                        "rbw": self.rbw, "interval_s": self.interval_s})
+        return SweepSettings.from_dict(
+            {
+                "start_hz": self.start_hz,
+                "stop_hz": self.stop_hz,
+                "points": self.points,
+                "rbw": self.rbw,
+                "interval_s": self.interval_s,
+            }
+        )
 
 
 @dataclass(frozen=True)
 class QLXDConfig(Section):
     NAME: ClassVar[str] = "qlxd"
-    source: str = "device"    # device (receivers on the network) | demo | off
-    interface: str = ""       # NIC for discovery; "" = first with a 169.254.x.x address
+    source: str = "device"  # device (receivers on the network) | demo | off
+    interface: str = ""  # NIC for discovery; "" = first with a 169.254.x.x address
     hosts: tuple[str, ...] = ()  # receivers to always monitor, "ip" or "ip:port"
     state_file: str = "qlxd_state.json"  # UI-edited interface/hosts, overrides the two above
     meter_poll_s: float = 1.0
@@ -227,7 +247,7 @@ class QLXDConfig(Section):
     def validate(self) -> None:
         _check_source("qlxd", self.source, DEVICE_SOURCES)
         if not all(isinstance(h, str) for h in self.hosts):
-            raise ConfigError("qlxd.hosts must be a list of \"ip\" or \"ip:port\" strings")
+            raise ConfigError('qlxd.hosts must be a list of "ip" or "ip:port" strings')
         for key in ("meter_poll_s", "full_poll_s"):
             if not 0.2 <= getattr(self, key) <= 300:
                 raise ConfigError(f"qlxd.{key} must be between 0.2 and 300")
@@ -240,9 +260,9 @@ class RingConfig(Section):
     NAME: ClassVar[str] = "ring"
     enabled: bool = True
     sensitivity: str = "normal"  # low | normal | high
-    fmin: float = 80.0           # Hz, detection range
+    fmin: float = 80.0  # Hz, detection range
     fmax: float = 12000.0
-    mains_hz: float = 60.0       # skip mains hum harmonics up to 1 kHz (50 in Europe; 0 = off)
+    mains_hz: float = 60.0  # skip mains hum harmonics up to 1 kHz (50 in Europe; 0 = off)
 
     @classmethod
     def _prepare(cls, d: dict[str, Any]) -> dict[str, Any]:
@@ -266,13 +286,21 @@ class VocalConfig(Section):
     NAME: ClassVar[str] = "vocal"
     enabled: bool = False
     inputs: tuple[int, ...] = ()  # 0-based inputs that are vocal mics; () = any input
-    listen_s: float = 20.0        # seconds of speech to collect
+    listen_s: float = 20.0  # seconds of speech to collect
     max_cut_db: float = 6.0
     max_boost_db: float = 3.0
+    house_mic: int = -1  # input of a measurement mic in the house; -1 = none
+    auto_allowed: bool = False  # allow auto EQ (still off until a person turns it on per channel)
+    profiles_file: str = "eq_profiles.json"  # saved EQ profiles (e.g. per actor)
+    room_tilt_db_oct: float = 0.0  # in-room target: reference speech tilted by this (dB / octave re 1 kHz)
 
     def validate(self) -> None:
         if not all(isinstance(i, int) and not isinstance(i, bool) and i >= 0 for i in self.inputs):
             raise ConfigError("vocal.inputs must be a list of input indices (0-based)")
+        if not -1 <= self.house_mic <= 127:
+            raise ConfigError("vocal.house_mic must be an input index (0-based) or -1")
+        if not -3 <= self.room_tilt_db_oct <= 3:
+            raise ConfigError("vocal.room_tilt_db_oct must be between -3 and 3")
         if not 6 <= self.listen_s <= 120:
             raise ConfigError("vocal.listen_s must be between 6 and 120")
         if not 1 <= self.max_cut_db <= 12 or not 0 <= self.max_boost_db <= 6:
@@ -284,17 +312,17 @@ class TF5Config(Section):
     """The mixer over the network: names and settings (RCP), EQ (TF Editor protocol)."""
 
     NAME: ClassVar[str] = "tf5"
-    source: str = "device"    # device (the console at host; off while host is "") | demo | off
-    host: str = ""            # console IP
-    port: int = 49280         # Yamaha remote control protocol
-    username: str = ""        # the TF5's protocol has no login; kept for completeness, not sent
+    source: str = "device"  # device (the console at host; off while host is "") | demo | off
+    host: str = ""  # console IP
+    port: int = 49280  # Yamaha remote control protocol
+    username: str = ""  # the TF5's protocol has no login; kept for completeness, not sent
     password: str = ""
-    poll_s: float = 30.0      # full re-read period (changes on the desk are pushed in between)
+    poll_s: float = 30.0  # full re-read period (changes on the desk are pushed in between)
     usb_patch: tuple[str, ...] = ()  # per USB capture channel: "InCh N", "St L", "St R" or ""; () = TF default
-    usb_post_fader: bool = False     # USB feeds taken after the fader? (ring attribution adds the fader if not)
-    eq: bool = False          # also read the EQ (TF Editor protocol, read-only) for the spectrum overlay
+    usb_post_fader: bool = False  # USB feeds taken after the fader? (ring attribution adds the fader if not)
+    eq: bool = False  # also read the EQ (TF Editor protocol, read-only) for the spectrum overlay
     eq_port: int = 50368
-    eq_write: bool = False    # let a person apply suggested EQ to the desk (vocal assist "Apply to desk")
+    eq_write: bool = False  # let a person apply suggested EQ to the desk (vocal assist "Apply to desk")
 
     def validate(self) -> None:
         _check_source("tf5", self.source, DEVICE_SOURCES)
@@ -374,8 +402,16 @@ class Config:
 
 
 SECTIONS: dict[str, type[Section]] = {
-    "server": ServerConfig, "audio": AudioConfig, "dsp": DspConfig, "synth": SynthConfig, "rf": RFConfig,
-    "qlxd": QLXDConfig, "ring": RingConfig, "vocal": VocalConfig, "tf5": TF5Config, "update": UpdateConfig,
+    "server": ServerConfig,
+    "audio": AudioConfig,
+    "dsp": DspConfig,
+    "synth": SynthConfig,
+    "rf": RFConfig,
+    "qlxd": QLXDConfig,
+    "ring": RingConfig,
+    "vocal": VocalConfig,
+    "tf5": TF5Config,
+    "update": UpdateConfig,
 }
 
 

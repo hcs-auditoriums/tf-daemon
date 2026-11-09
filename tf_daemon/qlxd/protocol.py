@@ -23,9 +23,9 @@ RUN_TIME_UNKNOWN = 65535
 RUN_TIME_CALCULATING = 65534
 RUN_TIME_WARNING = 65533  # "communication warning": runtime not available
 
-RF_OFFSET_DB = 128    # RX_RF_LVL 000..115 -> dBm = value - 128
+RF_OFFSET_DB = 128  # RX_RF_LVL 000..115 -> dBm = value - 128
 AUDIO_OFFSET_DB = 50  # AUDIO_LVL 000..050 -> dBFS = value - 50
-GAIN_OFFSET_DB = 18   # AUDIO_GAIN 000..060 -> dB = value - 18
+GAIN_OFFSET_DB = 18  # AUDIO_GAIN 000..060 -> dB = value - 18
 
 _MSG = re.compile(rb"<([^<>]*)>")
 
@@ -65,7 +65,7 @@ def parse(body: str) -> tuple[str, int | None, str, list[str]] | None:
     kind, ch, param, rest = m.groups()
     rest = rest.strip()
     if rest.startswith("{"):
-        args = [rest[1:rest.rfind("}") if "}" in rest else None].strip()]
+        args = [rest[1 : rest.rfind("}") if "}" in rest else None].strip()]
     else:
         args = rest.split()
     return ("REP" if kind == "REPORT" else kind), (int(ch) if ch else None), param, args
@@ -129,9 +129,11 @@ def decode(param: str, args: list[str]) -> dict[str, Any]:
             return {"audio_dbfs": None if n is None else n - AUDIO_OFFSET_DB}
         case "ALL" if len(args) >= 3:  # SAMPLE 1 ALL <antenna> <rf> <audio>
             rf, audio = _int(args[1]), _int(args[2])
-            return {**_antenna(args[0]),
-                    "rf_dbm": None if rf is None else rf - RF_OFFSET_DB,
-                    "audio_dbfs": None if audio is None else audio - AUDIO_OFFSET_DB}
+            return {
+                **_antenna(args[0]),
+                "rf_dbm": None if rf is None else rf - RF_OFFSET_DB,
+                "audio_dbfs": None if audio is None else audio - AUDIO_OFFSET_DB,
+            }
     return {}
 
 

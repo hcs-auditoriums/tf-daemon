@@ -1,7 +1,7 @@
 """The pages in a real (headless) browser, against the running demo server.
 
-Like tests/test_live.py these need TF_DAEMON_URL (set in the dev container) and
-skip without it; they also need Playwright's Chromium, which the dev image has.
+Like tests/test_live.py these run against tests/conftest.py's private demo server
+(or TF_DAEMON_URL); they also need Playwright's Chromium, which the dev image has.
 They catch what the Python tests can't: a script error, a page that stops
 drawing, a control that no longer does anything. Read-only, like the live tests:
 nothing here changes the server's state (no mic check is started, no peak reset).
@@ -63,7 +63,7 @@ def _open(page, path):
 @pytest.mark.parametrize("path", ["/", "/rf", "/qlxd", "/config"])
 def test_page_runs_without_script_errors(page, path):
     _open(page, path)
-    page.wait_for_timeout(2500)   # websockets connect, the first frames arrive and are drawn
+    page.wait_for_timeout(2500)  # websockets connect, the first frames arrive and are drawn
 
 
 def test_audio_page_connects_names_inputs_and_draws(page):
@@ -79,8 +79,11 @@ def test_switching_input_follows_the_buttons(page):
     _open(page, "/")
     page.wait_for_function("document.querySelectorAll('#channels button').length >= 4", timeout=8000)
     page.locator("#channels button", has_text="Lead Vox").click()
-    page.wait_for_function("""[...document.querySelectorAll('#channels button')]
-        .some(b => b.textContent === 'Lead Vox' && b.getAttribute('aria-pressed') === 'true')""", timeout=4000)
+    page.wait_for_function(
+        """[...document.querySelectorAll('#channels button')]
+        .some(b => b.textContent === 'Lead Vox' && b.getAttribute('aria-pressed') === 'true')""",
+        timeout=4000,
+    )
 
 
 def test_waterfall_layout_draws(page):
@@ -112,14 +115,14 @@ def test_console_panel_and_eq_from_the_simulated_desk(page):
 
 
 def test_rings_from_the_synth_tone_are_listed(page):
-    _open(page, "/")   # the synth carries a steady 2.5 kHz tone: the ring detector reports it
+    _open(page, "/")  # the synth carries a steady 2.5 kHz tone: the ring detector reports it
     page.wait_for_function("!document.getElementById('ring-alert').hidden", timeout=15000)
 
 
 def test_mic_check_panel_opens_and_closes(page):
     _open(page, "/")
     btn = page.locator("#mic-check")
-    btn.wait_for(state="visible", timeout=8000)   # vocal assist is on in config.dev.toml
+    btn.wait_for(state="visible", timeout=8000)  # vocal assist is on in config.dev.toml
     btn.click()
     page.locator("#vocal-panel").wait_for(state="visible", timeout=4000)
     btn.click()
@@ -163,7 +166,7 @@ def test_every_view_control_works_without_errors(page):
     all_sends.wait_for(timeout=4000)
     all_sends.check()
     page.locator("#console-panel .cp-sendhdr input[type=checkbox]").uncheck()
-    page.select_option("#input", "5")   # an input with no button: analyzed while viewed
+    page.select_option("#input", "5")  # an input with no button: analyzed while viewed
     page.wait_for_function("document.getElementById('input').value === '5'", timeout=3000)
     page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=8000)
     page.wait_for_timeout(500)
@@ -176,3 +179,114 @@ def test_ring_list_opens(page):
     alert.click()
     page.locator("#ring-list").wait_for(state="visible", timeout=3000)
     assert "Hz" in page.locator("#ring-list").inner_text()
+
+
+def test_live_listening_starts_and_clears(page):
+    _open(page, "/")
+    page.locator("#mic-check").wait_for(state="visible", timeout=8000)
+    page.wait_for_function("document.getElementById('input') !== null", timeout=8000)
+    channel = int(page.locator("#input").input_value())
+    page.locator("#mic-check").click()
+    panel = page.locator("#vocal-panel")
+    panel.wait_for(state="visible", timeout=4000)
+    try:
+        panel.get_by_role("button", name="Listen live").click()
+        page.locator("#vocal-panel .vp-live").wait_for(timeout=5000)  # "● Live · heard …"
+        panel.get_by_role("button", name="Stop").wait_for(timeout=2000)
+    finally:  # leave the shared demo server as it was
+        page.evaluate(
+            """(ch) => fetch('/api/vocal/clear', {method: 'POST',
+                         headers: {'Content-Type': 'application/json'},
+                         body: JSON.stringify({channel: ch})})""",
+            channel,
+        )
+    panel.get_by_role("button", name="Listen live").wait_for(timeout=5000)
+
+
+def test_auto_eq_control_is_offered(page):
+    _open(page, "/")  # config.dev.toml allows auto EQ; it's off until a person turns it on
+    page.locator("#mic-check").wait_for(state="visible", timeout=8000)
+    page.locator("#mic-check").click()
+    panel = page.locator("#vocal-panel")
+    panel.get_by_role("button", name="Turn auto on…").wait_for(timeout=5000)
+
+
+def test_eq_profiles_save_and_delete_from_the_sidebar(page):
+    _open(page, "/")
+    bar = page.locator("#console-panel .cp-profiles")
+    bar.wait_for(state="visible", timeout=10000)  # the EQ section's profile bar
+    name = "Browser test profile"
+    page.once("dialog", lambda d: d.accept(name))  # the "Save as" prompt
+    bar.get_by_role("button", name="Save as…").click()
+    pick = bar.get_by_label("EQ profile")
+    listed = f"[...document.querySelectorAll('#console-panel .cp-pick option')].some(o => o.value === {name!r})"
+    page.wait_for_function(listed, timeout=5000)
+    pick.select_option(name)
+    page.once("dialog", lambda d: d.accept())  # "Delete profile …?"
+    bar.get_by_role("button", name="Delete").click()
+    page.wait_for_function(f"!{listed}", timeout=5000)
+
+
+def test_eq_bands_can_be_dragged_and_typed_on_the_spectrum(page):
+    import json
+    import urllib.request
+
+    def desk_band(label):
+        with urllib.request.urlopen(URL + "/api/tf5/eq/0", timeout=5) as r:
+            return next(b for b in json.loads(r.read())["eq"]["bands"] if b["label"] == label)
+
+    def put(changes):
+        req = urllib.request.Request(
+            URL + "/api/tf5/eq/0",
+            method="PUT",
+            headers={"Content-Type": "application/json"},
+            data=json.dumps({"changes": changes, "confirm": True}).encode(),
+        )
+        urllib.request.urlopen(req, timeout=10).read()
+
+    _open(page, "/")
+    page.wait_for_function("document.querySelectorAll('#channels button').length >= 1", timeout=8000)
+    page.locator("#channels button", has_text="Pastor").click()
+    page.wait_for_function("!document.getElementById('eq-toggle').hidden", timeout=8000)
+    page.click("#view-menu summary")
+    page.check("#show-eq")
+    page.click("#view-menu summary")
+    page.wait_for_function("window.tfEqHandles && window.tfEqHandles().some(h => h.key === 'HM')", timeout=8000)
+    assert page.evaluate("window.tfEqPreviewError()") < 0.05  # this page's maths = the desk's
+    before = desk_band("HM")
+    try:
+        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
+        box = page.locator("#spectrum").bounding_box()
+        x, y = box["x"] + h["x"], box["y"] + h["y"]
+        page.mouse.move(x, y)
+        page.mouse.down()
+        for i in range(1, 6):  # drag up and a little right
+            page.mouse.move(x + 4 * i, y - 6 * i)
+        page.mouse.up()
+        page.wait_for_function("1", timeout=1000)
+        wait = 0
+        while desk_band("HM")["gain"] <= before["gain"] and wait < 50:
+            page.wait_for_timeout(100)
+            wait += 1
+        assert desk_band("HM")["gain"] > before["gain"]  # dragged up: more gain on the desk
+        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
+        page.mouse.click(box["x"] + h["x"], box["y"] + h["y"])  # a click: its settings
+        pop = page.get_by_role("dialog", name="EQ HM")
+        pop.wait_for(timeout=3000)
+        pop.get_by_label("Gain").fill("-2.5")
+        pop.get_by_label("Gain").press("Enter")
+        page.wait_for_timeout(200)
+        for _ in range(50):
+            if desk_band("HM")["gain"] == -2.5:
+                break
+            page.wait_for_timeout(100)
+        assert desk_band("HM")["gain"] == -2.5
+    finally:  # leave the shared demo desk as it was
+        band = "PEQ/Bank/Band:1"
+        put(
+            [
+                [f"{band}/Gain", round(before["gain"] * 100)],
+                [f"{band}/Frequency", round(before["freq"] * 10)],
+                [f"{band}/Q", round(before["q"] * 1000)],
+            ]
+        )

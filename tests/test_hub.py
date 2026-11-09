@@ -12,7 +12,7 @@ def test_wait_returns_only_newer_payloads():
     hub = FrameHub()
     assert hub.wait(0, timeout=0.01) == (0, None)
     hub.publish("a")
-    hub.publish("b")   # only the latest is kept
+    hub.publish("b")  # only the latest is kept
     assert hub.wait(0, timeout=0.01) == (2, "b")
     assert hub.wait(2, timeout=0.01) == (2, None)
 
@@ -28,7 +28,7 @@ def test_stream_sends_the_current_payload_then_each_new_one():
     wait_until(lambda: sent == ["snapshot", "next"])
     hub.close()
     t.join(timeout=1)
-    assert not t.is_alive()   # a closed hub ends the stream instead of spinning
+    assert not t.is_alive()  # a closed hub ends the stream instead of spinning
 
 
 def test_stream_stops_when_the_client_goes_away():

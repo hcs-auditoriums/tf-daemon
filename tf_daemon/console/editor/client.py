@@ -43,12 +43,12 @@ from .guard import ALLOWED_EVENT_REPLIES, WRITABLE, ReadOnlyViolation, check_out
 log = logging.getLogger(__name__)
 
 DEFAULT_PORT = 50368
-MAX_FRAME = 4 * 1024 * 1024      # the Mixing dump is 67 kB; anything near this is garbage
-KEEPALIVE_S = 10.0               # our keepalive period (the guide: every <= 15 s)
-RX_TIMEOUT_S = 35.0              # no frame from the console for this long: reconnect
-SYNC_TIMEOUT_S = 20.0            # connect -> Mixing dump
-CLIENT_TYPE_WAIT_S = 3.0         # SetClientType acked but no onSetClientType: go on after this
-WRITE_CONFIRM_S = 3.0            # write(): how long to wait for the console to echo each change
+MAX_FRAME = 4 * 1024 * 1024  # the Mixing dump is 67 kB; anything near this is garbage
+KEEPALIVE_S = 10.0  # our keepalive period (the guide: every <= 15 s)
+RX_TIMEOUT_S = 35.0  # no frame from the console for this long: reconnect
+SYNC_TIMEOUT_S = 20.0  # connect -> Mixing dump
+CLIENT_TYPE_WAIT_S = 3.0  # SetClientType acked but no onSetClientType: go on after this
+WRITE_CONFIRM_S = 3.0  # write(): how long to wait for the console to echo each change
 
 
 class TFEditorClient:
@@ -60,11 +60,12 @@ class TFEditorClient:
     parameters when a person asks for it.
     """
 
-    def __init__(self, host: str, port: int = DEFAULT_PORT, on_change: Callable[[], None] | None = None,
-                 writes: bool = False) -> None:
+    def __init__(
+        self, host: str, port: int = DEFAULT_PORT, on_change: Callable[[], None] | None = None, writes: bool = False
+    ) -> None:
         self.host, self.port = host, port
         self.writes = writes
-        self._write_lock = threading.Lock()                     # one write() at a time
+        self._write_lock = threading.Lock()  # one write() at a time
         self._authorized: dict[tuple[tuple[int, ...], tuple[int, ...]], tuple[int, int]] = {}  # addr -> (type, value)
         self._echo = threading.Condition()
         self._awaiting: dict[tuple[tuple[int, ...], tuple[int, ...]], int | str | None] = {}  # addr -> echoed value
@@ -80,12 +81,12 @@ class TFEditorClient:
         self.connects = 0
         self.last_error: str | None = None
         self.updated: float | None = None
-        self.changes = 0             # parameter pushes applied
-        self.rejected = 0            # Mixing pushes that didn't fit our copy of the data (should stay 0)
+        self.changes = 0  # parameter pushes applied
+        self.rejected = 0  # Mixing pushes that didn't fit our copy of the data (should stay 0)
         self.last_rejected: str | None = None
-        self.received: dict[str, int] = {}   # "TAG cc dd ee" -> frames received (diagnostics)
+        self.received: dict[str, int] = {}  # "TAG cc dd ee" -> frames received (diagnostics)
         self.desc_md5: str | None = None
-        self.sent: list[tuple[str, tuple[int, int, int]]] = []   # (tag, cmd) of the last frames sent
+        self.sent: list[tuple[str, tuple[int, int, int]]] = []  # (tag, cmd) of the last frames sent
         self._phase = "idle"
         self._mixing_due: float | None = None
 
@@ -110,11 +111,22 @@ class TFEditorClient:
             self._thread = None
 
     def status(self) -> dict[str, Any]:
-        return {"host": self.host, "port": self.port, "connected": self.connected, "synced": self.synced,
-                "connects": self.connects, "last_error": self.last_error, "updated": self.updated,
-                "changes": self.changes, "rejected": self.rejected, "last_rejected": self.last_rejected,
-                "received": dict(self.received), "descriptor_md5": self.desc_md5,
-                "descriptor_known": self.desc_md5 in (None, DESC_MD5["Mixing"]), "read_only": not self.writes}
+        return {
+            "host": self.host,
+            "port": self.port,
+            "connected": self.connected,
+            "synced": self.synced,
+            "connects": self.connects,
+            "last_error": self.last_error,
+            "updated": self.updated,
+            "changes": self.changes,
+            "rejected": self.rejected,
+            "last_rejected": self.last_rejected,
+            "received": dict(self.received),
+            "descriptor_md5": self.desc_md5,
+            "descriptor_known": self.desc_md5 in (None, DESC_MD5["Mixing"]),
+            "read_only": not self.writes,
+        }
 
     def eq(self, kind: str, x: int) -> dict[str, Any] | None:
         with self._lock:
@@ -172,8 +184,11 @@ class TFEditorClient:
                         self._send(sock, "MMIX", set_param_message(list(wpath), list(widx), prm, value))
                 finally:
                     self._authorized = {}
-                log.info("TF5 editor protocol: wrote %d EQ parameter(s) on user request: %s", len(plan),
-                         ", ".join(f"{p}={v}" for p, _, _, v in plan))
+                log.info(
+                    "TF5 editor protocol: wrote %d EQ parameter(s) on user request: %s",
+                    len(plan),
+                    ", ".join(f"{p}={v}" for p, _, _, v in plan),
+                )
                 deadline = time.monotonic() + timeout
                 with self._echo:
                     while any(v is None for v in self._awaiting.values()):
@@ -185,15 +200,24 @@ class TFEditorClient:
             finally:
                 with self._echo:
                     self._awaiting = {}
-        return [{"path": path, "value": value, "confirmed": echoed.get(key) is not None, "actual": echoed.get(key)}
-                for path, key, _, value in plan]
+        return [
+            {"path": path, "value": value, "confirmed": echoed.get(key) is not None, "actual": echoed.get(key)}
+            for path, key, _, value in plan
+        ]
 
     def _allow_set(self, msg: Message) -> bool:
         """check_outbound's test while write() runs: exactly one of the requested changes."""
         e = msg.elements
-        if len(e) != 8 or e[0] != Element(T_U8, b"\0") or e[1] != Element(T_STR, "Mixing") \
-                or e[2] != Element(T_STR, "Mixing") or e[6] != Element(T_U32, [ORIGIN_SELF]) \
-                or e[4].type != T_U32 or e[5].type != T_U32 or e[3] != Element(T_U16, [len(e[4].value)]):
+        if (
+            len(e) != 8
+            or e[0] != Element(T_U8, b"\0")
+            or e[1] != Element(T_STR, "Mixing")
+            or e[2] != Element(T_STR, "Mixing")
+            or e[6] != Element(T_U32, [ORIGIN_SELF])
+            or e[4].type != T_U32
+            or e[5].type != T_U32
+            or e[3] != Element(T_U16, [len(e[4].value)])
+        ):
             return False
         want = self._authorized.get((tuple(e[4].value), tuple(e[5].value)))
         if want is None:
@@ -243,8 +267,12 @@ class TFEditorClient:
             sock.settimeout(1.0)
             self.connected = True
             self.connects += 1
-            log.info("TF5 editor protocol: connected to %s:%d (%s)", self.host, self.port,
-                     "EQ writes on request" if self.writes else "read-only")
+            log.info(
+                "TF5 editor protocol: connected to %s:%d (%s)",
+                self.host,
+                self.port,
+                "EQ writes on request" if self.writes else "read-only",
+            )
             self._phase, self._mixing_due = "property", None
             self._open("Property", sock)
             started = last_rx = last_ka = time.monotonic()
@@ -292,8 +320,11 @@ class TFEditorClient:
             if msg.cmd == HASH_COMPARE and len(msg.elements) >= 3 and msg.elements[2].type == T_U8:
                 self.desc_md5 = msg.elements[2].value.hex()
                 if self.desc_md5 != DESC_MD5["Mixing"]:
-                    log.warning("TF5 Mixing descriptor %s differs from the known firmware; "
-                                "EQ is read by parameter name and may be incomplete", self.desc_md5)
+                    log.warning(
+                        "TF5 Mixing descriptor %s differs from the known firmware; "
+                        "EQ is read by parameter name and may be incomplete",
+                        self.desc_md5,
+                    )
             elif msg.cmd == DUMP:
                 self._on_dump(sock, msg)
             elif msg.cmd == SET_PARAM:
@@ -312,7 +343,7 @@ class TFEditorClient:
         if msg.cmd != EVENT:
             return
         if name in ALLOWED_EVENT_REPLIES:
-            self._send(sock, EVENT_TAG, event(name, args, reply=True))   # TF Editor echoes these
+            self._send(sock, EVENT_TAG, event(name, args, reply=True))  # TF Editor echoes these
         elif name == "onSetClientType":
             if self._phase == "client_type":
                 self._start_mixing(sock)
@@ -364,13 +395,14 @@ class TFEditorClient:
             except ProtocolError as err:
                 self.rejected += 1
                 self.last_rejected = f"path={e[4].value} idx={e[5].value}: {err}"
-                if self.rejected <= 5 or self.rejected % 100 == 0:   # loud, but not one line per knob tick
-                    log.warning("TF5 editor protocol: push not applied (%d so far): %s", self.rejected,
-                                self.last_rejected)
+                if self.rejected <= 5 or self.rejected % 100 == 0:  # loud, but not one line per knob tick
+                    log.warning(
+                        "TF5 editor protocol: push not applied (%d so far): %s", self.rejected, self.last_rejected
+                    )
                 return
         key = (tuple(e[4].value), tuple(e[5].value))
         with self._echo:
-            if key in self._awaiting:   # the console confirming a write() of ours
+            if key in self._awaiting:  # the console confirming a write() of ours
                 self._awaiting[key] = value
                 self._echo.notify_all()
         self.changes += 1

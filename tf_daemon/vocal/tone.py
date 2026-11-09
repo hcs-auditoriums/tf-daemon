@@ -1,4 +1,4 @@
-"""Vocal EQ suggestions from a mic check.
+"""Vocal EQ suggestions from a voice's long-term spectrum (see voice.py for collecting it).
 
 Listen to a vocal mic while the person talks, build the long-term average
 spectrum (LTAS) of their speech, compare its *shape* with a reference speech
@@ -7,14 +7,6 @@ suggestions are advice for the operator; nothing here talks to the console.
 
 How
 ---
-VoiceCollector, per hop, on the newest 4096 samples (85 ms, Hann):
-  * speech activity: level in 100 Hz-8 kHz more than 12 dB above a tracked
-    noise floor (fast down, slow up);
-  * pitch: normalized autocorrelation (Boersma's method: the frame's
-    autocorrelation divided by the window's), voiced when the peak in the
-    70-400 Hz lag range is >= 0.45;
-  * active frames are summed into the LTAS (voiced and unvoiced: sibilance
-    lives in the unvoiced ones), voiced frames give the pitch statistics.
 
 analyze() then:
   1. reads the LTAS (1/3-octave averages at 1/6-octave points, 160 Hz-8 kHz)
@@ -36,7 +28,7 @@ analyze() then:
   4. suggests a high-pass just under the voice's lowest pitch;
   5. names each move after the usual vocal descriptors (boomy, boxy, woody,
      nasal, tinny, harsh, sibilant; presence, air) and assigns it to a TF5
-     PEQ band (L, 1, 2, H) by frequency.
+     PEQ band (L, LM, HM, H) by frequency.
 
 The descriptors are a vocabulary for where an issue sits, not a diagnosis:
 "nasal" and "honky" overlap, and part of nasality is how a person talks. For
@@ -48,150 +40,99 @@ from __future__ import annotations
 
 import itertools
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
 
+from ..dsp.eq import BUTTERWORTH_Q, FS, section_db
+from .voice import VoiceCollector
+
 # ANSI S3.5-1997 Table 3: standard speech spectrum level, normal vocal effort
 # (dB per Hz, one-third octave band centres).
-ANSI_FREQS = np.array([160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000,
-                       6300, 8000], dtype=float)
-ANSI_NORMAL = np.array([32.41, 34.48, 34.75, 33.98, 34.59, 34.27, 32.06, 28.30, 25.01, 23.00, 20.15, 17.32, 13.18,
-                        11.55, 9.33, 5.31, 2.59, 1.13])
+ANSI_FREQS = np.array(
+    [160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000], dtype=float
+)
+ANSI_NORMAL = np.array(
+    [
+        32.41,
+        34.48,
+        34.75,
+        33.98,
+        34.59,
+        34.27,
+        32.06,
+        28.30,
+        25.01,
+        23.00,
+        20.15,
+        17.32,
+        13.18,
+        11.55,
+        9.33,
+        5.31,
+        2.59,
+        1.13,
+    ]
+)
 
-POINTS = 160.0 * 2.0 ** (np.arange(34) / 6)            # 1/6-octave analysis points, 160 Hz .. 7.2 kHz
-CURVE = np.geomspace(40.0, 16000.0, 121)                # for plotting the suggested EQ
+POINTS = 160.0 * 2.0 ** (np.arange(34) / 6)  # 1/6-octave analysis points, 160 Hz .. 7.2 kHz
+CURVE = np.geomspace(40.0, 16000.0, 121)  # for plotting the suggested EQ
 NORM_LO, NORM_HI = 200.0, 6300.0
 
 # (low, high, name) where a cut / boost sits; first match wins.
-CUT_NAMES = [(0, 250, "boomy / muddy"), (250, 500, "boxy"), (500, 800, "woody / hollow"),
-             (800, 1500, "nasal / honky"), (1500, 2600, "tinny / thin"), (2600, 5000, "harsh"),
-             (5000, 20000, "sibilant")]
+CUT_NAMES = [
+    (0, 250, "boomy / muddy"),
+    (250, 500, "boxy"),
+    (500, 800, "woody / hollow"),
+    (800, 1500, "nasal / honky"),
+    (1500, 2600, "tinny / thin"),
+    (2600, 5000, "harsh"),
+    (5000, 20000, "sibilant"),
+]
 BOOST_NAMES = [(0, 5000, "presence (clarity)"), (5000, 20000, "air")]
 
 # TF5 input PEQ bands and the range each is most at home in.
-SLOTS = [("L", 0, 400), ("1", 250, 1600), ("2", 1000, 5000), ("H", 3500, 20000)]
+SLOTS = [("L", 0, 400), ("LM", 250, 1600), ("HM", 1000, 5000), ("H", 3500, 20000)]
 
 
 def _name(table: Sequence[tuple[float, float, str]], f: float) -> str:
     return next(n for lo, hi, n in table if lo <= f < hi)
 
 
+# Bands are modelled with the desk's own filter maths (dsp/eq.py, TF Editor's), so
+# what the suggestion predicts is what the TF5 does once it's applied. (Its bell is
+# wider at a given Q than the textbook one, and its width depends on the gain.)
+
+
 def bell_db(freqs: np.ndarray, f0: float, gain_db: float, q: float) -> np.ndarray:
-    """Magnitude (dB) of an analog peaking EQ (RBJ prototype) at ``freqs``."""
-    s = 1j * np.asarray(freqs, dtype=float) / f0
-    a = 10 ** (gain_db / 40)
-    h = (s * s + s * (a / q) + 1) / (s * s + s / (a * q) + 1)
-    return 20 * np.log10(np.abs(h))
+    """The TF5's peaking EQ band: magnitude (dB) at ``freqs``."""
+    return section_db("bell", f0, gain_db, q, np.asarray(freqs, dtype=float), FS)
 
 
-def hpf_db(freqs: np.ndarray, f0: float, order: int = 2) -> np.ndarray:
-    """Butterworth high-pass magnitude (dB), 6 dB/octave per order."""
-    return -10 * np.log10(1 + (f0 / np.asarray(freqs, dtype=float)) ** (2 * order))
+def hpf_db(freqs: np.ndarray, f0: float) -> np.ndarray:
+    """The TF5's channel high-pass (12 dB/octave): magnitude (dB) at ``freqs``."""
+    return section_db("hpf", f0, 0.0, BUTTERWORTH_Q, np.asarray(freqs, dtype=float), FS)
 
 
-def q_for_octaves(n: float) -> float:
-    """Q of a bell whose half-gain points are ``n`` octaves apart."""
-    r = 2.0 ** n
-    return math.sqrt(r) / (r - 1)
+def q_for_octaves(n: float, gain_db: float) -> float:
+    """Q of a TF5 bell of ``gain_db`` whose half-gain points are ``n`` octaves apart."""
+    grid = 1000.0 * 2.0 ** np.linspace(-4, 4, 1601)
 
+    def width(q: float) -> float:
+        above = np.abs(bell_db(grid, 1000.0, gain_db, q)) >= abs(gain_db) / 2
+        return float(np.log2(grid[above][-1] / grid[above][0])) if above.any() else 0.0
 
-class VoiceCollector:
-    """Accumulates one mic check: speech activity, pitch, long-term spectrum."""
+    lo, hi = math.log(0.1), math.log(20.0)  # wider at lower Q: bisect on log Q
+    for _ in range(30):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if width(math.exp(mid)) > n else (lo, mid)
+    return math.exp((lo + hi) / 2)
 
-    N = 4096
-    ACTIVE_DB = 12.0       # above the noise floor
-    MIN_LEVEL_DB = -85.0   # absolute floor for "someone is talking" (dBFS, sine-peak)
-    VOICED = 0.45
-
-    def __init__(self, samplerate: int = 48000) -> None:
-        self.fs = samplerate
-        n = self.N
-        self.window = np.hanning(n).astype(np.float64)
-        self._wsum = float(np.sum(self.window))
-        self._win_ac = np.fft.irfft(np.abs(np.fft.rfft(self.window, 2 * n)) ** 2)[:n]
-        self.freqs = np.fft.rfftfreq(n, 1 / samplerate)
-        self._k0, self._k1 = int(100 * n / samplerate), int(8000 * n / samplerate)
-        self._lag0, self._lag1 = int(samplerate / 400), int(samplerate / 70)
-        self.ltas = np.zeros(len(self.freqs))
-        self.active_frames = 0
-        self.voiced_frames = 0
-        self.total_frames = 0
-        self.f0s: list[float] = []
-        self._floor: float | None = None
-        self._speech_levels: list[float] = []
-        self._last_t: float | None = None
-        self.speech_s = 0.0
-
-    def _db(self, p: float) -> float:
-        return 10 * math.log10(p * (2 / self._wsum) ** 2 + 1e-30)
-
-    def process(self, frame: np.ndarray, now: float) -> bool:
-        """Analyze the newest N samples at stream time ``now`` (s). True if speech."""
-        dt = 0.05 if self._last_t is None else min(max(now - self._last_t, 0.0), 0.5)
-        self._last_t = now
-        x = np.asarray(frame[-self.N:], dtype=np.float64)
-        if len(x) < self.N:
-            return False
-        self.total_frames += 1
-        spec = np.fft.rfft(x * self.window)
-        p = np.abs(spec) ** 2
-        level = self._db(float(np.sum(p[self._k0:self._k1])))
-        # Noise floor: follows the level down at once, creeps up 3 dB/s.
-        self._floor = level if self._floor is None else min(level, self._floor + 3.0 * dt)
-        active = level > self._floor + self.ACTIVE_DB and level > self.MIN_LEVEL_DB
-        if not active:
-            return False
-        self.ltas += p
-        self.active_frames += 1
-        self.speech_s += dt
-        self._speech_levels.append(level)
-        f0, strength = self._pitch(x)
-        if strength >= self.VOICED:
-            self.voiced_frames += 1
-            self.f0s.append(f0)
-        return True
-
-    def _pitch(self, x: np.ndarray) -> tuple[float, float]:
-        n = self.N
-        xw = (x - x.mean()) * self.window
-        ac = np.fft.irfft(np.abs(np.fft.rfft(xw, 2 * n)) ** 2)[:n]
-        if ac[0] <= 0:
-            return 0.0, 0.0
-        r = ac / ac[0] / np.maximum(self._win_ac / self._win_ac[0], 1e-3)
-        seg = r[self._lag0:self._lag1 + 1]
-        best = float(seg.max())
-        # Prefer the shortest lag close to the best (avoids picking an octave below).
-        lag = self._lag0 + int(np.flatnonzero(seg >= 0.9 * best)[0])
-        if 1 <= lag < n - 1:
-            a, b, c = r[lag - 1], r[lag], r[lag + 1]
-            den = a - 2 * b + c
-            lag_f = lag + (0.5 * (a - c) / den if den < 0 else 0.0)
-        else:
-            lag_f = float(lag)
-        return self.fs / lag_f, best
-
-    @property
-    def voiced_ratio(self) -> float:
-        return self.voiced_frames / self.active_frames if self.active_frames else 0.0
-
-    @property
-    def snr_db(self) -> float | None:
-        if not self._speech_levels or self._floor is None:
-            return None
-        return float(np.median(self._speech_levels) - self._floor)
-
-    def progress(self) -> dict[str, Any]:
-        return {"speech_s": round(self.speech_s, 1), "voiced_ratio": round(self.voiced_ratio, 2),
-                "f0_hz": round(float(np.median(self.f0s)), 1) if len(self.f0s) >= 5 else None}
-
-
-# --------------------------------------------------------------------------- analysis
 
 def _band_levels(collector: VoiceCollector, centres: np.ndarray, width_oct: float) -> np.ndarray:
     """Mean LTAS power density (dB) in bands of ``width_oct`` around each centre."""
-    p = collector.ltas / max(collector.active_frames, 1)
+    p = collector.mean_ltas
     f = collector.freqs
     out = np.empty(len(centres))
     for i, fc in enumerate(centres):
@@ -203,18 +144,29 @@ def _band_levels(collector: VoiceCollector, centres: np.ndarray, width_oct: floa
     return out
 
 
-def _difference(collector: VoiceCollector) -> np.ndarray:
-    """Measured minus target (dB) at POINTS, before levelling."""
+def _difference(collector: VoiceCollector, tilt_db_oct: float = 0.0) -> np.ndarray:
+    """Measured minus target (dB) at POINTS, before levelling. ``tilt_db_oct`` tilts the
+    target (reference speech) about 1 kHz."""
     # 1/3-octave averaging: smooths the voice's harmonic comb (which ripples
     # +-2 dB in narrower bands) while costing well under 1 dB on the
     # octave-wide build-ups that make a voice boxy or nasal.
     measured = _band_levels(collector, POINTS, 1 / 3)
-    target = np.interp(np.log(POINTS), np.log(ANSI_FREQS), ANSI_NORMAL)
+    target = np.interp(np.log(POINTS), np.log(ANSI_FREQS), ANSI_NORMAL) + tilt_db_oct * np.log2(POINTS / 1000.0)
     return measured - target
 
 
-def _fit_bands(dev: np.ndarray, max_bands: int, max_cut: float, max_boost: float, *,
-               skip: np.ndarray | None = None, cut_thr: float = 3.0, boost_thr: float = 3.0) -> list[dict[str, Any]]:
+def _fit_bands(
+    dev: np.ndarray,
+    max_bands: int,
+    max_cut: float,
+    max_boost: float,
+    *,
+    boost_cap: Callable[[float], float] | None = None,
+    capped: list[str] | None = None,
+    skip: np.ndarray | None = None,
+    cut_thr: float = 3.0,
+    boost_thr: float = 3.0,
+) -> list[dict[str, Any]]:
     """``skip``: points where no cut may be centred (the voice's fundamental, notches)."""
     resid = dev.copy()
     bands: list[dict[str, Any]] = []
@@ -243,20 +195,42 @@ def _fit_bands(dev: np.ndarray, max_bands: int, max_cut: float, max_boost: float
                 resid[p] = 0.0
             continue
         octaves = max(np.log2(POINTS[hi] / POINTS[lo]) + 1 / 6, 1 / 3)
-        q = float(np.clip(q_for_octaves(octaves), 0.5, 4.0))
         fc = float(np.sqrt(POINTS[lo] * POINTS[hi])) if hi > lo else float(POINTS[p])
         if cut:
             gain = -min(round(resid[p] * 0.8 * 2) / 2, max_cut)
         else:
             gain = min(round(-resid[p] * 0.6 * 2) / 2, max_boost)
+            if boost_cap is not None and gain > (limit := boost_cap(fc)):
+                cap = math.floor(limit * 2) / 2  # whole half-dBs, rounded down (the safe way)
+                if capped is not None:  # too close to feedback for the whole boost
+                    capped.append(
+                        f"Boost at {fc:.0f} Hz "
+                        + (f"held to +{cap:g} dB" if cap >= 1 else "left out")
+                        + " to stay clear of feedback."
+                    )
+                if cap < 1.0:
+                    no_cut = no_cut.copy()
+                    no_cut[p] = True
+                    resid[p] = 0.0
+                    continue
+                gain = cap
         if abs(gain) < 1.0:
             break
+        q = float(np.clip(q_for_octaves(octaves, gain), 0.5, 4.0))
         if any(abs(math.log2(fc / b["freq"])) < 1 / 3 for b in bands):
-            resid[lo:hi + 1] = 0.0  # already covered; don't stack bands
+            resid[lo : hi + 1] = 0.0  # already covered; don't stack bands
             continue
-        bands.append({"type": "bell", "freq": round(fc, -1 if fc < 1000 else -2), "gain": gain,
-                      "q": round(q, 1), "issue": _name(CUT_NAMES if cut else BOOST_NAMES, fc),
-                      "deviation_db": round(float(resid[p]), 1), "kind": "cut" if cut else "boost"})
+        bands.append(
+            {
+                "type": "bell",
+                "freq": round(fc, -1 if fc < 1000 else -2),
+                "gain": gain,
+                "q": round(q, 1),
+                "issue": _name(CUT_NAMES if cut else BOOST_NAMES, fc),
+                "deviation_db": round(float(resid[p]), 1),
+                "kind": "cut" if cut else "boost",
+            }
+        )
         resid = resid + bell_db(POINTS, fc, gain, q)
     return bands
 
@@ -265,7 +239,7 @@ def _resonances(collector: VoiceCollector, f0: float | None, limit: int = 2) -> 
     """Narrow peaks in the LTAS: 6 dB above the median of the +-1/8 octave around
     them, at most 1/8 octave wide at half power, 500 Hz-8 kHz (lower down the
     voice's first harmonics stay peaky), and not a harmonic of the voice."""
-    p = collector.ltas / max(collector.active_frames, 1)
+    p = collector.mean_ltas
     db = 10 * np.log10(p + 1e-30)
     f = collector.freqs
     df = f[1]
@@ -289,9 +263,18 @@ def _resonances(collector: VoiceCollector, f0: float | None, limit: int = 2) -> 
             continue  # a harmonic of a fairly steady voice, not a resonance
         out.append((excess, f[k]))
     out.sort(reverse=True)
-    return [{"type": "bell", "freq": round(float(fr), -1), "gain": -min(round(ex * 0.6 * 2) / 2, 6.0), "q": 8.0,
-             "issue": "resonance", "deviation_db": round(float(ex), 1), "kind": "notch"}
-            for ex, fr in out[:limit]]
+    return [
+        {
+            "type": "bell",
+            "freq": round(float(fr), -1),
+            "gain": -min(round(ex * 0.6 * 2) / 2, 6.0),
+            "q": 8.0,
+            "issue": "resonance",
+            "deviation_db": round(float(ex), 1),
+            "kind": "notch",
+        }
+        for ex, fr in out[:limit]
+    ]
 
 
 def _assign_slots(moves: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -316,16 +299,37 @@ def _round_hpf(f: float) -> float:
     return float(5 * round(f / 5))
 
 
-def analyze(collector: VoiceCollector, rings: list[dict[str, Any]] | None = None, *,
-            max_cut_db: float = 6.0, max_boost_db: float = 3.0, min_speech_s: float = 6.0) -> dict[str, Any]:
-    """Suggestions from a finished mic check (see the module docstring)."""
+def analyze(
+    collector: VoiceCollector,
+    rings: list[dict[str, Any]] | None = None,
+    *,
+    max_cut_db: float = 6.0,
+    max_boost_db: float = 3.0,
+    min_speech_s: float = 6.0,
+    room_db: np.ndarray | None = None,
+    tilt_db_oct: float = 0.0,
+    boost_cap: Callable[[float], float] | None = None,
+) -> dict[str, Any]:
+    """Suggestions from a finished mic check (see the module docstring).
+
+    ``room_db`` (dB at POINTS, see room.py): what the PA and the room do to the voice
+    on its way to the listener, measured with a house mic. Added to the mic's
+    spectrum, so the suggestion aims at the voice as the room hears it.
+    ``boost_cap(freq)``: the largest boost that stays clear of feedback there (feedback.py)."""
     prog = collector.progress()
     if collector.speech_s < min_speech_s:
-        return {"ok": False, "error": f"only {collector.speech_s:.1f} s of speech heard; need at least "
-                                      f"{min_speech_s:.0f} s", **prog}
+        return {
+            "ok": False,
+            "error": f"only {collector.speech_s:.1f} s of speech heard; need at least {min_speech_s:.0f} s",
+            **prog,
+        }
     if collector.voiced_ratio < 0.25:
-        return {"ok": False, "error": "this doesn't sound like a voice (little pitched sound); "
-                                      "is it the right input, and is someone talking?", **prog}
+        return {
+            "ok": False,
+            "error": "this doesn't sound like a voice (little pitched sound); "
+            "is it the right input, and is someone talking?",
+            **prog,
+        }
     f0 = float(np.median(collector.f0s)) if len(collector.f0s) >= 20 else None
     f0_low = float(np.percentile(collector.f0s, 10)) if len(collector.f0s) >= 20 else None
     fundamental = np.zeros(len(POINTS), dtype=bool)
@@ -335,15 +339,25 @@ def analyze(collector: VoiceCollector, rings: list[dict[str, Any]] | None = None
         f0_high = float(np.percentile(collector.f0s, 90))
         assert f0 is not None  # set under the same condition as f0_low
         fundamental = (POINTS >= 0.85 * f0_low) & (POINTS <= max(1.25 * f0, f0_high))
-    diff = _difference(collector)
+    diff = _difference(collector, tilt_db_oct)
+    if room_db is not None:
+        diff = diff + room_db
     ref = (POINTS >= NORM_LO) & (POINTS <= NORM_HI) & ~fundamental
 
     notches = _resonances(collector, f0)
     for r in rings or []:
         if not any(abs(math.log2(r["freq"] / n["freq"])) < 1 / 12 for n in notches):
-            notches.append({"type": "bell", "freq": round(float(r["freq"]), -1), "gain": -4.0, "q": 8.0,
-                            "issue": f"ring ({r.get('count', 1)}× on this input)", "deviation_db": None,
-                            "kind": "notch"})
+            notches.append(
+                {
+                    "type": "bell",
+                    "freq": round(float(r["freq"]), -1),
+                    "gain": -4.0,
+                    "q": 8.0,
+                    "issue": f"ring ({r.get('count', 1)}× on this input)",
+                    "deviation_db": None,
+                    "kind": "notch",
+                }
+            )
     notches = notches[:2]
     # No broad cut centred on the voice's own fundamental (that energy *is* the
     # voice; the standard spectrum averages low and high voices) or on a notch.
@@ -356,8 +370,16 @@ def analyze(collector: VoiceCollector, rings: list[dict[str, Any]] | None = None
     off = float(np.percentile(diff[ref], 35))
     for _ in range(6):
         dev_raw = diff - off
-        broad = _fit_bands(dev_raw, max_bands=4 - len(notches), max_cut=max_cut_db, max_boost=max_boost_db,
-                           skip=skip)
+        capped: list[str] = []
+        broad = _fit_bands(
+            dev_raw,
+            max_bands=4 - len(notches),
+            max_cut=max_cut_db,
+            max_boost=max_boost_db,
+            skip=skip,
+            boost_cap=boost_cap,
+            capped=capped,
+        )
         eq = sum((bell_db(POINTS, b["freq"], b["gain"], b["q"]) for b in broad), np.zeros(len(POINTS)))
         new_off = float(np.median((diff + eq)[ref]))
         if abs(new_off - off) < 0.1:
@@ -368,8 +390,12 @@ def analyze(collector: VoiceCollector, rings: list[dict[str, Any]] | None = None
     hpf: dict[str, Any] | None = None
     if f0_low:
         freq = _round_hpf(min(max(0.75 * f0_low, 60.0), 180.0))
-        hpf = {"band": "HPF", "type": "hpf", "freq": freq,
-               "issue": f"rumble / proximity below the voice (lowest pitch ≈ {f0_low:.0f} Hz)"}
+        hpf = {
+            "band": "HPF",
+            "type": "hpf",
+            "freq": freq,
+            "issue": f"rumble / proximity below the voice (lowest pitch ≈ {f0_low:.0f} Hz)",
+        }
 
     curve = np.zeros(len(CURVE))
     after = dev_raw.copy()
@@ -380,15 +406,20 @@ def analyze(collector: VoiceCollector, rings: list[dict[str, Any]] | None = None
         curve += hpf_db(CURVE, hpf["freq"])
 
     snr = collector.snr_db
-    notes = []
+    notes = list(dict.fromkeys(capped))
     if collector.speech_s < 15:
         notes.append(f"Only {collector.speech_s:.0f} s of speech: treat these as rough.")
     if snr is not None and snr < 20:
         notes.append(f"Speech is only {snr:.0f} dB above the background: other sound on this mic may skew the result.")
     if collector.voiced_ratio < 0.4:
         notes.append("Less pitched sound than usual for speech: check it's a voice on this input.")
-    confidence = "good" if collector.speech_s >= 15 and (snr or 0) >= 20 and collector.voiced_ratio >= 0.4 else \
-        "fair" if collector.speech_s >= 8 else "rough"
+    confidence = (
+        "good"
+        if collector.speech_s >= 15 and (snr or 0) >= 20 and collector.voiced_ratio >= 0.4
+        else "fair"
+        if collector.speech_s >= 8
+        else "rough"
+    )
 
     return {
         "ok": True,

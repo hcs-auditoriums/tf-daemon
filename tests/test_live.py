@@ -1,9 +1,8 @@
 """End-to-end checks against a running server with simulated hardware.
 
-The dev container (compose.yaml) runs ``python -m tf_daemon --demo --config
-config.dev.toml`` on the code on disk and sets TF_DAEMON_URL, so ``pytest`` in
-the container covers it. Elsewhere these skip unless TF_DAEMON_URL points at a
-server started with ``--demo``. Read-only: nothing here changes the server.
+tests/conftest.py starts a private demo server for these (``--demo --config
+config.dev.toml``) and sets TF_DAEMON_URL; set it yourself to use another server
+started with ``--demo``. Read-only: nothing here changes the server.
 """
 
 from __future__ import annotations
@@ -46,14 +45,14 @@ def wait_for(path: str, pred, timeout: float = 15.0):
 def status():
     def all_up(s):
         m = s["modules"]
-        return (m["audio"]["frames"] > 0 and m["rf"]["connected"] and m["qlxd"]["online"] >= 4
-                and m["tf5"]["connected"])
+        return m["audio"]["frames"] > 0 and m["rf"]["connected"] and m["qlxd"]["online"] >= 4 and m["tf5"]["connected"]
+
     return wait_for("/api/status", all_up)
 
 
 def test_every_simulated_device_is_up(status):
     m = status["modules"]
-    assert m["audio"]["source"] == "synth" and m["audio"]["skipped_hops"] == 0
+    assert m["audio"]["source"] == "stage" and m["audio"]["skipped_hops"] == 0
     assert m["rf"]["device"] == "demo"
     assert m["qlxd"]["receivers"] == m["qlxd"]["online"] == 4
 
@@ -67,8 +66,8 @@ def test_pages_load(status, page):
 def test_channel_names_come_from_the_simulated_console(status):
     chans = wait_for("/api/audio/meta", lambda m: len(m["channels"]) == 34)["channels"]
     labels = {c["index"]: c["label"] for c in chans}
-    assert labels[0] == "Pastor" and labels[32] == "Main L"   # config labels win
-    assert labels[2] == "BGV 1"                                # read from the console
+    assert labels[0] == "Pastor" and labels[32] == "Main L"  # config labels win
+    assert labels[2] == "BGV 1"  # read from the console
 
 
 def test_console_eq_is_read(status):
@@ -82,11 +81,18 @@ def test_vocal_assist_can_write_to_the_simulated_desk(status):
 
 
 def test_rf_sweeps_the_receiver_range(status):
-    _, rf = get("/api/rf/state")
-    assert rf["scanning"] and len(rf["sweep"]["live"]) == rf["settings"]["points"]
     _, qlxd = get("/api/qlxd/state")
     freqs = [r["frequency_mhz"] * 1e6 for r in qlxd["receivers"]]
-    assert rf["settings"]["start_hz"] <= min(freqs) and max(freqs) <= rf["settings"]["stop_hz"]
+    # A server that just started sweeps the default range until it knows the receivers.
+    rf = wait_for(
+        "/api/rf/state",
+        lambda s: (
+            s["sweep"] is not None
+            and s["settings"]["start_hz"] <= min(freqs)
+            and max(freqs) <= s["settings"]["stop_hz"]
+        ),
+    )
+    assert rf["scanning"] and len(rf["sweep"]["live"]) == rf["settings"]["points"]
 
 
 def test_audio_websocket_streams_metadata_console_and_spectra(status):
@@ -103,7 +109,7 @@ def test_audio_websocket_streams_metadata_console_and_spectra(status):
             elif m is not None:
                 binary += 1
         assert {"tf5", "rings"} <= kinds, kinds
-        assert binary >= 3   # spectrum frames at ~20/s
+        assert binary >= 3  # spectrum frames at ~20/s
     finally:
         ws.close()
 
