@@ -287,7 +287,7 @@ Designer `FUN_005196e0(coef, fs, Q, gain, freq, type)`:
 | 6 / 7 | 1st-order LPF / HPF |
 | 8–11 | first-order shelf variants (unused by the PEQ table) |
 
-`tf_daemon/tfeditor.py` (`biquad`, `eq_curve`) implements this. `tests/tf_editor_reference.py` is a literal transcription of the decompiled code that the tests compare against.
+`tf_daemon/dsp/eq.py` (`biquad`, `eq_curve`) implements this. `tests/tf_editor_reference.py` is a literal transcription of the decompiled code that the tests compare against.
 
 ### 6.2 Writing EQ (tf-daemon's "Apply to desk") [CODE per 4.4; StageMix acceptance PENDING]
 
@@ -299,7 +299,7 @@ What tf-daemon sends, only on a person's confirmed click (`POST /api/vocal/apply
   - `e5` = `[ch-1, 0, 0, band, 0]`;
   - **origin `0xA0`**;
   - value `0x24` s32 for signed parameters (Gain), `0x14` u32 for the rest.
-- **Parameters** (`tfeditor.WRITABLE`), input channels only, raw limits in `WRITE_LIMITS`:
+- **Parameters** (`console/editor/guard.py`: `WRITABLE`), input channels only, raw limits in `WRITE_LIMITS`:
   - `PEQ/On`
   - `PEQ/Bank/HPF/{On,Frequency}` (20–600 Hz)
   - `PEQ/Bank/{BandL,Band:n,BandH}/{Type,Frequency,Gain,Q,LPFOn}` (20 Hz–20 kHz, ±18 dB, Q 0.1–10)

@@ -385,7 +385,7 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   recording patch: USB 1–32 = InCh 1–32, USB 33–34 = St L/R. Status:
   `GET /api/tf5/status`, values: `GET /api/tf5/channels`.
 - `tf5.eq` (default `false`) / `tf5.eq_port` (50368): also read every channel's
-  EQ over the TF Editor protocol (`tf_daemon/tfeditor.py`, protocol notes in
+  EQ over the TF Editor protocol (`tf_daemon/console/editor/`, protocol notes in
   `guides/tf5_api.md`) and offer an **EQ** toggle that overlays the console's EQ
   curve on the spectrum (at the spectrum's dB scale from the View range, 0 dB at
   mid-height; band handles sit on the curve). The **Console** sidebar also gets an
@@ -400,7 +400,7 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   confirmed set-param messages, only for input-channel PEQ parameters (switch,
   HPF, bands) with values in range. `GET /api/tf5/eq/<usb>` returns the settings and
   curve. One-off read-only probe from a shell:
-  `python -m tf_daemon.tfeditor <console-ip> --channels 1-8 [--watch]`.
+  `python -m tf_daemon.console.editor <console-ip> --channels 1-8 [--watch]`.
 
 Levels are dBFS with AES17 convention: a full-scale sine reads 0 dBFS.
 
@@ -413,13 +413,30 @@ tf_daemon/
   app.py           Flask app factory; the one place modules are built and wired
   config.py        typed, validated, immutable Config (one dataclass per section)
   modules.py       Module protocol: register(app, sock) / start / stop / status
+  hub.py           FrameHub: latest-value broadcast shared by the modules
+  system.py        /config page: config.toml editing, restart, self-update
+  vocal.py         vocal EQ assist: mic-check sessions, Apply to desk / Undo
   audio/           ── the audio analysis module ──
     sources.py     DeviceSource (PortAudio), SynthSource, WavSource
     ringbuffer.py  lock-protected per-channel ring buffers
     engine.py      analysis thread, binary frame encoding, FrameHub
     module.py      HTTP + WebSocket routes for audio
-  dsp/
+  dsp/             ── signal processing, no I/O ──
     spectrum.py    windowed FFT, averaging, peak hold, log display bins
+    ring.py        ring / feedback detection and attribution
+    vocal.py       vocal EQ suggestions from a mic check
+    eq.py          the console EQ's response curve (TF Editor's maths)
+  console/         ── the Yamaha TF5 over the network ──
+    patch.py       which console source each USB capture channel carries
+    rcp.py         TF5Client: names, faders, sends over RCP (TCP 49280)
+    module.py      TF5Module: /api/tf5/* routes, console data for the audio page
+    sim.py         simulated TF5, both protocols (demo mode, tests)
+    editor/        the EQ over the TF Editor protocol (TCP 50368)
+      codec.py     wire format: elements, messages, frames
+      guard.py     what may be sent: read-only unless a person asked for a write
+      dump.py      the console's parameter tree and data image; a channel's EQ
+      client.py    TFEditorClient: session, sync, keepalive, confirmed writes
+      __main__.py  read-only probe CLI
   rf/              ── the RF (tinySA) module ──
     devices.py     TinySADevice (tsapython, USB serial), DemoDevice
     engine.py      connect/disconnect, sweep thread, peak hold, JSON state hub
@@ -432,7 +449,6 @@ tf_daemon/
     engine.py      persisted settings, discovery, receiver set, JSON state hub
     simulator.py   fake QLXD4 TCP servers (demo mode, tests)
     module.py      /qlxd page, HTTP + WebSocket routes
-  hub.py           FrameHub: latest-value broadcast shared by the modules
   static/          index.html + app.js (audio), rf.html + rf.js (RF),
                    qlxd.html + qlxd.js (wireless), style.css
 ```
@@ -455,7 +471,8 @@ Data flow:
 
 Feature areas are **modules** (`tf_daemon/modules.py`). The audio module owns
 its device, threads and routes (`/api/audio/*`, `/ws/audio`); the RF module owns
-the tinySA and `/rf`, `/api/rf/*`, `/ws/rf`. Both are assembled in
+the tinySA and `/rf`, `/api/rf/*`, `/ws/rf`; likewise QLX-D, the TF5 console and
+the vocal assist. All of them are built and wired together in one place,
 `app.build_modules`.
 
 RF data flow: the **sweep thread** calls the tinySA's `scan` (blocking, one

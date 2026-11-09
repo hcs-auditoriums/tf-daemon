@@ -15,6 +15,8 @@ from .audio.engine import AudioEngine
 from .audio.module import AudioModule
 from .audio.sources import DeviceSource, Source, SynthSource, WavSource
 from .config import Config
+from .console.module import TF5Module
+from .console.sim import SimConsole
 from .modules import Module
 from .qlxd.engine import QLXDEngine
 from .qlxd.module import QLXDModule
@@ -22,8 +24,6 @@ from .rf.devices import DemoDevice, RFDevice, TinySADevice
 from .rf.engine import RangeHint, RFEngine, fit_span
 from .rf.module import RFModule
 from .system import register_system
-from .tf5 import TF5Module
-from .tf5sim import SimConsole
 from .vocal import VocalModule
 
 log = logging.getLogger(__name__)

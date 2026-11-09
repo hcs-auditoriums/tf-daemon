@@ -19,10 +19,13 @@ write ad-hoc fakes or plan how to test against real devices; this is the recipe:
 5. For a new feature, add a unit test next to the existing ones, and a check in
    `tests/test_live.py` if it shows up in the running app.
 
-Test doubles live in `tf_daemon/tf5sim.py` (TF5 RCP + TF Editor), `tf_daemon/qlxd/simulator.py`,
+Test doubles live in `tf_daemon/console/sim.py` (TF5 RCP + TF Editor), `tf_daemon/qlxd/simulator.py`,
 the RF demo device in `tf_daemon/rf/devices.py` and the synth source in
 `tf_daemon/audio/sources.py`. Reuse and extend those, don't make new ones. Tests use
 ephemeral ports and `tmp_path`, so they are safe in parallel. Keep it that way.
+The TF Editor protocol tests are in `tests/editor/` (fixtures in its `conftest.py`, shared
+doubles and `assert_read_only` in `tests/editor_fakes.py`). `tests/editor/test_guard.py` pins
+the write path: a change there needs a deliberate review, never a loosened assertion.
 When a test waits on a simulated device, wait for the condition (`wait_until`,
 `wait_settled` in `tests/test_tf5.py`), never a fixed sleep.
 

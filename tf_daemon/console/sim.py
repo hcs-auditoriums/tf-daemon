@@ -1,9 +1,9 @@
 """Simulated TF5 (demo mode, development and tests): both of its network protocols.
 
-    python -m tf_daemon.tf5sim                      # RCP on 49280, TF Editor on 50368
+    python -m tf_daemon.console.sim                 # RCP on 49280, TF Editor on 50368
     python -m tf_daemon --demo                      # the whole app, this console in-process
 
-* SimRCP: the console side of RCP (tf5.py): answers ``prminfo`` / ``get`` with a
+* SimRCP: the console side of RCP (console/rcp.py): answers ``prminfo`` / ``get`` with a
   plausible service's channel list and pushes ``NOTIFY set`` when a fader moves
   "on the desk".
 * FakeEditorConsole: the console side of the TF Editor handshake recorded from TF
@@ -27,9 +27,10 @@ import socket
 import struct
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
-from tf_daemon.tfeditor import (
+from .editor.codec import (
     DESC_MD5,
     DUMP,
     EVENT,
@@ -42,7 +43,6 @@ from tf_daemon.tfeditor import (
     T_U8,
     T_U16,
     T_U32,
-    Dump,
     FrameReader,
     Message,
     element,
@@ -51,6 +51,7 @@ from tf_daemon.tfeditor import (
     message,
     parse_message,
 )
+from .editor.dump import Dump
 
 log = logging.getLogger(__name__)
 
@@ -361,7 +362,7 @@ class FakeEditorConsole:
 
 RCP_PREFIX = {"InCh": "MIXER:Current/InCh/", "St": "MIXER:Current/St/", "Mix": "MIXER:Current/Mix/"}
 # (kind, path, x count, y count, min, max, default, unit, type, scale): the shape of the
-# TF's prminfo list for what tf5.py reads. Like the TF5, no EQ / gain addresses.
+# TF's prminfo list for what console/rcp.py reads. Like the TF5, no EQ / gain addresses.
 RCP_PARAMS = [
     ("InCh", "Label/Name", 40, 1, 0, 64, '"ch"', "", "string", 1),
     ("InCh", "Label/Color", 40, 1, 0, 8, '"Blue"', "", "string", 1),
@@ -424,15 +425,19 @@ class SimRCP:
     """Console side of TCP 49280: ``prminfo`` / ``get`` replies; ``NOTIFY set`` on desk changes.
 
     ``drift_s`` > 0 moves a random fader of the named inputs by a few dB every that
-    many seconds, so open pages visibly follow "the desk".
+    many seconds, so open pages visibly follow "the desk". ``values`` (raw reply
+    tokens by (address, x, y)) and ``prminfo`` (the parameter list's entries)
+    default to the demo console's. ``received`` keeps the latest lines clients sent.
     """
 
-    def __init__(self, values: dict[tuple[str, int, int], str] | None = None, *, host: str = "127.0.0.1",
-                 port: int = 0, drift_s: float = 0.0, seed: int = 1) -> None:
+    def __init__(self, values: dict[tuple[str, int, int], str] | None = None, *, prminfo: list[str] | None = None,
+                 host: str = "127.0.0.1", port: int = 0, drift_s: float = 0.0, seed: int = 1) -> None:
         self.values = demo_rcp_values() if values is None else values
-        self.prminfo = [f'"{RCP_PREFIX[k]}{p}" {xs} {ys if ys > 1 else 0} {lo} {hi} {d} "{u}" {t} any rw {s}'
-                        for k, p, xs, ys, lo, hi, d, u, t, s in RCP_PARAMS]
+        self.prminfo = prminfo if prminfo is not None else [
+            f'"{RCP_PREFIX[k]}{p}" {xs} {ys if ys > 1 else 0} {lo} {hi} {d} "{u}" {t} any rw {s}'
+            for k, p, xs, ys, lo, hi, d, u, t, s in RCP_PARAMS]
         self.requests = 0
+        self.received: deque[str] = deque(maxlen=100_000)
         self._rng = random.Random(seed)
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -471,6 +476,7 @@ class SimRCP:
         if not parts:
             return ""
         self.requests += 1
+        self.received.append(line)
         if parts[0] == "prminfo" and len(parts) == 2 and parts[1].isdigit():
             i = int(parts[1])
             return f"OK prminfo {i} {self.prminfo[i]}" if i < len(self.prminfo) else f"ERROR prminfo {i} UnknownIndex"
@@ -504,14 +510,18 @@ class SimRCP:
             if level > -32768:
                 self.set(addr, x, 0, str(max(-4000, min(1000, level + self._rng.choice([-300, -150, 150, 300])))))
 
-    def close(self) -> None:
-        self._stop.set()
+    def drop_connections(self) -> None:
+        """Close every client connection, as a console reboot or cable pull would."""
         for c in list(self.conns):
             try:
-                c.shutdown(socket.SHUT_RDWR)
+                c.shutdown(socket.SHUT_RDWR)   # close() alone may not send a FIN while _serve is in recv
             except OSError:
                 pass
             c.close()
+
+    def close(self) -> None:
+        self._stop.set()
+        self.drop_connections()
         self.srv.close()
 
 
@@ -550,7 +560,7 @@ class SimConsole:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="python -m tf_daemon.tf5sim",
+    ap = argparse.ArgumentParser(prog="python -m tf_daemon.console.sim",
                                  description="Simulated TF5: point tf5.host (with tf5.eq / eq_write) at it.")
     ap.add_argument("--host", default="127.0.0.1", help="address to listen on (0.0.0.0 for other machines)")
     ap.add_argument("--rcp-port", type=int, default=49280)

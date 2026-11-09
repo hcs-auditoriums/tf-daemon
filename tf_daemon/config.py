@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, ClassVar
 
+from .console.patch import parse_patch_entry
 from .rf.settings import SweepSettings
 
 log = logging.getLogger(__name__)
@@ -302,7 +303,6 @@ class TF5Config(Section):
                 raise ConfigError(f"tf5.{key} must be 1..65535, got {getattr(self, key)}")
         if not 1 <= self.poll_s <= 3600:
             raise ConfigError("tf5.poll_s must be between 1 and 3600")
-        from .tf5 import parse_patch_entry  # local: tf5 imports flask, config shouldn't at import time
         for entry in self.usb_patch:
             if not isinstance(entry, str):
                 raise ConfigError(f"tf5.usb_patch entries must be strings, got {entry!r}")
