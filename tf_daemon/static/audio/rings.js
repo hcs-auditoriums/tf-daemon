@@ -47,43 +47,95 @@ function renderRings() {
     const src = e.sources && e.sources[0] ? ` ← ${e.sources[0].label}` : "";
     alert.textContent = `${SEV[sev].label} ${fmtHz(e.freq)} · ${e.label}${src}` + (live.length > 1 ? ` +${live.length - 1}` : "");
     alert.title = `Show ${e.label}`;
-    alert.onclick = () => { if (e.channel !== state.input) selectInput(e.channel); };
+    alert.onclick = () => {
+      if (e.channel !== state.input) selectInput(e.channel);
+      if (!ringsOpen) setRingsOpen(true);
+    };
   }
 
   const list = $("ring-list");
   list.hidden = !state.showRings || !state.rings.length;
   if (list.hidden) return;
+  const groups = groupRings(state.rings);
   const head = el("div", "rl-head");
+  const toggle = el("button", "rl-toggle", `Rings · ${groups.length}`);
+  toggle.type = "button";
+  toggle.setAttribute("aria-expanded", String(ringsOpen));
+  toggle.title = ringsOpen ? "Hide the list" : "Show the list";
+  toggle.onclick = () => setRingsOpen(!ringsOpen);
   const clear = el("button", "rl-btn", "Clear");
   clear.type = "button";
   clear.title = "Forget past rings (live ones stay)";
   clear.onclick = () => post("/api/audio/rings/clear");
-  head.append(el("span", "", "Rings"), clear);
+  head.append(toggle, clear);
+  list.classList.toggle("collapsed", !ringsOpen);
   const rows = [head];
-  for (const e of state.rings.slice(0, 8)) {
-    const sev = severity(e);
-    const row = el("div", `rl-row${e.active ? " live" : ""}`);
-    const dot = el("span", "rl-dot"); dot.style.background = SEV[sev].color;
-    const main = el("div", "rl-main");
-    const top = el("div", "rl-top");
-    const freq = el("button", "rl-freq", fmtHz(e.freq));
-    freq.type = "button";
-    freq.title = `Show ${e.label}`;
-    freq.onclick = () => { if (e.channel !== state.input) selectInput(e.channel); };
-    top.append(freq, el("span", "rl-sev", SEV[sev].label));
-    if (e.count > 1) top.append(el("span", "rl-count", `×${e.count}`));
-    const sub = el("div", "rl-sub",
-      `${e.label} · GEQ ${fmtBand(e.geq)} · ${e.active ? "now" : ago(e.last_seen)}`);
-    main.append(top, sub);
-    if (e.sources && e.sources.length) main.append(sourcesLine(e));
-    const ign = el("button", "rl-btn", "Ignore");
-    ign.type = "button";
-    ign.title = "Not feedback (a steady tone): stop reporting this frequency";
-    ign.onclick = () => post("/api/audio/rings/ignore", { freq: e.freq });
-    row.append(dot, main, ign);
-    rows.push(row);
-  }
+  if (ringsOpen) for (const g of groups.slice(0, 8)) rows.push(ringRow(g));
   list.replaceChildren(...rows);
+}
+
+// The list folds to its title bar (remembered in this browser); the header alert unfolds it.
+// Folded at first on a phone, where it would cover the plot.
+let ringsOpen = loadInt("tf.ringsOpen", matchMedia("(max-width: 720px)").matches ? 0 : 1) === 1;
+function setRingsOpen(open) {
+  ringsOpen = open;
+  save("tf.ringsOpen", open ? 1 : 0);
+  renderRings();
+}
+
+// One ring heard on several inputs (the mains L and R, the mics feeding them) is one row:
+// events within a quarter tone of each other. Worst first: live, then severity, then latest.
+const SAME_RING = 2 ** (1 / 24);
+const worse = (a, b) => (b.active - a.active) || (SEV[severity(b)].rank - SEV[severity(a)].rank) || (b.last_seen - a.last_seen);
+function groupRings(events) {
+  const groups = [];
+  for (const e of [...events].sort(worse)) {
+    const g = groups.find((g) => Math.max(g.top.freq, e.freq) / Math.min(g.top.freq, e.freq) < SAME_RING);
+    if (g) g.events.push(e); else groups.push({ top: e, events: [e] });
+  }
+  return groups;
+}
+
+function ringRow(g) {
+  const e = g.top, sev = severity(e), active = g.events.some((x) => x.active);
+  const row = el("div", `rl-row${active ? " live" : ""}`);
+  const dot = el("span", "rl-dot"); dot.style.background = SEV[sev].color;
+  const main = el("div", "rl-main");
+  const top = el("div", "rl-top");
+  const freq = el("button", "rl-freq", fmtHz(e.freq));
+  freq.type = "button";
+  freq.title = `Show ${e.label}`;
+  freq.onclick = () => { if (e.channel !== state.input) selectInput(e.channel); };
+  top.append(freq, el("span", "rl-sev", SEV[sev].label));
+  const count = Math.max(...g.events.map((x) => x.count));
+  if (count > 1) top.append(el("span", "rl-count", `×${count}`));
+  // Where it was heard, each a link to that input, then the GEQ band and when.
+  const where = el("div", "rl-sub");
+  const seen = new Set();
+  for (const x of g.events) {
+    if (seen.has(x.channel)) continue;
+    if (seen.size) where.append(", ");
+    seen.add(x.channel);
+    where.append(inputLink(x.label, x.channel, seen.size === 1));
+  }
+  where.append(` · GEQ ${fmtBand(e.geq)} · ${active ? "now" : ago(Math.max(...g.events.map((x) => x.last_seen)))}`);
+  main.append(top, where);
+  const fed = g.events.find((x) => x.sources && x.sources.length);
+  if (fed) main.append(sourcesLine(fed));
+  const ign = el("button", "rl-btn", "Ignore");
+  ign.type = "button";
+  ign.title = "Not feedback (a steady tone): stop reporting this frequency";
+  ign.onclick = () => post("/api/audio/rings/ignore", { freq: e.freq });
+  row.append(dot, main, ign);
+  return row;
+}
+
+function inputLink(label, channel, top) {
+  const b = el("button", top ? "rl-srcname top" : "rl-srcname", label);
+  b.type = "button";
+  b.title = `Show ${label}`;
+  b.onclick = () => selectInput(channel);
+  return b;
 }
 
 // Which inputs feed a ring on the mains, strongest first: "from ROEDER · KAT −5 dB".
@@ -97,11 +149,7 @@ function sourcesLine(e) {
   line.append("from ");
   e.sources.forEach((s, i) => {
     if (i) line.append(" · ");
-    const b = el("button", i ? "rl-srcname" : "rl-srcname top", s.label);
-    b.type = "button";
-    b.title = `Show ${s.label}`;
-    b.onclick = () => selectInput(s.channel);
-    line.append(b);
+    line.append(inputLink(s.label, s.channel, !i));
     if (i) line.append(` ${s.rel_db.toFixed(0)} dB`);
   });
   return line;

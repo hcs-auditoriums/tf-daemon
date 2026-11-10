@@ -10,6 +10,7 @@ from helpers import make_config
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError, load_config
+from tf_daemon.console.module import EQ_LIMITS
 
 
 def test_eq_config(tmp_path):
@@ -84,6 +85,7 @@ def test_eq_route(console):
             "synced": True,
             "writable": False,
             "fader_writable": False,
+            "limits": EQ_LIMITS,  # values pinned in tests/test_eq_edit.py
             "eq": None,
             "freqs": [],
             "curve": [],
@@ -124,9 +126,10 @@ def test_page_has_the_eq_toggle():
     assert re.search(r"const eqHalf = \(\) => \(state\.dbMax - state\.dbMin\) / 2", js)
     assert "eqHalf()" in draw and "eqY" in draw
     assert "eqHandles()" in draw
-    # Handles: bells / shelves at their own gain (what you grab), the HPF and filters on the curve.
+    # Handles: bells / shelves at their own gain (what you grab), the HPF and filters (no gain)
+    # on the 0 dB line, so a sideways drag doesn't move them up and down.
     handles = re.search(r"export function eqHandles\(\) \{(.*?)\n\}\n", js, re.S).group(1)
-    assert "yEq(b.gain)" in handles and "yEq(eqAt(b.freq) ?? 0)" in handles and "yEq(eqAt(eq.hpf.freq) ?? 0)" in handles
+    assert "yEq(b.gain)" in handles and "filter ? eqY(0)" in handles and "y: eqY(0)" in handles
     # The console sidebar has its own EQ graph, redrawn on every pushed change.
     side = re.search(r"function drawPanelEq\(\) \{(.*?)\n\}\n", js, re.S).group(1)
     assert "eqAt(f)" in side and "eqHalf()" in side and "peqRange" not in js  # the spectrum's scale

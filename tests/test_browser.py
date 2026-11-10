@@ -190,6 +190,11 @@ def test_console_strip_fits_a_tablet_and_is_touch_sized(page):
         "e => [...e.children].map(c => c.className.split(' ')[0] + (c.classList.contains('cp-fadersec') ? '-fader' : ''))"
     )
     assert kids[-1] == "cp-head" and kids.index("cp-on") < kids.index("cp-section-fader")  # ON, fader, name at the foot
+    # The fader scale: labels a line apart, none under the cap (it reaches past the track).
+    ys = sorted(b["y"] for b in (t.bounding_box() for t in panel.locator(".cp-scale span:not([hidden])").all()))
+    assert len(ys) >= 4 and all(b - a >= 10 for a, b in zip(ys, ys[1:], strict=False)), ys
+    scale = panel.locator(".cp-scale").bounding_box()
+    assert scale["x"] + scale["width"] <= panel.locator(".cp-cap").bounding_box()["x"]
     for sel in ["button.cp-on", ".cp-cap", ".cp-profmenu > summary"]:
         assert panel.locator(sel).bounding_box()["height"] >= 30, sel
     was = page.is_checked("#show-eq")
@@ -265,8 +270,27 @@ def test_ring_list_opens(page):
     alert = page.locator("#ring-alert")
     alert.wait_for(state="visible", timeout=15000)
     alert.click()
-    page.locator("#ring-list").wait_for(state="visible", timeout=3000)
-    assert "Hz" in page.locator("#ring-list").inner_text()
+    rl = page.locator("#ring-list")
+    rl.wait_for(state="visible", timeout=3000)
+    assert "Hz" in rl.inner_text()
+    # One row per ring however many inputs heard it (the synth's 2.5 kHz is on several).
+    freqs = rl.locator(".rl-freq").all_inner_texts()
+    assert len(freqs) == len(set(freqs)), freqs
+    plot, box = page.locator("#spec-pane").bounding_box(), rl.bounding_box()
+    assert box["y"] >= plot["y"] and box["y"] + box["height"] <= plot["y"] + plot["height"] + 1  # inside the plot
+    rl.locator(".rl-toggle").click()  # folds to its title bar
+    page.wait_for_function("!document.querySelector('#ring-list .rl-row')", timeout=2000)
+    alert.click()  # the alert unfolds it
+    rl.locator(".rl-row").first.wait_for(timeout=2000)
+
+
+def test_top_bar_stays_one_row_on_a_tablet_with_a_ring_alert(page):
+    page.set_viewport_size({"width": 1024, "height": 768})
+    _open(page, "/")
+    alert = page.locator("#ring-alert")
+    alert.wait_for(state="visible", timeout=15000)
+    tabs = page.locator("header .tabs").bounding_box()
+    assert abs(alert.bounding_box()["y"] - tabs["y"]) < tabs["height"]  # beside the tabs, not on a row below
 
 
 def test_live_listening_starts_and_clears(page):
@@ -347,6 +371,11 @@ def test_eq_bands_can_be_dragged_and_typed_on_the_spectrum(page):
     assert page.evaluate("window.tfEqPreviewError()") < 0.05  # this page's maths = the desk's
     before = desk_band("HM")
     try:
+        # The HPF has no gain: its handle sits on the 0 dB line (mid-plot), not on the curve.
+        mid = page.evaluate(
+            "(() => { const c = document.getElementById('spectrum'); return (12 + c.clientHeight - 26) / 2; })()"
+        )
+        assert abs(page.evaluate("window.tfEqHandles().find(h => h.key === 'HPF').y") - mid) < 0.5
         h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
         box = page.locator("#spectrum").bounding_box()
         x, y = box["x"] + h["x"], box["y"] + h["y"]
@@ -436,6 +465,21 @@ def test_eq_bands_can_be_dragged_and_typed_on_the_spectrum(page):
         pop.get_by_label("Lock Frequency").click()  # unlocked again
         assert not pop.get_by_label("Frequency", exact=True).is_disabled()
         page.wait_for_function("!window.tfEqHandles().find(h => h.key === 'HM').locked", timeout=3000)
+
+        # Dragged far past the plot's corner: the handle stays on the plot, the desk within its range.
+        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
+        page.mouse.move(box["x"] + h["x"], box["y"] + h["y"])
+        page.mouse.down()
+        for i in range(1, 6):
+            page.mouse.move(box["x"] + h["x"] + 400 * i, box["y"] + h["y"] - 200 * i)
+        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
+        page.mouse.up()
+        assert 0 <= h["x"] <= box["width"] and 0 <= h["y"] <= box["height"], h
+        for _ in range(50):
+            if desk_band("HM")["gain"] == 18:
+                break
+            page.wait_for_timeout(100)
+        assert desk_band("HM")["gain"] == 18 and desk_band("HM")["freq"] <= 20000
     finally:  # leave the shared demo desk as it was
         band = "PEQ/Bank/Band:1"
         put(

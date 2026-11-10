@@ -103,6 +103,21 @@ function sendRows(p, mixes) {
   return rows;
 }
 
+// A short fader (a tablet) has no room for every label: keep those at least a line apart,
+// the most useful first, and hide the rest (their ticks stay).
+const SCALE_KEEP = ["0", "-inf", "10", "-10", "-20", "-40", "-30", "-60"], SCALE_GAP = 12;
+const scaleFit = new ResizeObserver(([entry]) => {
+  const h = entry.contentRect.height, kept = [];
+  const labels = [...entry.target.parentElement.querySelectorAll(".cp-scale span")];
+  for (const key of SCALE_KEEP) {
+    const t = labels.find((s) => s.dataset.db === key);
+    if (!t) continue;
+    const y = faderPos(key === "-inf" ? null : Number(key)) * h;
+    t.hidden = kept.some((k) => Math.abs(k - y) < SCALE_GAP);
+    if (!t.hidden) kept.push(y);
+  }
+});
+
 // ------------------------------------------------------------------ fader / ON from the page
 
 // Writable when the desk lets faders be written and this input carries an input channel
@@ -358,6 +373,7 @@ export function renderPanel() {
       if (labelled) {
         const t = el("span", d === 0 ? "zero" : "", d === null ? "−∞" : d > 0 ? `+${d}` : String(d));
         t.style.bottom = pos;
+        t.dataset.db = d === null ? "-inf" : d;
         scale.append(t);
       }
       const tick = el("i", d === 0 ? "zero" : labelled ? "" : "minor");
@@ -369,6 +385,8 @@ export function renderPanel() {
     track.append(refs.fill, refs.cap);
     fader.append(scale, track);
     faderSec.append(fader);
+    scaleFit.disconnect();
+    scaleFit.observe(track);
     refs.track = track;
     if (writable) {
       wireFader(ch, track);
