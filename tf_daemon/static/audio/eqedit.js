@@ -377,6 +377,13 @@ function endDrag(e) {
 }
 canvas.addEventListener("pointerup", endDrag);
 canvas.addEventListener("pointercancel", endDrag);
+// On a phone a swipe over the plot scrolls the page (touch-action: pan-y, style.css); a touch
+// that starts on a handle, or a second finger (a pinch), is the EQ's instead.
+canvas.addEventListener("touchstart", (e) => {
+  if (!editable()) return;
+  const r = canvas.getBoundingClientRect(), t = e.changedTouches[0];
+  if (e.touches.length >= 2 || hit(t.clientX - r.left, t.clientY - r.top)) e.preventDefault();
+}, { passive: false });
 
 canvas.addEventListener("wheel", (e) => {
   if (!editable()) return;
@@ -445,6 +452,37 @@ function field(label, value, step, unit, onSet, lock) {
   return row;
 }
 
+// Side-by-side buttons, like the page tabs: one tap, nothing to open. ``options``: [value, text].
+function segRow(label, options, now, pick) {
+  const row = el("div", "eqp-row"), seg = el("div", "eqp-seg");
+  seg.setAttribute("role", "radiogroup");
+  seg.setAttribute("aria-label", label);
+  for (const [value, text] of options) {
+    const opt = el("button", "", text);
+    opt.type = "button";
+    opt.setAttribute("role", "radio");
+    opt.setAttribute("aria-checked", String(value === now));
+    opt.onclick = () => { if (value !== now) pick(value); };   // the settings follow (syncEqPop)
+    seg.append(opt);
+  }
+  row.append(el("span", "", label), seg);
+  return row;
+}
+
+// What the open settings show: rebuilt when it changes, whoever changed it (the toolbar's EQ /
+// HPF, undo, a paste, the desk). Called each frame the plot is drawn; not under a drag, a pinch
+// or a value being typed.
+const popSig = (key) => {
+  const eq = state.eq && state.eq.eq;
+  return JSON.stringify([eq && (key === "HPF" ? eq.hpf : eq.bands.find((x) => x.label === key)), eqLocks(key)]);
+};
+export function syncEqPop() {
+  const typing = pop && document.activeElement?.tagName === "INPUT" && pop.contains(document.activeElement);
+  if (!pop || drag || pinch || typing) return;
+  if (!editable()) closePop();
+  else if (popSig(pop.dataset.key) !== pop.dataset.sig) showPop(pop.dataset.key);
+}
+
 export function showPop(key) {
   const d = state.eq, eq = d && d.eq;
   if (!eq || !editable()) return;
@@ -459,32 +497,19 @@ export function showPop(key) {
   const close = el("button", "eqp-x", "×"); close.type = "button"; close.title = "Close"; close.onclick = closePop;
   head.append(el("strong", "", key === "HPF" ? "High-pass" : `Band ${key}`), close);
   pop.append(head);
+  pop.dataset.sig = popSig(key);
   if (key === "HPF") {
-    const on = el("label", "eqp-row"), cb = el("input");
-    cb.type = "checkbox"; cb.checked = eq.hpf.on; cb.onchange = () => edit("HPF", { on: cb.checked });
-    on.append(cb, el("span", "", "On"));
-    pop.append(on, field("Frequency", eq.hpf.freq, 1, "Hz", (v) => { edit("HPF", { freq: v }); showPop("HPF"); }, ["HPF", "freq"]));
+    // Off / On as the toolbar's HPF button (both follow the EQ: syncEqPop).
+    pop.append(segRow("Filter", [[false, "Off"], [true, "On"]], !!eq.hpf.on, (on) => edit("HPF", { on })),
+               field("Frequency", eq.hpf.freq, 1, "Hz", (v) => { edit("HPF", { freq: v }); showPop("HPF"); }, ["HPF", "freq"]));
   } else {
     const b = eq.bands.find((x) => x.label === key);
     if (BAND_TYPES[key]) {
       // Bell / shelf (and LPF on the high band); a low band set to HPF on the desk can be
       // turned back into a bell or shelf here.
       const names = { bell: "Bell", shelf: "Shelf", lpf: "LPF", hpf: "HPF" };
-      // Side-by-side buttons, like the page tabs: one tap, nothing to open.
-      const row = el("div", "eqp-row"), seg = el("div", "eqp-seg");
-      seg.setAttribute("role", "radiogroup");
-      seg.setAttribute("aria-label", "Type");
       const now = typeOf(b), kinds = BAND_TYPES[key].includes(now) ? BAND_TYPES[key] : [...BAND_TYPES[key], now];
-      for (const k of kinds) {
-        const opt = el("button", "", names[k]);
-        opt.type = "button";
-        opt.setAttribute("role", "radio");
-        opt.setAttribute("aria-checked", String(k === now));
-        opt.onclick = () => { if (k !== now) { edit(key, { type: k }); showPop(key); } };
-        seg.append(opt);
-      }
-      row.append(el("span", "", "Type"), seg);
-      pop.append(row);
+      pop.append(segRow("Type", kinds.map((k) => [k, names[k]]), now, (type) => edit(key, { type })));
     }
     pop.append(field("Frequency", b.freq, 1, "Hz", (v) => { edit(key, { freq: v }); showPop(key); }, [key, "freq"]));
     if (b.type !== "hpf" && b.type !== "lpf") {
@@ -492,7 +517,7 @@ export function showPop(key) {
       if (b.type === "bell") pop.append(field("Q", b.q, 0.01, "", (v) => { edit(key, { q: v }); showPop(key); }, [key, "q"]));
     }
   }
-  $("spec-pane").append(pop);
+  $("spec-pane").parentElement.append(pop);   // the plot's box: on a phone a section under it (style.css)
   const pane = $("spec-pane").getBoundingClientRect();
   // Beside the handle, never over it (it's clicked again to close this): right, else left.
   const right = h.x + 14, left = h.x - 14 - pop.offsetWidth;

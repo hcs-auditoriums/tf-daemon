@@ -103,42 +103,59 @@ def test_phone_top_bar_hides_the_menus_behind_one_button(page):
     page.locator("#view-menu").wait_for(state="hidden", timeout=2000)
 
 
-BOX = "e => { const r = e.getBoundingClientRect(); return {x: r.left, y: r.top, w: r.width, h: r.height}; }"
+# In page coordinates: the phone page scrolls.
+PAGE_BOX = """e => { const r = e.getBoundingClientRect();
+    return {x: r.left, y: r.top + scrollY, w: r.width, h: r.height, b: r.bottom + scrollY}; }"""
 
 
-def test_phone_page_scrolls_with_the_strip_under_the_plot_and_sheets_for_settings(page):
-    """A phone (style.css, PHONE in audio/shared.js): the page scrolls instead of squeezing the
-    plot; the strip follows it at full width, no EQ thumbnail, its fader across; the strip's
-    settings open as a sheet at the foot of the screen (upright) or its right side (on its side)."""
+def test_phone_page_scrolls_with_nothing_over_the_plot(page):
+    """A phone (style.css): the page scrolls instead of squeezing the plot, and nothing floats
+    over it. Under the plot, in order: the EQ toolbar, a band's settings, the strip (its fader
+    across, no EQ thumbnail, its tool row last), that row's settings, the rings. On its side: one
+    top-bar row and the plot the height of the screen."""
     page.set_viewport_size({"width": 390, "height": 844})
     open_page(page, "/")
-    page.wait_for_function(TILES, timeout=8000)
-    track = page.locator("#console-panel .cp-track")
-    track.wait_for(timeout=10000)
+    page.wait_for_function("document.querySelectorAll('#channels button').length >= 4", timeout=8000)
+    page.locator("#channels button", has_text="Lead Vox").click()
+    page.wait_for_function("!document.getElementById('eq-toggle').hidden", timeout=8000)
+    page.evaluate(
+        "() => { const cb = document.getElementById('show-eq'); cb.checked = true; cb.dispatchEvent(new Event('change')); }"
+    )
+    page.wait_for_function("window.tfEqHandles && window.tfEqHandles().some(h => h.key === 'HM')", timeout=8000)
+    h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
+    plot = page.locator("#spectrum").evaluate(PAGE_BOX)
+    page.mouse.click(plot["x"] + h["x"], plot["y"] - page.evaluate("scrollY") + h["y"])  # its settings
+    page.locator(".eq-pop").wait_for(timeout=3000)
+    page.locator(".cp-tool", has_text="GATE").click()
+    page.locator("#strip-panel").wait_for(timeout=3000)
+    page.locator("#ring-list").wait_for(timeout=10000)  # the demo stage rings within seconds
+
     sizes = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.scrollHeight, innerHeight]")
     assert sizes[0] <= 390 and sizes[1] > sizes[2]  # scrolls down, never sideways
-    plot, panel = page.locator("#spectrum").evaluate(BOX), page.locator("#console-panel").evaluate(BOX)
-    assert plot["h"] >= 380 and panel["y"] >= plot["y"] + plot["h"] - 1 and panel["w"] == 390
+    assert plot["h"] >= 380
+    order = ["#spectrum", "#eq-bar", ".eq-pop", "#console-panel", "#strip-panel", "#ring-list"]
+    boxes = [page.locator(sel).evaluate(PAGE_BOX) for sel in order]
+    for sel, box, prev in zip(order[1:], boxes[1:], boxes[:-1], strict=True):
+        assert box["y"] >= prev["b"] - 1, f"{sel} overlaps what is above it"
+        assert box["w"] >= 360, sel
+    tools, fader = page.locator(".cp-tools").evaluate(PAGE_BOX), page.locator(".cp-fadersec").evaluate(PAGE_BOX)
+    assert tools["y"] >= fader["b"] - 1  # the tool row last, over its settings
+    assert not page.locator("#strip-panel .sp-tabs").is_visible()  # the tool row is its tabs
     assert not page.locator("#console-panel .cp-eq").is_visible()
-    t, cap = track.evaluate(BOX), page.locator(".cp-cap").evaluate(BOX)
-    assert t["w"] > 250 and t["h"] < 20 and cap["h"] >= 44  # across, a thumb-sized cap
+    track = page.locator("#console-panel .cp-track")
+    t, cap = track.evaluate(PAGE_BOX), page.locator(".cp-cap").evaluate(PAGE_BOX)
+    assert t["w"] > 300 and 30 <= t["h"] <= 44 and cap["h"] >= 44  # across, thumb-sized
     assert t["x"] <= cap["x"] + cap["w"] / 2 <= t["x"] + t["w"]
     assert track.evaluate("e => getComputedStyle(e).touchAction") in ("pan-y", "manipulation")  # the page still scrolls
-    page.locator(".cp-tool", has_text="IN").click()
-    sheet = page.locator("#strip-panel")
-    sheet.wait_for(timeout=3000)
-    s = sheet.evaluate(BOX)
-    assert s["x"] == 0 and s["w"] == 390 and abs(s["y"] + s["h"] - 844) <= 1
-    page.keyboard.press("Escape")
+    assert (
+        page.locator("#spectrum").evaluate("e => getComputedStyle(e).touchAction") == "pan-y"
+    )  # a swipe on the plot too
 
     page.set_viewport_size({"width": 844, "height": 390})  # on its side
-    tabs, btn = page.locator("header .tabs").evaluate(BOX), page.locator("#menus-btn").evaluate(BOX)
-    assert abs(btn["y"] - tabs["y"]) < tabs["h"] and page.locator("header").evaluate(BOX)["h"] < 70  # one row
-    assert page.locator("#spectrum").evaluate(BOX)["h"] >= 300
-    page.locator(".cp-tool", has_text="GATE").click()
-    sheet.wait_for(timeout=3000)
-    s = sheet.evaluate(BOX)
-    assert abs(s["x"] + s["w"] - 844) <= 1 and s["y"] == 0 and s["h"] == 390 and s["w"] <= 844 * 0.52 + 1
+    tabs, btn = page.locator("header .tabs").evaluate(PAGE_BOX), page.locator("#menus-btn").evaluate(PAGE_BOX)
+    assert abs(btn["y"] - tabs["y"]) < tabs["h"] and page.locator("header").evaluate(PAGE_BOX)["h"] < 70  # one row
+    assert page.locator("#spectrum").evaluate(PAGE_BOX)["h"] >= 300
+    assert page.locator("#eq-bar").evaluate(PAGE_BOX)["y"] >= page.locator("#spectrum").evaluate(PAGE_BOX)["b"] - 1
 
 
 def test_keyboard_shortcuts_and_command_palette(page):

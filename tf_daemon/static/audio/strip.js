@@ -181,6 +181,7 @@ export function openStrip(which) {
   built = null;
   render();
   load();
+  if (getComputedStyle(panel).position === "static") panel.scrollIntoView({ block: "nearest" });   // a phone
 }
 function close() { panel.hidden = true; paintTools(); }
 
