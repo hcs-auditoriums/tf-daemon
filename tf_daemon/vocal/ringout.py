@@ -69,6 +69,7 @@ from typing import Any
 
 import numpy as np
 
+from ..dsp.db import power_db
 from . import bands
 from .auto import PATHS, AutoEQ
 from .plan import eq_plan
@@ -151,9 +152,9 @@ class _Watch:
         x = np.asarray(x[-self.N :], dtype=np.float64)
         if len(x) < self.N:
             return
-        db = 10 * np.log10(np.abs(np.fft.rfft(x * self.window)) ** 2 * self._scale + 1e-20)
+        db = power_db(np.abs(np.fft.rfft(x * self.window)) ** 2 * self._scale, 1e-20)
         peak = float(np.max(np.abs(x)))
-        rms_db = 10 * math.log10(float(np.mean(x**2)) + 1e-20) + 3.0  # sine-peak full scale, like the rest
+        rms_db = power_db(float(np.mean(x**2)), 1e-20) + 3.0  # sine-peak full scale, like the rest
         with self._lock:
             self.levels.append(rms_db)
             self.t = t

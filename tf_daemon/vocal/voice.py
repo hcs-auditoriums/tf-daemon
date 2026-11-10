@@ -22,6 +22,8 @@ from typing import Any
 
 import numpy as np
 
+from ..dsp.db import power_db
+
 
 class VoiceCollector:
     """Accumulates a voice: speech activity, pitch, long-term spectrum."""
@@ -53,7 +55,7 @@ class VoiceCollector:
         self.speech_s = 0.0
 
     def _db(self, p: float) -> float:
-        return 10 * math.log10(p * (2 / self._wsum) ** 2 + 1e-30)
+        return power_db(p * (2 / self._wsum) ** 2)
 
     def process(self, frame: np.ndarray, now: float) -> bool:
         """Analyze the newest N samples at stream time ``now`` (s). True if speech."""

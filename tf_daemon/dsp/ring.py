@@ -67,6 +67,7 @@ from typing import Any
 import numpy as np
 
 from ..config import RingConfig
+from .db import amp_db, power_db
 from .spectrum import blackman_harris
 
 # ISO 1/3-octave centres (the TF's GEQ bands).
@@ -116,7 +117,7 @@ def narrowband_levels(frames: np.ndarray, freqs: list[float], samplerate: int, w
     t = np.arange(n) / samplerate
     basis = window[None, :] * np.exp(-2j * np.pi * np.asarray(freqs, dtype=np.float64)[:, None] * t[None, :])
     amp = 2.0 * np.abs(frames.astype(np.float64) @ basis.T) / float(np.sum(window))
-    return 20.0 * np.log10(amp + 1e-12)
+    return amp_db(amp)
 
 
 def geq_band(freq: float) -> float:
@@ -255,7 +256,7 @@ class RingDetector:
         return self._classify(now)
 
     def _db(self, p: np.ndarray) -> np.ndarray:
-        return 10.0 * np.log10(p + 1e-30) + self._db_offset
+        return power_db(p) + self._db_offset
 
     def _background(self, p: np.ndarray) -> np.ndarray:
         seg = p[self.k0 : self.k1 + 1]

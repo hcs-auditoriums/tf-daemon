@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 
 from ..config import REQUIRED_SAMPLERATE
+from ..dsp.db import db_to_amp
 
 log = logging.getLogger(__name__)
 
@@ -292,8 +293,13 @@ class _PacedSource(Source):
         return {"resyncs": self._late}
 
 
-def _db_to_amp(db: float) -> float:
-    return float(10.0 ** (db / 20.0))
+def sim_levels(speech_db: float, noise_db: float, tone_db: float) -> tuple[float, float, float]:
+    """(speech RMS, noise RMS, tone peak) amplitudes for the simulated sources.
+
+    Levels are AES17 dBFS: a full-scale sine is 0 dBFS, so RMS = 10^(dB/20) / sqrt(2).
+    This matches the analyzer, where a sine at X dBFS reads X on its peak bin. Voice
+    and the noise loop are unit RMS."""
+    return db_to_amp(speech_db) / np.sqrt(2.0), db_to_amp(noise_db) / np.sqrt(2.0), db_to_amp(speech_db + tone_db)
 
 
 def make_pink_noise(n: int, rng: np.random.Generator) -> np.ndarray:
@@ -399,11 +405,7 @@ class SynthSource(_PacedSource):
         self._rng = np.random.default_rng(seed)
         fs = samplerate
 
-        # Levels are AES17 dBFS: a full-scale sine is 0 dBFS, so RMS = 10^(dB/20) / sqrt(2).
-        # This matches the analyzer, where a sine at X dBFS reads X on its peak bin.
-        self._speech_amp = _db_to_amp(speech_db) / np.sqrt(2.0)  # RMS while voiced (voice is unit RMS)
-        self._noise_amp = _db_to_amp(noise_db) / np.sqrt(2.0)  # noise loop is unit RMS
-        self._tone_peak = _db_to_amp(speech_db + tone_db)  # sine amplitude
+        self._speech_amp, self._noise_amp, self._tone_peak = sim_levels(speech_db, noise_db, tone_db)
         self._tone_w = 2 * np.pi * tone_hz / fs
         self._tone_phase = 0.0
 

@@ -48,6 +48,7 @@ from typing import Any
 
 import numpy as np
 
+from ..dsp.db import power_db
 from ..dsp.eq import BUTTERWORTH_Q, FS, section_db
 from . import bands
 from .voice import VoiceCollector
@@ -149,7 +150,7 @@ def _band_levels(collector: VoiceCollector, centres: np.ndarray, width_oct: floa
         sel = (f >= lo) & (f < hi)
         if not sel.any():
             sel = np.argmin(np.abs(f - fc)) == np.arange(len(f))
-        out[i] = 10 * np.log10(float(np.mean(p[sel])) + 1e-30)
+        out[i] = power_db(float(np.mean(p[sel])))
     return out
 
 
@@ -253,7 +254,7 @@ def _resonances(collector: VoiceCollector, f0: float | None, limit: int = 2) -> 
     them, at most 1/8 octave wide at half power, 500 Hz-8 kHz (lower down the
     voice's first harmonics stay peaky), and not a harmonic of the voice."""
     p = collector.mean_ltas
-    db = 10 * np.log10(p + 1e-30)
+    db = power_db(p)
     f = collector.freqs
     df = f[1]
     out = []

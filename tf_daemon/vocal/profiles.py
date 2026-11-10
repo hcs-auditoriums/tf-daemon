@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
+from ..files import write_atomic
 from .auto import PATHS
 
 log = logging.getLogger(__name__)
@@ -50,11 +50,7 @@ class ProfileStore:
         return out
 
     def _save(self) -> None:
-        if self.path.parent != Path("."):
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({"profiles": self._profiles}, indent=1))
-        os.replace(tmp, self.path)
+        write_atomic(self.path, json.dumps({"profiles": self._profiles}, indent=1), parents=True)
 
     def list(self) -> list[dict[str, Any]]:
         with self._lock:

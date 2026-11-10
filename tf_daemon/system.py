@@ -34,6 +34,7 @@ from flask import Blueprint, Flask, jsonify, request
 
 from . import __version__
 from .config import UpdateConfig, load_config
+from .files import write_atomic
 
 log = logging.getLogger(__name__)
 
@@ -90,9 +91,7 @@ def _read_state() -> dict[str, Any] | None:
 
 def _write_state(**fields: Any) -> None:
     fields.setdefault("time", int(time.time()))
-    tmp = UPDATE_STATE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(fields))
-    os.replace(tmp, UPDATE_STATE)
+    write_atomic(UPDATE_STATE, json.dumps(fields))
 
 
 def _start_update_unit() -> bool:
@@ -189,19 +188,6 @@ def _validate_toml(text: str) -> None:
         os.unlink(tmp)
 
 
-def _write_atomic(path: Path, text: str) -> None:
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".config-", suffix=".toml")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(text)
-        if path.exists():
-            os.chmod(tmp, path.stat().st_mode & 0o777)
-        os.replace(tmp, path)
-    except BaseException:
-        os.unlink(tmp)
-        raise
-
-
 def _restart_now() -> None:
     log.info("Restarting tf-daemon (requested from /config)")
     try:
@@ -275,7 +261,7 @@ def register_system(app: Flask, cfg: UpdateConfig, config_path: str | Path | Non
             _validate_toml(text)
         except ValueError as e:
             return jsonify({"ok": False, "error": str(e)}), 400
-        _write_atomic(cfg_file, text)
+        write_atomic(cfg_file, text, keep_mode=True)
         log.info("Config written to %s", cfg_file)
         return jsonify({"ok": True})
 

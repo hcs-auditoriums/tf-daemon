@@ -36,7 +36,7 @@ import numpy as np
 
 from ..config import REQUIRED_SAMPLERATE
 from ..dsp.eq import eq_curve, section_db
-from .sources import VoiceGen, _db_to_amp, _PacedSource, make_pink_noise
+from .sources import VoiceGen, _PacedSource, make_pink_noise, sim_levels
 
 SPEED_OF_SOUND = 343.0
 STEP = 240  # samples per loop step (5 ms): the leak delay must be at least this
@@ -185,9 +185,7 @@ class StageSource(_PacedSource):
             if not 0 <= i < channels:
                 raise ValueError(f"stage input {i} is outside the {channels} capture channels")
         self._rng = np.random.default_rng(s.seed)
-        self._speech_amp = _db_to_amp(s.speech_db) / np.sqrt(2.0)
-        self._noise_amp = _db_to_amp(s.noise_db) / np.sqrt(2.0)
-        self._tone_peak = _db_to_amp(s.speech_db + s.tone_db)
+        self._speech_amp, self._noise_amp, self._tone_peak = sim_levels(s.speech_db, s.noise_db, s.tone_db)
         self._tone_w = 2 * np.pi * s.tone_hz / fs
         self._tone_phase = 0.0
         self._t = np.arange(1, blocksize + 1, dtype=np.float64)

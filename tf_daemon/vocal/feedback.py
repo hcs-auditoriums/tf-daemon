@@ -35,6 +35,7 @@ from typing import Any
 
 import numpy as np
 
+from ..dsp.db import power_db
 from .transfer import Transfer
 
 # 150 Hz .. 5 kHz, 1/24-octave steps: where speech (and most programme) excites the loop. Above,
@@ -56,7 +57,7 @@ class Feedback:
 
     def process_idle(self, mains: np.ndarray, mic: np.ndarray) -> None:
         """One hop while this mic's talker is quiet: learn the PA -> mic leak."""
-        level = lambda x: 10 * np.log10(float(np.mean(np.asarray(x[-self.leak.N :], dtype=np.float64) ** 2)) + 1e-30)  # noqa: E731
+        level = lambda x: power_db(float(np.mean(np.asarray(x[-self.leak.N :], dtype=np.float64) ** 2)))  # noqa: E731
         m = level(mains)
         if m < IDLE_MAINS_DB or m - level(mic) < MAINS_OVER_MIC_DB:
             return

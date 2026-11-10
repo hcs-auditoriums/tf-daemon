@@ -18,7 +18,7 @@ from .audio.sources import DeviceSource, Source, SourceError, SynthSource, WavSo
 from .audio.stage import DeskMix, StageSettings, StageSource
 from .config import Config
 from .console.module import TF5Module
-from .console.patch import patch_from
+from .console.patch import patch_from, stereo_inputs
 from .console.sim import SimConsole
 from .modules import Module
 from .qlxd.engine import QLXDEngine
@@ -63,7 +63,7 @@ def stage_settings(cfg: Config) -> StageSettings:
     """The simulated stage for this config: talkers on the named inputs, the mains on the
     stereo-bus USB channels, the house mic on ``synth.house_mic``."""
     patch = patch_from(cfg.tf5.usb_patch)
-    st = {src[1]: i for i, src in enumerate(patch) if src is not None and src[0] == "St"}
+    st = {side: i for i, side in stereo_inputs(patch).items()}
     if 0 not in st or 1 not in st:
         raise SourceError("the stage needs St L and St R on the USB patch (tf5.usb_patch)")
     house = cfg.synth.house_mic if cfg.synth.house_mic >= 0 else None
@@ -136,7 +136,7 @@ def _tf5_module(
 
 def _mains(cfg: Config) -> tuple[int, ...]:
     """The inputs carrying the stereo bus (St L / R on the USB patch)."""
-    return tuple(i for i, src in enumerate(patch_from(cfg.tf5.usb_patch)) if src is not None and src[0] == "St")
+    return tuple(stereo_inputs(patch_from(cfg.tf5.usb_patch)))
 
 
 def receiver_range(qlxd: QLXDEngine | None) -> RangeHint | None:
