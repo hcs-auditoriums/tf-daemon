@@ -2,9 +2,11 @@
 # Pull the latest code from GitHub, reinstall the package and restart the service,
 # rolling back to the previous revision if any step fails.
 # Runs ON THE SERVER as the service user:
-#   bash deploy/update.sh [remote-url] [branch]
+#   bash deploy/update.sh [remote-url] [branch] [ref]
 # Remote and branch default to $UPDATE_REMOTE / $UPDATE_BRANCH (the /config page
-# writes them to .update.env), then to this repo's main.
+# writes them to .update.env), then to this repo's main. ref ($UPDATE_REF) is what to
+# run: the branch by default, or another branch or a commit id (full or short) to try
+# something out; the next update without one goes back to the branch.
 #
 # The /config page's Update button starts this through the tf-daemon-update
 # unit (TF_UPDATE_DETACHED=1), so it survives restarting tf-daemon and can check
@@ -24,14 +26,15 @@ set -Eeuo pipefail
 main() {
   local remote=${1:-${UPDATE_REMOTE:-https://github.com/hcs-auditoriums/tf-daemon.git}}
   local branch=${2:-${UPDATE_BRANCH:-main}}
+  REF=${3:-${UPDATE_REF:-$branch}}
   HEALTH_URL=${UPDATE_HEALTH_URL:-http://127.0.0.1:8080/api/system/info}
   cd "$(dirname "$0")/.."
   APP_DIR=$PWD
   OLD=none NEW=none
   trap 'state failed "update script stopped unexpectedly at line $LINENO"' ERR
 
-  state running "fetching $branch"
-  echo "==> fetching $branch from $remote"
+  state running "fetching $REF"
+  echo "==> fetching $REF from $remote"
   if [ ! -d .git ]; then
     git init -q
     git symbolic-ref HEAD "refs/heads/$branch"
@@ -41,12 +44,8 @@ main() {
   else
     git remote add origin "$remote"
   fi
-  if ! git fetch -q origin "$branch"; then
-    fail failed "could not fetch $branch from $remote"
-  fi
-
   OLD=$(cat REVISION 2>/dev/null || git rev-parse -q --verify HEAD || echo none)
-  NEW=$(git rev-parse FETCH_HEAD)
+  NEW=$(resolve "$REF") || fail failed "could not fetch $REF from $remote"
   if [ "$OLD" = "$NEW" ] && git rev-parse -q --verify HEAD >/dev/null; then
     echo "==> already up to date (${NEW:0:7})"
     state up_to_date "already at ${NEW:0:7}"
@@ -80,10 +79,23 @@ main() {
   state done "updated to ${NEW:0:7}"
 }
 
+# resolve REF: fetch it and print its commit. A branch is fetched by name; a commit id
+# (7-40 hex digits) is looked up among every branch's commits, else fetched by id.
+resolve() {
+  if [[ $1 =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+    git fetch -q origin '+refs/heads/*:refs/remotes/origin/*' || return 1
+    if git rev-parse -q --verify "$1^{commit}"; then return 0; fi
+    git fetch -q origin "$1" 2>/dev/null || return 1
+  else
+    git fetch -q origin "$1" || return 1
+  fi
+  git rev-parse FETCH_HEAD
+}
+
 # state STATE MESSAGE: record progress for the /config page (atomically).
 state() {
-  printf '{"state": "%s", "from": "%s", "to": "%s", "message": "%s", "pid": %d, "time": %d}\n' \
-    "$1" "$OLD" "$NEW" "${2//\"/\'}" "$$" "$(date +%s)" > .update.json.tmp
+  printf '{"state": "%s", "from": "%s", "to": "%s", "ref": "%s", "message": "%s", "pid": %d, "time": %d}\n' \
+    "$1" "$OLD" "$NEW" "$REF" "${2//\"/\'}" "$$" "$(date +%s)" > .update.json.tmp
   mv .update.json.tmp .update.json
 }
 

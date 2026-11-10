@@ -168,7 +168,34 @@ def test_rf_waterfall_is_full_when_the_page_opens(page):
     )
 
 
-def test_config_page_offers_the_switches(page):
+def test_config_page_edits_settings_one_at_a_time(page):
     open_page(page, "/config")
-    page.locator("#switches input[type=checkbox]").first.wait_for(timeout=8000)
-    assert "tf5.eq_write" in page.locator("#switches").inner_text()
+    page.locator("#settings .set-row").first.wait_for(timeout=8000)
+    common = page.locator("details[data-group=common] .set-name").all_inner_texts()
+    assert "tf5.eq_write" in common  # "Most used", named with their tables
+    # Find a setting, change it (saved to the file at once), put it back to its default.
+    page.fill("#find", "sensitivity")
+    row = page.locator("details[data-group=ring] .set-row[data-key='ring.sensitivity']")
+    row.wait_for(state="visible", timeout=2000)
+    assert page.locator("details[data-group=tf5]").is_hidden()  # nothing there matches
+    try:
+        row.get_by_role("radio", name="high").click()
+        row.locator(".set-status", has_text="saved").wait_for(timeout=4000)
+        assert 'sensitivity = "high"' in page.locator("#config").input_value()  # the text follows
+        assert "changed" in (row.get_attribute("class") or "")
+        page.locator("#restart-bar").wait_for(state="visible", timeout=2000)
+    finally:
+        row.get_by_role("button", name="Reset").click()
+        row.locator(".set-status", has_text="back to the default").wait_for(timeout=4000)
+    assert "sensitivity" not in page.locator("#config").input_value()
+    # A value the config can't take is refused and the box shows the file's value again.
+    page.fill("#find", "server port")
+    port = page.locator(".set-row[data-key='server.port'] input")
+    port.fill("99999")
+    port.press("Enter")
+    page.locator(".set-row[data-key='server.port'] .set-status.error").wait_for(timeout=4000)
+    assert port.input_value() == "8080"
+    page.errors.clear()  # the browser logs the refusal (400) as a console error: expected here
+    # Another branch or commit to run: the field and its button are there (not pressed here).
+    page.locator("#try-ref > summary").click()
+    page.locator("#ref").wait_for(state="visible", timeout=2000)
