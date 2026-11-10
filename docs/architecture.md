@@ -10,7 +10,8 @@ tf_daemon/
                    EngineModule, the base of the RF and QLX-D modules
   files.py         write_atomic: state and config files are replaced, never half-written
   hub.py           FrameHub: latest-value broadcast shared by the modules
-  system.py        /config page: config.toml editing, restart, self-update
+  system.py        /config page: config.toml editing, restart, self-update (a branch or commit)
+  config_edit.py   one setting at a time in config.toml (the /config page's settings form)
   vocal/           ── vocal EQ assist (everything it does lives here) ──
     voice.py       the voice on a mic: speech activity, pitch, long-term spectrum
     tone.py        EQ suggestions from that spectrum, against reference speech
@@ -69,7 +70,7 @@ tf_daemon/
     sim.py         simulated QLXD4 receivers (demo mode, tests)
     module.py      /qlxd page, HTTP + WebSocket routes
   static/          rf.html + rf.js (RF), qlxd.html + qlxd.js (wireless),
-                   config.html + config.js, keys.js (all pages: shortcuts, the / command palette), style.css;
+                   config.html + config.js + settings.js (its settings form), keys.js (all pages: shortcuts, the / command palette), style.css;
                    the page scripts are ES modules (no build step) sharing
                    common.js ($, storage, JSON POST, reconnecting websocket,
                    canvas sizing)

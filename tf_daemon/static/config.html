@@ -19,7 +19,7 @@
       <h2>Software</h2>
       <dl class="facts">
         <dt>Version</dt><dd id="version">–</dd>
-        <dt>Revision</dt><dd id="revision">–</dd>
+        <dt>Running</dt><dd id="revision">–</dd>
         <dt>Source</dt><dd id="source">–</dd>
         <dt>Latest</dt><dd id="latest">not checked</dd>
       </dl>
@@ -28,29 +28,47 @@
         <button id="update" type="button" class="primary">Update now</button>
         <span id="update-msg" class="muted"></span>
       </div>
+      <details class="cfg-more" id="try-ref">
+        <summary>Run another branch or commit</summary>
+        <p class="muted">To try something out without merging it. <b>Update now</b> goes back to
+          <span id="main-branch">main</span>.</p>
+        <div class="controls">
+          <input id="ref" list="refs" type="text" spellcheck="false" autocomplete="off"
+                 placeholder="branch name or commit id" aria-label="Branch or commit">
+          <datalist id="refs"></datalist>
+          <button id="switch-ref" type="button">Switch…</button>
+        </div>
+      </details>
       <pre id="update-log" class="log" hidden></pre>
     </section>
 
-    <section class="cfg-card" id="switches-card" hidden>
-      <h2>Switches</h2>
-      <p class="muted">Written to config.toml straight away; they apply after a restart.</p>
-      <div id="switches" class="switches"></div>
-      <div class="controls">
-        <button id="restart" type="button">Restart now</button>
-        <span id="switch-msg" class="muted"></span>
+    <section class="cfg-card">
+      <div class="cfg-head">
+        <h2>Settings</h2>
+        <input id="find" type="search" placeholder="Find a setting…" aria-label="Find a setting">
       </div>
+      <p class="muted">Each change is saved to <span id="config-path">config.toml</span> at once (its
+        comments kept) and applies after a restart.</p>
+      <div id="restart-bar" class="restart-bar" hidden>
+        <span>Saved. Restart for the changes to apply.</span>
+        <button id="restart" type="button" class="primary">Restart now</button>
+      </div>
+      <div id="settings" class="settings"></div>
+      <p id="settings-msg" class="muted"></p>
     </section>
 
-    <section class="cfg-card grow">
-      <h2>config.toml</h2>
-      <p class="muted" id="config-path"></p>
-      <textarea id="config" spellcheck="false" aria-label="config.toml"></textarea>
-      <div class="controls">
-        <button id="save" type="button" class="primary">Save</button>
-        <button id="save-restart" type="button">Save &amp; restart</button>
-        <button id="reload" type="button">Discard changes</button>
-        <span id="config-msg" class="muted"></span>
-      </div>
+    <section class="cfg-card">
+      <details class="cfg-more" id="raw">
+        <summary>Edit config.toml as text</summary>
+        <p class="muted">Everything, including the <code>[[channels]]</code> list. It is checked before it is saved.</p>
+        <textarea id="config" spellcheck="false" aria-label="config.toml"></textarea>
+        <div class="controls">
+          <button id="save" type="button" class="primary">Save</button>
+          <button id="save-restart" type="button">Save &amp; restart</button>
+          <button id="reload" type="button">Discard changes</button>
+          <span id="config-msg" class="muted"></span>
+        </div>
+      </details>
     </section>
   </main>
   <script type="module" src="/static/keys.js"></script>

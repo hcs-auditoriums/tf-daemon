@@ -4,11 +4,16 @@ Routes:
   GET  /config                  config / update page
   GET  /api/system/info         version, running revision, update source
   POST /api/system/check        compare the running revision with the remote branch
-  POST /api/system/update       start deploy/update.sh (pull, reinstall, restart, roll back on failure)
+  POST /api/system/update       start deploy/update.sh (pull, reinstall, restart, roll back on failure);
+                                body (optional): {ref}: a branch or commit id to run instead of
+                                update.branch, to try something out (the next plain update goes back)
+  GET  /api/system/refs         the remote's branches, for picking one
   GET  /api/system/update       update progress: {state, message, from, to, running, log}
-  GET  /api/system/config       config.toml text, and the SWITCHES as the file sets them
+  GET  /api/system/config       config.toml text, and every setting as the file sets it
+                                (config_edit.settings: type, value, default, help, choices)
   PUT  /api/system/config       body: {text}; validated before it is written
-  PUT  /api/system/switch       body: {key, on}: one of the SWITCHES set in the file (comments kept)
+  PUT  /api/system/setting      body: {key, value}: one setting changed in the file (comments kept);
+                                value null takes it out (back to its default). Validated first.
   POST /api/system/restart      restart the systemd service
 
 The update runs as the service user, preferably in its own systemd unit
@@ -34,7 +39,7 @@ from typing import Any
 
 from flask import Blueprint, Flask, jsonify, request
 
-from . import __version__
+from . import __version__, config_edit
 from .config import Config, UpdateConfig, load_config
 from .files import write_atomic
 
@@ -103,6 +108,11 @@ def _start_update_unit() -> bool:
         return False
 
 
+# A branch name or a commit id: what git accepts, and nothing that could become an option or
+# break the env file it is written to (no "-" first, no "..", no whitespace).
+REF_RE = re.compile(r"^(?!-)(?!.*\.\.)(?!.*/$)(?!.*\.lock$)[A-Za-z0-9._/-]{1,100}$")
+
+
 class Updater:
     """Starts deploy/update.sh and reports on it from the state file it writes.
 
@@ -116,18 +126,22 @@ class Updater:
         self._lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
 
-    def start(self) -> bool:
+    def start(self, ref: str | None = None) -> bool:
+        """Update to ``ref`` (a branch or commit id; default: the configured branch)."""
+        ref = ref or self.branch
+        if not REF_RE.match(ref):
+            raise ValueError(f"not a branch or commit id: {ref!r}")
         with self._lock:
             if self.status()["running"]:
                 return False
-            UPDATE_ENV.write_text(f"UPDATE_REMOTE={self.remote}\nUPDATE_BRANCH={self.branch}\n")
+            UPDATE_ENV.write_text(f"UPDATE_REMOTE={self.remote}\nUPDATE_BRANCH={self.branch}\nUPDATE_REF={ref}\n")
             UPDATE_LOG.write_text("")
-            _write_state(state="running", message="starting", pid=None, **{"from": self.running_revision})
+            _write_state(state="running", message="starting", pid=None, ref=ref, **{"from": self.running_revision})
             if _start_update_unit():
                 log.info("Update started in the tf-daemon-update unit")
                 return True
             # No unit (install-service.sh not rerun yet): run it as our child.
-            env = {**os.environ, "UPDATE_REMOTE": self.remote, "UPDATE_BRANCH": self.branch}
+            env = {**os.environ, "UPDATE_REMOTE": self.remote, "UPDATE_BRANCH": self.branch, "UPDATE_REF": ref}
             env.pop("TF_UPDATE_DETACHED", None)
             with UPDATE_LOG.open("a") as logf:
                 # Own session so it isn't tied to a request thread.
@@ -141,6 +155,14 @@ class Updater:
                 )
             log.info("Update started in-process (pid %d); tf-daemon-update unit not available", self._proc.pid)
             return True
+
+    def running_ref(self) -> str | None:
+        """The branch or commit the last update switched to, when this process runs it."""
+        st = _read_state() or {}
+        to = st.get("to")
+        if st.get("state") in ("done", "up_to_date", "restarting") and to and to == self.running_revision:
+            return st.get("ref") or None
+        return None
 
     def status(self) -> dict[str, Any]:
         if self._proc is not None:
@@ -190,47 +212,6 @@ def _validate_toml(text: str) -> Config:
         os.unlink(tmp)
 
 
-# The on / off settings people change most, offered as switches on the /config page:
-# "table.key" -> what it does (the defaults and the rest are in config.py).
-SWITCHES = {
-    "tf5.eq_write": "Edit the desk's EQ from the pages",
-    "tf5.fader_write": "Faders and ON from the pages, and ring-out (needs EQ editing)",
-    "vocal.auto_allowed": "Offer auto EQ (still off until turned on per channel)",
-    "rf.auto_connect": "Keep the tinySA connected and sweeping",
-}
-
-
-def switch_values(cfg: Config) -> dict[str, bool]:
-    return {key: bool(getattr(getattr(cfg, key.split(".")[0]), key.split(".")[1])) for key in SWITCHES}
-
-
-def set_switch(text: str, key: str, on: bool) -> str:
-    """``text`` with ``key = true / false`` in its table: the line changed in place (its comment
-    kept), else added under the table's header, else the table added at the end."""
-    table, name = key.split(".")
-    value = "true" if on else "false"
-    lines = text.splitlines(keepends=True)
-    start = end = None
-    for i, line in enumerate(lines):
-        header = re.match(r"\s*\[([^\[\]]+)\]\s*(#.*)?$", line)
-        if header and start is not None:
-            end = i
-            break
-        if header and header.group(1).strip() == table:
-            start = i
-    if start is None:
-        sep = "" if not text or text.endswith("\n\n") else "\n" if text.endswith("\n") else "\n\n"
-        return f"{text}{sep}[{table}]\n{name} = {value}\n"
-    end = len(lines) if end is None else end
-    pattern = re.compile(rf"^(\s*{re.escape(name)}\s*=\s*)(true|false)\b")
-    for i in range(start + 1, end):
-        if pattern.match(lines[i]):
-            lines[i] = pattern.sub(rf"\g<1>{value}", lines[i])
-            return "".join(lines)
-    lines.insert(start + 1, f"{name} = {value}\n")
-    return "".join(lines)
-
-
 def _restart_now() -> None:
     log.info("Restarting tf-daemon (requested from /config)")
     try:
@@ -260,6 +241,7 @@ def register_system(app: Flask, cfg: UpdateConfig, config_path: str | Path | Non
                 "git_checkout": (APP_DIR / ".git").exists(),
                 "remote": updater.remote,
                 "branch": updater.branch,
+                "ref": updater.running_ref(),  # a branch / commit switched to; None: as installed
                 "config_path": str(cfg_file) if cfg_file else None,
             }
         )
@@ -278,9 +260,25 @@ def register_system(app: Flask, cfg: UpdateConfig, config_path: str | Path | Non
 
     @bp.post("/update")
     def update():
-        if not updater.start():
+        ref = (request.get_json(silent=True) or {}).get("ref") or None
+        try:
+            if ref is not None and not isinstance(ref, str):
+                raise ValueError("ref must be a branch name or commit id")
+            started = updater.start(ref)
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+        if not started:
             return jsonify({"ok": False, "error": "an update is already running"}), 409
         return jsonify({"ok": True}), 202
+
+    @bp.get("/refs")
+    def refs():
+        try:
+            out = _git("ls-remote", "--heads", updater.remote)
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+            return jsonify({"ok": False, "error": f"could not reach {updater.remote}: {e}"}), 502
+        heads = [line.split("refs/heads/", 1)[1] for line in out.splitlines() if "refs/heads/" in line]
+        return jsonify({"ok": True, "branches": sorted(heads, key=lambda b: (b != updater.branch, b))})
 
     @bp.get("/update")
     def update_status():
@@ -292,10 +290,12 @@ def register_system(app: Flask, cfg: UpdateConfig, config_path: str | Path | Non
             return jsonify({"ok": False, "error": "no config file in use"}), 404
         text = cfg_file.read_text() if cfg_file.exists() else ""
         try:
-            switches = switch_values(_validate_toml(text))
+            settings = config_edit.settings(_validate_toml(text), text)
         except ValueError:
-            switches = None  # the file doesn't load: edit it as text
-        return jsonify({"ok": True, "path": str(cfg_file), "text": text, "switches": switches, "labels": SWITCHES})
+            settings = None  # the file doesn't load: edit it as text
+        return jsonify(
+            {"ok": True, "path": str(cfg_file), "text": text, "settings": settings, "common": config_edit.COMMON}
+        )
 
     @bp.put("/config")
     def put_config():
@@ -312,24 +312,26 @@ def register_system(app: Flask, cfg: UpdateConfig, config_path: str | Path | Non
         log.info("Config written to %s", cfg_file)
         return jsonify({"ok": True})
 
-    @bp.put("/switch")
-    def put_switch():
+    @bp.put("/setting")
+    def put_setting():
         if cfg_file is None:
             return jsonify({"ok": False, "error": "no config file in use"}), 404
         body = request.get_json(silent=True) or {}
-        key, on = body.get("key"), body.get("on")
-        if key not in SWITCHES or not isinstance(on, bool):
-            return jsonify(
-                {"ok": False, "error": f'body must be {{"key": one of {sorted(SWITCHES)}, "on": true / false}}'}
-            ), 400
-        text = set_switch(cfg_file.read_text() if cfg_file.exists() else "", key, on)
+        key, value = body.get("key"), body.get("value")
+        text = cfg_file.read_text() if cfg_file.exists() else ""
         try:
-            switches = switch_values(_validate_toml(text))
+            if not isinstance(key, str):
+                raise ValueError('body must be {"key": "table.name", "value": ...}')
+            if value is None:
+                text = config_edit.unset_value(text, key)
+            else:
+                text = config_edit.set_value(text, key, config_edit.parse_value(key, value))
+            settings = config_edit.settings(_validate_toml(text), text)
         except ValueError as e:
             return jsonify({"ok": False, "error": str(e)}), 400
         write_atomic(cfg_file, text, keep_mode=True)
-        log.info("Config: %s = %s", key, on)
-        return jsonify({"ok": True, "text": text, "switches": switches})
+        log.info("Config: %s = %r", key, value)
+        return jsonify({"ok": True, "text": text, "settings": settings})
 
     @bp.post("/restart")
     def restart():

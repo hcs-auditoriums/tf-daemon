@@ -35,10 +35,15 @@ channel, Tab to move, Enter to run. Shortcuts include **Shift+← / Shift+→** 
 and **F** (full screen); **?** lists every command on the page, and [Keyboard](keyboard.md)
 has them all.
 
-**Config page.** Switches for the settings changed most (desk EQ and fader editing, auto EQ,
-the tinySA staying connected) write config.toml at once, keeping its comments; the file is
-also editable as text. Update and restart ask first. The page checks for updates by itself
-when it opens.
+**Config page.** Every setting of `config.toml` has its own control (a switch, buttons for a
+few choices, a number or text box), grouped by table with what it does, and **Most used**
+(desk EQ and fader editing, auto EQ, the tinySA) at the top; **Find a setting** filters
+them. A change is saved to the file at once, keeping its comments, and refused if the
+config can't take it; **Reset** takes a setting back to its default, and *changed* marks
+one that differs from it. Changes apply after a restart (**Restart now**). The whole file
+is editable as text too (the `[[channels]]` list is only there). Update now, and **Run
+another branch or commit** to try something out, are in the Software section; restarting
+and updating ask first. The page checks for updates by itself when it opens.
 
 A second page, **`/rf`**, is an RF spectrum analyzer for a **tinySA** on USB
 serial (connect, sweep, live trace + peak hold, waterfall, and lines at the
