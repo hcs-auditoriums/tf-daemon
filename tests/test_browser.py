@@ -115,7 +115,7 @@ def test_console_panel_and_eq_from_the_simulated_desk(page):
     panel.wait_for(state="visible", timeout=8000)
     page.wait_for_function("document.getElementById('console-panel').textContent.trim().length > 0", timeout=8000)
     page.wait_for_function("!document.getElementById('eq-toggle').hidden", timeout=8000)
-    page.click("#view-menu summary")
+    page.click("#show-menu summary")
     page.check("#show-eq")
     page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=4000)
 
@@ -193,10 +193,6 @@ def test_every_view_control_works_without_errors(page):
     for value in ["-90,-10", "-80,0", "-70,-20", "-130,0", "auto"]:
         page.select_option("#range", value)
         page.wait_for_timeout(150)
-    for box in ["#show-avg", "#show-live", "#show-peak", "#show-rings"]:
-        page.uncheck(box)
-        page.wait_for_timeout(100)
-        page.check(box)
     page.check("#layout input[value=waterfall]")
     page.select_option("#wf-source", "avg")
     page.select_option("#wf-span", "300")
@@ -205,14 +201,22 @@ def test_every_view_control_works_without_errors(page):
     page.mouse.move(box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.3)
     page.wait_for_timeout(300)
     page.check("#layout input[value=spectrum]")
-    page.click("#view-menu summary")
+    page.click("#trace-menu summary")
+    for box in ["#show-avg", "#show-live", "#show-peak"]:
+        page.uncheck(box)
+        page.wait_for_timeout(100)
+        page.check(box)
+    page.click("#show-menu summary")
+    for box in ["#show-rings", "#show-ring-list"]:
+        page.uncheck(box)
+        page.wait_for_timeout(100)
+        page.check(box)
     page.wait_for_function("!document.getElementById('console-toggle').hidden", timeout=8000)
-    page.click("#view-menu summary")
     page.uncheck("#show-console")
     page.locator("#console-panel").wait_for(state="hidden", timeout=2000)
     page.check("#show-console")
     page.locator("#console-panel").wait_for(state="visible", timeout=2000)
-    page.click("#view-menu summary")  # close the menu: it opens over the sidebar
+    page.click("#show-menu summary")  # close the menu: it opens over the sidebar
     page.locator("#channels [data-input='5']").click()  # an unlisted input: analyzed while viewed
     page.wait_for_function(
         "document.querySelector('#channels [data-input=\"5\"]').getAttribute('aria-pressed') === 'true'", timeout=3000
@@ -387,3 +391,45 @@ def test_sidebar_fader_and_on_set_the_desk(page):
         )
     finally:  # leave the shared demo desk as it was
         put({"level": -32768 if level0 is None else round(level0 * 100), "on": on0})
+
+
+def test_view_traces_and_show_menus(page):
+    """The header menus: one open at a time; each option where it belongs, and remembered."""
+    open_page(page, "/")
+    page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=8000)
+    menus = ["#view-menu", "#trace-menu", "#show-menu"]
+    for m in menus:
+        page.click(f"{m} summary")
+        assert [page.locator(o).evaluate("e => e.open") for o in menus] == [o == m for o in menus]
+    page.click("#spectrum", position={"x": 5, "y": 5})  # a click outside closes it
+    assert not page.locator("#show-menu").evaluate("e => e.open")
+
+    # Traces: Reset sits on the Peak hold row and only works while that trace is shown; remembered.
+    page.click("#trace-menu summary")
+    assert page.is_enabled("#reset-peak")
+    page.uncheck("#show-peak")
+    assert page.is_disabled("#reset-peak")
+    page.reload()
+    page.click("#trace-menu summary")
+    assert not page.is_checked("#show-peak") and page.is_disabled("#reset-peak")
+    page.check("#show-peak")
+
+    # View: the waterfall's options are greyed out while it isn't shown.
+    page.click("#view-menu summary")
+    page.check("#layout input[value=spectrum]")
+    assert page.locator("#wf-opts").evaluate("e => e.disabled")
+    page.check("#layout input[value=both]")
+    assert not page.locator("#wf-opts").evaluate("e => e.disabled")
+    page.check("#layout input[value=spectrum]")
+
+    # Show: ring markers and the ring list are separate; the suggested EQ follows the mic-check panel's box.
+    page.wait_for_function("!document.getElementById('ring-alert').hidden", timeout=15000)
+    page.click("#show-menu summary")
+    page.uncheck("#show-rings")
+    page.locator("#ring-list").wait_for(state="visible", timeout=2000)
+    page.uncheck("#show-ring-list")
+    page.locator("#ring-list").wait_for(state="hidden", timeout=2000)
+    page.check("#show-ring-list")
+    page.check("#show-rings")
+    page.wait_for_function("!document.getElementById('vocal-toggle').hidden", timeout=8000)
+    assert page.is_checked("#show-vocal")

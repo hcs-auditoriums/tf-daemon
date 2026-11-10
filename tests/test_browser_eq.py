@@ -67,9 +67,9 @@ def show_eq(page, name):
     page.wait_for_function("document.querySelectorAll('#channels button').length >= 1", timeout=8000)
     page.locator("#channels button", has_text=name).click()
     page.wait_for_function("!document.getElementById('eq-toggle').hidden", timeout=8000)
-    page.click("#view-menu summary")
+    page.click("#show-menu summary")
     page.check("#show-eq")
-    page.click("#view-menu summary")
+    page.click("#show-menu summary")
     page.wait_for_function("window.tfEqHandles && window.tfEqHandles().some(h => h.key === 'HM')", timeout=8000)
 
 
@@ -84,9 +84,9 @@ def test_eq_bands_can_be_dragged_and_typed_on_the_spectrum(page):
     page.wait_for_function("document.querySelectorAll('#channels button').length >= 1", timeout=8000)
     page.locator("#channels button", has_text="Pastor").click()
     page.wait_for_function("!document.getElementById('eq-toggle').hidden", timeout=8000)
-    page.click("#view-menu summary")
+    page.click("#show-menu summary")
     page.check("#show-eq")
-    page.click("#view-menu summary")
+    page.click("#show-menu summary")
     page.wait_for_function("window.tfEqHandles && window.tfEqHandles().some(h => h.key === 'HM')", timeout=8000)
     assert page.evaluate("window.tfEqPreviewError()") < 0.05  # this page's maths = the desk's
     before = desk_band("HM")
@@ -272,11 +272,28 @@ def test_eq_toolbar_double_tap_pinch_and_types(page):
         ab.click()
         wait_desk(page, 1, lambda e: band(e, "HM")["gain"] == 0, "back from A/B")
 
+        # Compare with before: the EQ just before the first change made here (the double-tap,
+        # HM at +4 dB). A change on the plot during it ends the comparison; "back" can't undo it.
+        menu.click()
+        bar.get_by_role("button", name="Compare with before").click()
+        wait_desk(page, 1, lambda e: band(e, "HM")["gain"] == 4, "the EQ from before (HM +4 dB)")
+        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
+        page.mouse.dblclick(box["x"] + h["x"], box["y"] + h["y"])  # gain to 0 while comparing
+        wait_desk(page, 1, lambda e: band(e, "HM")["gain"] == 0, "HM at 0 dB, changed while comparing")
+        menu.click()
+        item = bar.get_by_role("button", name="Compare with before")
+        assert item.is_visible() and not bar.get_by_role("button", name="Back to your EQ").count()
+        bar.get_by_role("button", name="Gain flat").click()  # the bands from before off again
+        wait_desk(page, 1, lambda e: all(b["gain"] == 0 for b in e["bands"]), "every band flat")
+
         # A narrow bell (Q 10) is drawn to its real peak, not as a spike between the desk's points.
         # 1521.5 Hz is between two of the desk's 241 curve points: they peak at 11.67 dB.
         put_eq(1, [[f"{hm}/Gain", 1200], [f"{hm}/Q", 10000], [f"{hm}/Frequency", 15215]])
-        wait_desk(page, 1, lambda e: band(e, "HM")["q"] == 10, "HM at Q 10")
-        page.wait_for_function("window.tfEqPeaks().desk > 5", timeout=4000)
+        wait_desk(
+            page, 1, lambda e: band(e, "HM")["q"] == 10 and band(e, "HM")["freq"] == 1521.5, "HM at Q 10, 1521.5 Hz"
+        )
+        # Gain, Q and frequency arrive one by one: wait for the page to have all three.
+        page.wait_for_function("(p => p.desk > 5 && p.desk < 11.8)(window.tfEqPeaks())", timeout=4000)
         peaks = page.evaluate("window.tfEqPeaks()")
         assert abs(peaks["drawn"] - 12) < 0.05 and peaks["desk"] < 11.8, peaks
 

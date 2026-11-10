@@ -184,9 +184,19 @@ const history = new Map();   // input -> {undo: [eq...], redo: [eq...]}
 const UNDO_MAX = 50;
 const hist = () => { if (!history.has(state.input)) history.set(state.input, { undo: [], redo: [] }); return history.get(state.input); };
 export const eqSnapshot = () => (state.eq && state.eq.eq ? structuredClone(state.eq.eq) : null);
+// The EQ just before the first change made here to each input, and when: what "Compare with
+// before" goes back to. Kept for the page's life, whatever the undo limit drops; a change made
+// on the desk before then is part of it, so comparing never undoes someone else's work.
+const start = new Map();   // input -> {eq, at}
+export const eqBefore = () => start.get(state.input) || null;
+// Every change a person makes (a drag, a typed value, a toolbar button) starts here.
+let onUserEdit = () => {};
+export function onEqUserEdit(fn) { onUserEdit = fn; }
 function remember() {
   const snap = eqSnapshot();
   if (!snap) return;
+  onUserEdit();
+  if (!start.has(state.input)) start.set(state.input, { eq: structuredClone(snap), at: Date.now() });
   const h = hist();
   h.undo.push(snap);
   if (h.undo.length > UNDO_MAX) h.undo.shift();
@@ -197,8 +207,6 @@ let onHistory = () => {};
 export function onEqHistory(fn) { onHistory = fn; }
 export const canUndo = () => hist().undo.length > 0;
 export const canRedo = () => hist().redo.length > 0;
-// The EQ before the first change made here to this input (what "compare with before" goes back to).
-export const eqBefore = () => hist().undo[0] || null;
 export function undoEq() { step(hist().undo, hist().redo); }
 export function redoEq() { step(hist().redo, hist().undo); }
 function step(from, to) {

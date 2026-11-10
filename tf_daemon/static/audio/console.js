@@ -489,7 +489,7 @@ export function drawPanelEq() {
 
 new ResizeObserver(() => drawPanelEq()).observe($("console-panel"));
 
-// Two controls, one setting: the Show > Console checkbox and the icon on the plot.
+// Two controls, one setting: Show > Console sidebar and the icon on the plot.
 function setShowConsole(on) {
   state.showConsole = on;
   $("show-console").checked = on;

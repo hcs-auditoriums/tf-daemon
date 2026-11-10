@@ -137,6 +137,9 @@ footer {
 /* Page-specific controls under the top bar (RF sweep form). */
 .toolbar { padding: 8px 16px; background: var(--bg); border-bottom: 1px solid var(--border); }
 
+/* The audio page's View / Traces / Show menus and Mic check: they wrap as one group. */
+.menus { display: flex; align-items: center; gap: 8px; }
+
 /* Dropdown menu (native <details>): the summary is the button. */
 .menu { position: relative; }
 .menu summary {
@@ -151,7 +154,8 @@ footer {
 .menu summary:hover { border-color: var(--muted); }
 .menu-panel {
   position: absolute; top: calc(100% + 6px); left: 0; z-index: 20; min-width: 220px;
-  display: flex; flex-direction: column; gap: 12px; padding: 12px;
+  max-width: calc(100vw - 32px); max-height: calc(100vh - 80px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 14px; padding: 12px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
@@ -159,12 +163,28 @@ footer {
 .menu-panel legend { padding: 0 0 4px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .menu-panel label { display: flex; align-items: center; gap: 8px; color: var(--text); }
 .menu-panel label[hidden] { display: none; }
-.menu-row { justify-content: space-between; }
+.menu-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .menu-panel button {
   font: inherit; color: var(--text); background: #1e242c; border: 1px solid var(--border);
   border-radius: 6px; padding: 6px 12px; cursor: pointer;
 }
 .menu-panel button:hover { border-color: var(--muted); }
+.menu-panel button:disabled { opacity: 0.45; cursor: default; }
+.menu-panel fieldset:disabled { opacity: 0.45; }
+.menu-panel .menu-mini { padding: 2px 10px; font-size: 12px; }
+/* Layout as one segmented control. */
+.seg-row { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg-row label { flex: 1; gap: 0; position: relative; }
+.seg-row input { position: absolute; inset: 0; z-index: 1; margin: 0; opacity: 0; cursor: pointer; }
+.seg-row span { flex: 1; text-align: center; padding: 6px 10px; cursor: pointer; color: var(--muted); border-left: 1px solid var(--border); }
+.seg-row label:first-child span { border-left: 0; }
+.seg-row input:checked + span { color: var(--text); background: #24435c; font-weight: 600; }
+.seg-row input:focus-visible + span { outline: 2px solid var(--avg); outline-offset: -2px; }
+/* A trace's colour beside its name, as a legend. */
+.swatch { display: inline-block; width: 14px; height: 3px; border-radius: 2px; background: var(--sw); }
+.swatch.rta { --sw: var(--rta); } .swatch.avg { --sw: var(--avg); } .swatch.peak { --sw: var(--peak); }
+.swatch.eq { --sw: var(--eq); }
+.swatch.vocal { background: repeating-linear-gradient(90deg, var(--vocal) 0 4px, transparent 4px 7px); }
 
 /* ---------------------------------------------------------------- RF page */
 
@@ -469,9 +489,6 @@ main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { ri
 
 /* ---------------------------------------------------------------- audio waterfall */
 
-.menu-panel fieldset.seg { flex-direction: row; flex-wrap: wrap; gap: 4px 14px; }
-.menu-panel fieldset.seg legend { width: 100%; }
-
 /* ---------------------------------------------------------------- vocal EQ assist */
 
 .mic-btn {
@@ -605,7 +622,7 @@ main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { ri
   position: absolute; top: calc(100% + 4px); left: 0; display: flex; flex-direction: column; gap: 4px; padding: 6px;
   min-width: 170px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
-.eqb-panel .eqb-btn { justify-items: start; color: var(--text); font-weight: 400; }
+.eqb-panel .eqb-btn { justify-items: start; color: var(--text); font-weight: 400; white-space: nowrap; }
 @media (pointer: coarse) { .eqb-btn { min-width: 44px; min-height: 40px; font-size: 14px; } }
 
 /* A channel's gain / gate / comp / sends (audio/strip.js): one panel over the plot's right side,
