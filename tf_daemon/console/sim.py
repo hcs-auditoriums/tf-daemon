@@ -16,7 +16,7 @@ import time
 from typing import Any
 
 from .editor.dump import channel_eq
-from .sim_editor import SimEditor, default_mixing_values, wire_address
+from .sim_editor import SimEditor, default_mixing_values
 from .sim_rcp import DEMO_INPUTS, RCP_PREFIX, SimRCP
 
 log = logging.getLogger(__name__)
@@ -70,11 +70,7 @@ class SimConsole:
         """A fader moved "on the desk": editor-protocol clients see it too (origin: the console)."""
         for kind in ("Level", "On"):
             if addr == RCP_PREFIX["InCh"] + f"Fader/{kind}" and y == 0:
-                path = f"InputChannel:{x}/Fader/{kind}"
-                wp, idx = wire_address(self.editor.mixing, path)
-                with self.editor._lock:
-                    self.editor.mixing.apply(wp, idx, int(value))
-                self.editor.push_change(path, int(value))
+                self.editor.push_change(f"InputChannel:{x}/Fader/{kind}", int(value))  # applies it too
 
     def status(self) -> dict:
         return {

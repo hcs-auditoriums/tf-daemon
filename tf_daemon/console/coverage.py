@@ -169,7 +169,7 @@ FEATURES: list[Feature] = [
         "no",
         "yes",
         "view",
-        "Patch/Port, used for the USB patch",
+        "Patch/Select (0 INPUT, 1 USB, 2 SLOT): read for the USB patch",
     ),
     # ---------------------------------------------------------------- EQ
     Feature(

@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, ClassVar
 
+from .console.editor.tree import FUNCTIONS as EDITOR_FUNCTIONS
 from .console.patch import parse_patch_entry
 from .rf.settings import SweepSettings
 
@@ -34,6 +35,18 @@ AUDIO_SOURCES = ("device", "synth", "stage", "wav")
 
 class ConfigError(ValueError):
     pass
+
+
+# [tf5] switches of the write families beyond eq_write / fader_write (console/editor/guard.py).
+WRITE_SWITCHES = (
+    "mix_write",
+    "processing_write",
+    "headamp_write",
+    "phantom_write",
+    "label_write",
+    "fx_write",
+    "scene_recall",
+)
 
 
 # --------------------------------------------------------------------- sections
@@ -338,6 +351,18 @@ class TF5Config(Section):
     eq_port: int = 50368
     eq_write: bool = False  # let a person apply suggested EQ to the desk (vocal assist "Apply to desk")
     fader_write: bool = False  # also input faders / on (the vocal assist's ring-out session; needs eq_write)
+    # TF Editor protocol functions to subscribe (console/editor/tree.py; Mixing is required). Property
+    # is always subscribed for the handshake and its data (the console password) dropped unparsed.
+    functions: tuple[str, ...] = EDITOR_FUNCTIONS
+    # Write families (console/editor/guard.py FAMILIES), each a person's edit only, each off by default
+    # and each needing eq = true (same connection):
+    mix_write: bool = False  # faders / ON of every strip but inputs, balance, pan, sends, DCA / mute groups, cue
+    processing_write: bool = False  # phase, digital gain, gate, comp, bus PEQ, 1-knob, GEQ, delay, output gain
+    headamp_write: bool = False  # head-amp gain of the input ports
+    phantom_write: bool = False  # +48V and the phantom master (phantom power can damage gear)
+    label_write: bool = False  # strip names, colours, icons
+    fx_write: bool = False  # FX / insert FX bypass, mix balance, parameters
+    scene_recall: bool = False  # recall a scene (RecallScene event)
 
     def validate(self) -> None:
         _check_source("tf5", self.source, DEVICE_SOURCES)
@@ -357,6 +382,14 @@ class TF5Config(Section):
             raise ConfigError("tf5.eq_write needs tf5.eq = true (EQ is written over the same connection)")
         if self.fader_write and not self.eq_write:
             raise ConfigError("tf5.fader_write needs tf5.eq_write = true (faders are written over the same connection)")
+        for key in WRITE_SWITCHES:
+            if getattr(self, key) and not self.eq:
+                raise ConfigError(f"tf5.{key} needs tf5.eq = true (it is written over the same connection)")
+        unknown = [f for f in self.functions if f not in EDITOR_FUNCTIONS]
+        if unknown or "Mixing" not in self.functions:
+            raise ConfigError(
+                f"tf5.functions must list Mixing and only these: {', '.join(EDITOR_FUNCTIONS)} (got {list(self.functions)})"
+            )
 
     @property
     def active_source(self) -> str:

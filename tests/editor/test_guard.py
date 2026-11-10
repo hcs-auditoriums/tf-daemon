@@ -3,6 +3,7 @@ way out: nothing the client sends can change the console unless a person asked f
 
 import ast
 import re
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
@@ -11,9 +12,11 @@ from editor_fakes import (
     PKG,
     build_dump,
     dump_message,
+    function_dump,
     mixing_tree,
 )
 
+from tf_daemon.config import WRITE_SWITCHES, TF5Config
 from tf_daemon.console.editor.client import TFEditorClient
 from tf_daemon.console.editor.codec import (
     CLIENT_TYPE,
@@ -33,10 +36,29 @@ from tf_daemon.console.editor.codec import (
     hash_compare,
     message,
     parse_message,
+    set_param_message,
     subscribe,
     sync,
 )
-from tf_daemon.console.editor.guard import ReadOnlyViolation, check_outbound
+from tf_daemon.console.editor.dump import Dump
+from tf_daemon.console.editor.guard import (
+    BASE_FUNCTIONS,
+    FADER_LIMITS,
+    FADER_WRITABLE,
+    FAMILIES,
+    SCENE_RECALL,
+    WRITABLE,
+    WRITE_LIMITS,
+    ReadOnlyViolation,
+    Rule,
+    WriteNotAllowed,
+    WriteRefused,
+    check_outbound,
+    check_write,
+    families_for,
+    writable,
+)
+from tf_daemon.console.editor.tree import FUNCTIONS, TAGS
 
 
 def _set_param_bytes(func, path, idx, value_el, origin=0xA0):
@@ -176,7 +198,7 @@ def _code(path: Path) -> str:
 def test_editor_has_a_single_send_path_and_one_guarded_write_builder():
     """Across the editor package: one sendall, in TFEditorClient._send after check_outbound; no
     dump builder; one set-param builder (codec.set_param_message), called only by write()."""
-    files = ["__init__.py", "__main__.py", "client.py", "codec.py", "dump.py", "guard.py"]
+    files = ["__init__.py", "__main__.py", "client.py", "codec.py", "dump.py", "guard.py", "tree.py"]
     # A new module in the package must be looked at here before this test passes.
     assert sorted(p.name for p in EDITOR.glob("*.py")) == files
     code = {name: _code(EDITOR / name) for name in files}
@@ -211,6 +233,10 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
       * vocal RingOut: its loop (started only by start() <- POST /api/vocal/ringout/start with "confirm": true, and
     RingOut exists only when the desk's faders are writable), abort (Mute & cancel: mutes, never
     needs a confirmation) and unmute.
+    write() <- TF5Module.write_params (any write family; each needs its own tf5.*_write) <- only
+      TF5Module's param_set <- POST /api/tf5/param ("confirm": true): a person's edit.
+    recall_scene() <- TF5Module.recall_scene (needs tf5.scene_recall) <- only
+      TF5Module's recall_scene_route <- POST /api/tf5/event/recall_scene ("confirm": true).
     Nothing else in tf-daemon calls them."""
     calls: dict[str, list[str]] = {}
     for p in PKG.rglob("*.py"):
@@ -219,19 +245,31 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
             ("write", r"(\beq_client|\bec|TFEditorClient\b.*)\.write\("),
             ("write_eq", r"\.write_eq\("),
             ("write_fader", r"\.write_fader\("),
+            ("write_params", r"\.write_params\("),
+            ("recall_scene", r"(\beq_client|\bec|self)\.recall_scene\("),
             ("apply_suggestion", r"\.apply_suggestion\("),
             ("undo", r"\.undo\("),
         ):
             for _ in re.finditer(pattern, code):
                 calls.setdefault(name, []).append(p.relative_to(PKG).as_posix())
-    assert calls.get("write") == ["console/module.py", "console/module.py"]  # in write_eq and write_fader
+    # in write_eq, write_fader and write_params
+    assert calls.get("write") == ["console/module.py", "console/module.py", "console/module.py"]
     console_src = (PKG / "console" / "module.py").read_text(encoding="utf-8")
     assert "ec = self.eq_client" in console_src
     console_defs = {m.group(1): m.start() for m in re.finditer(r"\n    def (\w+)\(", console_src)}
     ec_writes = [m.start() for m in re.finditer(r"\bec\.write\(", console_src)]
     assert sorted(
         max((n for n, at in console_defs.items() if at < w), key=lambda n: console_defs[n]) for w in ec_writes
-    ) == ["write_eq", "write_fader"]
+    ) == ["write_eq", "write_fader", "write_params"]
+    # The generic write (any family) and the scene recall: each from its one route only, after the confirmation.
+    assert calls.get("write_params") == ["console/module.py"] and calls.get("recall_scene") == ["console/module.py"] * 2
+    ec_recalls = [m.start() for m in re.finditer(r"\bec\.recall_scene\(", console_src)]
+    owner = lambda pos: max((n for n, at in console_defs.items() if at < pos), key=lambda n: console_defs[n])  # noqa: E731
+    assert [owner(w) for w in ec_recalls] == ["recall_scene"]
+    param_set = console_src[console_src.index("def param_set():") :]
+    assert param_set.index('.get("confirm") is not True') < param_set.index("self.write_params(")
+    recall_route = console_src[console_src.index("def recall_scene_route():") :]
+    assert recall_route.index('.get("confirm") is not True') < recall_route.index("self.recall_scene(")
     assert sorted(calls.get("write_eq", [])) == [
         "console/module.py",
         "vocal/auto.py",
@@ -294,3 +332,210 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
     ]
     assert [ro_owner(m.start()) for m in re.finditer(r"threading\.Thread\(target=self\._run", ro_src)] == ["start"]
     assert "the EQ was changed on the desk" in auto_src  # it stops when someone else touches it
+
+
+# ====================================================================== write families
+# The owner asked for these (2026-11-10): each family is opt-in behind its own switch, every
+# value within the V4.55 schema (narrowed where the guard says so), strings only from a list.
+
+FAMILY_CASES = [
+    # family, function, path, an allowed value, a refused value
+    ("eq", "Mixing", "InputChannel:3/PEQ/Bank/BandL/Gain", -400, -2400),
+    ("eq", "Mixing", "InputChannel:3/PEQ/Bank/Band:1/Q", 10000, 10001),  # narrower than the schema's 16000
+    ("fader", "Mixing", "InputChannel:3/Fader/Level", -32768, 1001),
+    ("mix", "Mixing", "DCA:0/Fader/Level", -1000, 1001),
+    ("mix", "Mixing", "Mono/Fader/On", 0, 2),
+    ("mix", "Mixing", "Stereo:0/Output/Balance", -63, 64),
+    ("mix", "Mixing", "InputChannel:0/ToStereo/Pan", 63, -64),
+    ("mix", "Mixing", "InputChannel:2/ToMix:3/Pre", 1, 2),
+    ("mix", "Mixing", "StInChannel:1/ToStMix:11/Level", 0, -32769),
+    ("mix", "Mixing", "InputChannel:2/DCAGroup:7/Assign", 1, -1),
+    ("mix", "Mixing", "FxRtnChannel:0/MuteGroup:3/Assign", 1, 2),
+    ("mix", "FX", "InsFX:5/MuteGroup:1/Assign", 1, 2),
+    ("mix", "Setup", "MuteMaster:5/On", 1, 2),
+    ("mix", "Volatile", "Cue/InputChannel:14/On", 1, 2),
+    ("processing", "Mixing", "InputChannel:0/Input/Gain", -2400, 1001),
+    ("processing", "Mixing", "InputChannel:0/Gate/Bank/Gate/Threshold", -7200, 1),
+    ("processing", "Mixing", "InputChannel:0/Gate/Bank/Type", "GATE", "DUCKING"),
+    ("processing", "Mixing", "Mono/Comp/Bank/Compressor/Knee", "HARD", "SOFT-9"),
+    ("processing", "Mixing", "InputChannel:0/Comp/Bank/DeEsser/Q", 1600, 10001),
+    ("processing", "Mixing", "Matrix:3/PEQ/Bank/Band:1/Q", 16000, 16001),
+    ("processing", "Mixing", "Mono/PEQ/Bank/LPF/Slope", 24, 30),
+    ("processing", "Mixing", "InputChannel:0/PEQ/Bank/OneKnob/Mode", "Vocal", "Rock"),
+    ("processing", "Mixing", "InputChannel:0/PEQ/Bank/Type", "BOLD", "PRECISE"),
+    ("processing", "Mixing", "Mix:7/GEQ/Band:30/Gain", 1500, 1600),
+    ("processing", "Mixing", "StInChannel:0/Ducker/Release", 3340, 3339),
+    ("processing", "Mixing", "Matrix:0/Delay/Time", 1000000, 1000001),
+    ("processing", "Mixing", "StMix:0/Output/Gain", -2400, 1),
+    ("headamp", "Processing", "BuiltIn/InputPort:31/HeadAmp/Gain", 6600, 6601),
+    ("headamp", "Processing", "Slot/InputPort:63/HeadAmp/Gain", -600, -601),
+    ("phantom", "Processing", "BuiltIn/InputPort:0/HeadAmp/48V", 1, 2),
+    ("phantom", "Setup", "PhantomMaster/On", 0, 2),
+    ("label", "Mixing", "InputChannel:0/Label/Name", "Choir", "x" * 64),
+    ("label", "Mixing", "DCA:7/Label/Name", "Band ü", "tab\there"),
+    ("label", "Mixing", "Mix:0/Label/Color", "SkyBlue", "Blu"),
+    ("label", "Mixing", "Mono/Label/Icon", "WirelessMic", "Guitar"),
+    ("fx", "FX", "FX:0/Param/Bank/Value:63", -2147483648, "1"),
+    ("fx", "FX", "InsFX:2/Bypass", 1, 2),
+]
+
+NEAR_MISSES = [  # one step off a family's patterns: in no family at all
+    ("Mixing", "InputChannel:3/PEQ/OneKnobBackup/BandL/Gain", 0),  # the console's own copy
+    ("Mixing", "InputChannel:3/PEQ/Bank/HPF/Slope", 12),
+    ("Mixing", "InputChannel:3/DirectOut/Level", 0),
+    ("Mixing", "FxBus:0/Fader/Level", 0),
+    ("Mixing", "Mono:0/Fader/Level", 0),  # Mono has no index
+    ("Mixing", "InputChannel:0/Input/GainOffset", 0),
+    ("Mixing", "InputChannel:0/AutoMixer/Weight", 0),
+    ("Mixing", "StInChannel:0/Ducker/KeyIn_TF/Source", 0),
+    ("Mixing", "InputChannel:0/Patch/Select", 1),
+    ("Mixing", "InputChannel:0/Library/LastRecallPreset/Title", "x"),
+    ("Mixing", "InputChannel:0/Label/Name/", "x"),
+    ("Mixing", "xInputChannel:0/Fader/Level", 0),
+    ("Mixing", "Setup/MuteMaster:0/On", 1),  # right path, wrong function
+    ("Setup", "MuteMaster:0/Name", "x"),
+    ("Setup", "HAControl/On", 1),
+    ("Setup", "CommSession/MobileMix/Password", "x"),
+    ("Processing", "BuiltIn/OutputPort:0/Patch/Source", 0),
+    ("Volatile", "Cue/FxBus:0/On", 0),
+    ("Volatile", "ConsoleLock/Lock", 1),
+    ("FX", "FX:0/Param/PluginName", "Echo"),
+    ("Property", "UserAccount/Unit/Password", "x"),
+]
+ALL_FAMILIES = set(FAMILIES)
+
+
+def _frame(func, path, value):
+    """The set-param write() would send for ``path`` on the simulated V4.55 desk."""
+    wp, idx, prm = Dump(function_dump(func)).address(path)
+    return TAGS[func], set_param_message(wp, idx, prm, value, func)
+
+
+@pytest.mark.parametrize("family, func, path, good, bad", FAMILY_CASES)
+def test_family_allows_in_range_only(family, func, path, good, bad):
+    assert check_write(func, path, good, {family}).name == family
+    assert writable(func, path, {family}).name == family
+    with pytest.raises(WriteRefused):
+        check_write(func, path, bad, {family})
+    with pytest.raises(ReadOnlyViolation):  # a WriteRefused is a ReadOnlyViolation (and a ValueError)
+        check_write(func, path, bad, ALL_FAMILIES)
+
+
+@pytest.mark.parametrize("family, func, path, good, bad", FAMILY_CASES)
+def test_family_is_refused_with_its_switch_off(family, func, path, good, bad):
+    with pytest.raises(WriteNotAllowed, match=FAMILIES[family].switch):
+        check_write(func, path, good, ALL_FAMILIES - {family})
+    assert writable(func, path, ALL_FAMILIES - {family}) is None
+
+
+@pytest.mark.parametrize("family, func, path, good, bad", FAMILY_CASES)
+def test_family_frames_are_refused_outside_a_write_call(family, func, path, good, bad):
+    tag, payload = _frame(func, path, good)
+    for functions in (FUNCTIONS, BASE_FUNCTIONS):
+        with pytest.raises(ReadOnlyViolation):
+            check_outbound(tag, payload, functions=functions)
+    check_outbound(tag, payload, lambda m: True, FUNCTIONS)  # only a write call's own test lets it out
+    with pytest.raises(ReadOnlyViolation):
+        check_outbound(tag, payload, lambda m: False, FUNCTIONS)
+
+
+@pytest.mark.parametrize("func, path, value", NEAR_MISSES)
+def test_near_misses_are_in_no_family(func, path, value):
+    assert families_for(func, path) == []
+    with pytest.raises(WriteNotAllowed, match="not a writable parameter"):
+        check_write(func, path, value, ALL_FAMILIES)
+
+
+def test_existing_families_are_unchanged():
+    assert FAMILIES["eq"].switch == "tf5.eq_write" and FAMILIES["fader"].switch == "tf5.fader_write"
+    assert FAMILIES["eq"].rules == (Rule("Mixing", WRITABLE, WRITE_LIMITS),)
+    assert FAMILIES["fader"].rules == (Rule("Mixing", FADER_WRITABLE, FADER_LIMITS),)
+    assert WRITABLE.pattern == (
+        r"InputChannel:\d+/PEQ/(On|Bank/HPF/(On|Frequency)|Bank/(BandL|Band:\d|BandH)/(Type|Frequency|Gain|Q|LPFOn))"
+    )
+    assert FADER_WRITABLE.pattern == r"InputChannel:\d+/Fader/(Level|On)"
+    assert WRITE_LIMITS == {
+        "On": (0, 1),
+        "LPFOn": (0, 1),
+        "Type": (0, 2),
+        "HPF/Frequency": (200, 6000),
+        "Frequency": (200, 200000),
+        "Gain": (-1800, 1800),
+        "Q": (100, 10000),
+    }
+    assert FADER_LIMITS == {"Level": (-32768, 1000), "On": (0, 1)}
+
+
+def test_every_family_has_its_own_switch_off_by_default():
+    defaults = {f.name: f.default for f in fields(TF5Config)}
+    switches = [f.switch for f in FAMILIES.values()]
+    assert len(set(switches)) == len(switches) and SCENE_RECALL not in switches
+    for key in [*switches, SCENE_RECALL]:
+        assert defaults[key.removeprefix("tf5.")] is False, key
+    assert set(WRITE_SWITCHES) == {s.removeprefix("tf5.") for s in [*switches, SCENE_RECALL]} - {
+        "eq_write",
+        "fader_write",
+    }
+
+
+@pytest.mark.parametrize(
+    "func, path, value",
+    [
+        ("Mixing", "InputChannel:0/Label/Category", "Vocal"),  # no category verified yet
+        ("Mixing", "InputChannel:0/Label/Color", 3),  # a number for a string
+        ("Mixing", "InputChannel:0/Fader/Level", "0"),  # a string for a number
+        ("Mixing", "InputChannel:0/Fader/On", True),
+        ("Mixing", "InputChannel:40/Fader/On", 1),  # no such channel
+        ("Mixing", "Mix:8/GEQ/Band:0/Gain", 0),
+        ("Mixing", "Mix:0/GEQ/Band:31/Gain", 0),
+        ("Mixing", "StMix:0/ToStereo/Pan", 0),  # StMix has Assign only
+        ("Mixing", "Mix:0/PEQ/Bank/LPF/On", 1),  # only Mono has the LPF
+        ("FX", "FX:0/Param/Bank/Value:64", 0),
+    ],
+)
+def test_values_and_parameters_outside_the_schema_are_refused(func, path, value):
+    with pytest.raises(WriteRefused):
+        check_write(func, path, value, ALL_FAMILIES)
+
+
+def test_set_params_never_for_property_or_another_function():
+    tag, payload = _frame("Mixing", "DCA:0/Fader/Level", 0)
+    with pytest.raises(ReadOnlyViolation):  # a Mixing set-param on the Processing channel
+        check_outbound("MPRC", payload, lambda m: True, FUNCTIONS)
+    prop = Dump(function_dump("Property"))
+    wp, idx, prm = prop.address("Status/CommSession:0/ClientType")
+    with pytest.raises(ReadOnlyViolation):
+        check_outbound("MPRO", set_param_message(wp, idx, prm, "Editor", "Property"), lambda m: True, FUNCTIONS)
+
+
+def test_other_functions_only_when_subscribed():
+    for func in FUNCTIONS:
+        for payload in (subscribe(func), hash_compare(func), sync(False), sync(True)):
+            check_outbound(TAGS[func], payload, functions=FUNCTIONS)
+            if func not in BASE_FUNCTIONS:
+                with pytest.raises(ReadOnlyViolation):
+                    check_outbound(TAGS[func], payload)
+                with pytest.raises(ReadOnlyViolation):
+                    check_outbound(TAGS[func], payload, functions=BASE_FUNCTIONS)
+    with pytest.raises(ReadOnlyViolation):
+        check_outbound("MPRC", subscribe("Setup"), functions=FUNCTIONS)
+    with pytest.raises(ReadOnlyViolation):
+        check_outbound("MXXX", subscribe("Meter"), functions=[*FUNCTIONS, "Meter"])
+
+
+def test_recall_scene_only_as_asked():
+    ok = event("RecallScene", "NUMBER:A05")
+    with pytest.raises(ReadOnlyViolation):  # outside recall_scene()
+        check_outbound("EEVT", ok)
+    check_outbound("EEVT", ok, allow_event=lambda n, a: (n, a) == ("RecallScene", "NUMBER:A05"))
+    check_outbound("EEVT", event("RecallScene", "NUMBER:B99"), allow_event=lambda n, a: True)
+    with pytest.raises(ReadOnlyViolation):  # not the one asked for
+        check_outbound("EEVT", event("RecallScene", "NUMBER:A06"), allow_event=lambda n, a: a == "NUMBER:A05")
+    for args in ("NUMBER:C05", "NUMBER:A5", "NUMBER:A100", "NUMBER:a05", "NUMBER:A05 X", "scene_a 5", ""):
+        with pytest.raises(ReadOnlyViolation):
+            check_outbound("EEVT", event("RecallScene", args), allow_event=lambda n, a: True)
+    for other in (event("ChangeSelectedCH", "CHINFO:1"), event("Transport", "OPERATE:Play")):
+        with pytest.raises(ReadOnlyViolation):  # a recall in progress opens nothing else
+            check_outbound("EEVT", other, allow_event=lambda n, a: True)
+    with pytest.raises(ReadOnlyViolation):
+        check_outbound("EEVT", event("RecallScene", "NUMBER:A05", reply=True), allow_event=lambda n, a: True)

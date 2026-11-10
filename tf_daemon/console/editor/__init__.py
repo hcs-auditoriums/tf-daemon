@@ -12,13 +12,15 @@ established: guides/tf5_api.md.
     <- MMIX ..., full dump of every mix parameter, sync close   (parsed: EQ)
     -> MMIX sync close
     <- MMIX set-param  (a change on the desk / another app / scene recall)
+    -> MPRC subscribe "Processing", ...       then each other function in tf5.functions, one at a time
     <-> EEVT KeepAlive
 
 Modules:
 
 - codec:  the wire format (elements, messages, frames) and the few messages we build
 - guard:  what may be sent (read-only by default); every outgoing frame is checked
-- dump:   the console's parameter tree / data image, and a channel's EQ settings
+- dump:   a function's parameter tree / data image, and a channel's EQ
+- tree:   the TF5's V4.55 tree (tf5_v455.json): frame tags, descriptor MD5s, each parameter's schema
 - client: TFEditorClient, the session (connect, sync, keepalive, user-requested writes)
 
 Run ``python -m tf_daemon.console.editor <console-ip>`` to print the EQ (read-only).

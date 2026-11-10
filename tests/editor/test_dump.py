@@ -27,7 +27,19 @@ from tf_daemon.console.editor.dump import Dump, channel_eq, dump_blob
 def test_dump_parses_header_and_tree(mixing):
     assert mixing.func == "Mixing" and mixing.desc_md5 == DESC_MD5["Mixing"]
     names = [c.name for c in mixing.root.children]
-    assert names == ["InputChannel", "StInChannel", "Mix", "Stereo"]
+    assert names == [  # the V4.55 tree (tf5_v455.json), the console's order
+        "InputChannel",
+        "StInChannel",
+        "FxRtnChannel",
+        "Group",
+        "Mix",
+        "StMix",
+        "Matrix",
+        "FxBus",
+        "Stereo",
+        "Mono",
+        "DCA",
+    ]
     ic = mixing.root.child("InputChannel")
     assert ic.arraysize == 40
     assert len(mixing.data) == mixing.root.datasize

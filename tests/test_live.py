@@ -95,6 +95,19 @@ def test_ring_out_is_offered_with_the_simulated_desks_faders(status):
     assert tf5["eq"]["fader_writes"]
 
 
+def test_any_desk_parameter_is_read(status):
+    """Every function of the simulated desk syncs; /api/tf5/param reads any parameter, with its schema."""
+    wait_for("/api/tf5/status", lambda s: all(f["synced"] for f in s["eq"]["functions"].values()))
+    _, dca = get("/api/tf5/param?func=Mixing&path=DCA:0/Fader/Level")
+    assert isinstance(dca["value"], int) and dca["spec"]["min"] == -32768 and dca["family"] == "mix"
+    _, ha = get("/api/tf5/param?func=Processing&path=BuiltIn/InputPort:0/HeadAmp/Gain")
+    assert ha["value"] == 4500 and ha["writable"]  # demo mode: every write family is on
+    _, scene = get("/api/tf5/param?func=Setup&path=Scene/LastScene")
+    assert isinstance(scene["value"], str) and scene["spec"]["type"] == "str"
+    _, tf5 = get("/api/tf5/status")
+    assert tf5["eq"]["scene_recall"] and "phantom" in tf5["eq"]["write_families"]
+
+
 def test_rf_sweeps_the_receiver_range(status):
     _, qlxd = get("/api/qlxd/state")
     freqs = [r["frequency_mhz"] * 1e6 for r in qlxd["receivers"]]

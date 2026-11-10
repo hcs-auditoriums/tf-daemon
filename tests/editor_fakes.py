@@ -10,7 +10,9 @@ from helpers import wait_until
 import tf_daemon
 from tf_daemon.console.editor.codec import DUMP, EVENT, EVENT_REPLY, SET_PARAM, SUBSCRIBE, parse_message
 from tf_daemon.console.editor.guard import ALLOWED_PARAM_CMDS, check_outbound
+from tf_daemon.console.editor.tree import FUNCTIONS, TAGS
 from tf_daemon.console.sim_editor import (
+    MOBILE_PASSWORD,
     PASSWORD,
     C,
     SimEditor,
@@ -18,6 +20,7 @@ from tf_daemon.console.sim_editor import (
     console_hash,
     default_mixing_values,
     dump_message,
+    function_dump,
     mixing_tree,
     property_tree,
     set_param,
@@ -46,14 +49,15 @@ CAPTURED_NAMES = {
 
 
 def assert_read_only(fake):
-    """Every frame the client sent passes the guard and is a handshake/keepalive message."""
+    """Every frame the client sent passes the guard and is a handshake/keepalive message (for any
+    of the TF5's functions: subscribing one is read-only)."""
     assert fake.raw, "client sent nothing"
     for tag, payload in fake.raw:
-        check_outbound(tag, payload)
+        check_outbound(tag, payload, functions=FUNCTIONS)
         cmd = parse_message(payload).cmd
         assert cmd in ALLOWED_PARAM_CMDS | {EVENT, EVENT_REPLY}
         assert cmd not in (SET_PARAM, DUMP)
-        assert tag in ("MPRO", "MMIX", "EEVT")
+        assert tag in (*TAGS.values(), "EEVT")
     for _cmd, name, args in fake.events_from_client():
         if name == "SetClientType":
             assert args == "TYPE:StageMix SYNCDIR:2"
@@ -63,6 +67,8 @@ __all__ = [
     "C",
     "SimEditor",
     "PASSWORD",
+    "MOBILE_PASSWORD",
+    "function_dump",
     "build_dump",
     "console_hash",
     "default_mixing_values",

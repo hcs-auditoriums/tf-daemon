@@ -125,6 +125,19 @@ eq_write = false
 # on switches (it raises gain to find feedback, and its Mute & cancel button
 # mutes the channels). Only while a person runs a ring-out. Needs eq_write.
 fader_write = false
+# The rest of the desk over the same connection (each needs eq = true). Which functions to
+# read (default: all ten of the TF5's; Mixing is required; the Property data with the console
+# password is always dropped):
+# functions = ["Property", "Mixing", "Processing", "FX", "Setup", "Volatile", "Status", "SceneList", "SceneStatus", "ConsoleSetup"]
+# Writing more of the desk, one switch per kind of parameter, only ever on a person's edit and
+# within the desk's own ranges (docs/configuration.md). Phantom power can damage gear.
+mix_write = false         # faders / ON of every other strip, pan, balance, sends, DCA / mute groups, cue
+processing_write = false  # phase, digital gain, gate, comp, bus PEQ, 1-knob, GEQ, delay, output gain
+headamp_write = false     # head-amp gain
+phantom_write = false     # +48V and the phantom master
+label_write = false       # channel names, colours, icons
+fx_write = false          # FX / insert FX bypass, mix balance, parameters
+scene_recall = false      # recall a scene
 
 # Named inputs. index is the 0-based capture channel on the device. Every input
 # can be viewed in the browser; these get buttons and are always analyzed, the

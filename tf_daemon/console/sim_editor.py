@@ -1,341 +1,93 @@
 """Simulated TF5, the TF Editor side (console/editor): the console side of the handshake
-recorded from TF Editor (guides/tf5_api.md, section 6), with synthetic MMSXLIT dumps. It
-applies and echoes set-params like the TF5, so "Apply to desk" works against it, and
-records every frame the client sends so tests can check that nothing but read-only
-handshake traffic left the client.
-
-The MMSXLIT builder covers the subset of the Mixing tree tf-daemon reads, with the TF5's
-parameter names, widths and InputChannel collection order, so real wire addresses resolve.
+recorded from TF Editor (guides/tf5_api.md, section 6), serving all 10 functions of the V4.55
+tree on their own frame tags (subscribe, hash compare, dump, set-param echo, pushes), with
+dumps built by sim_tree.py from the real tree so real wire addresses resolve. It applies and
+echoes set-params like the TF5, so writes work against it, answers ``RecallScene`` with
+``onRecalledScene`` (and updates ``Setup/Scene/LastScene``), and records every frame the client
+sends so tests can check that nothing but read-only handshake traffic left the client.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
+import re
 import socket
 import struct
 import threading
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from .editor.codec import (
     DESC_MD5,
-    DUMP,
     EVENT,
     HASH_COMPARE,
     SET_PARAM,
     SYNC_CLOSE,
     SYNC_OPEN,
-    T_S32,
     T_STR,
-    T_U8,
-    T_U16,
-    T_U32,
     FrameReader,
     Message,
-    element,
     event,
     frame,
     message,
     parse_message,
 )
 from .editor.dump import Dump
+from .editor.tree import FUNCTIONS, TAGS, function_of_tag
+from .sim_tree import (
+    MOBILE_PASSWORD,
+    PASSWORD,
+    C,
+    build_dump,
+    console_hash,
+    default_mixing_values,
+    default_values,
+    dump_message,
+    function_dump,
+    function_tree,
+    mixing_tree,
+    property_tree,
+    set_param,
+    wire_address,
+)
 
 log = logging.getLogger(__name__)
 
-STR, INT, UINT = 0, 1, 2
-PASSWORD = "s3cret-Pa55word"  # in the fake Property dump; must never leak anywhere
+RECALL_STATUS = "OK"  # onRecalledScene's STATUS on success (the real desk's token is PENDING)
 
-
-# ---------------------------------------------------------------------- MMSXLIT builder
-
-
-@dataclass
-class C:
-    """A collection: name, array size, params [(name, type, elemsize, arraysize)], children."""
-
-    name: str
-    arraysize: int = 1
-    params: list[tuple[str, int, int, int]] = field(default_factory=list)
-    children: list[C] = field(default_factory=list)
-
-
-def _p(name: str, typ: int, size: int, arr: int = 1) -> tuple[str, int, int, int]:
-    return (name, typ, size, arr)
-
-
-def _datasize(c: C) -> int:
-    return sum(p[2] * p[3] for p in c.params) + sum(_datasize(ch) * ch.arraysize for ch in c.children)
-
-
-def _desc(c: C, offset: int) -> bytes:
-    prs = b"".join(
-        b"PR " + struct.pack("<BHH", t, size, arr) + name.encode().ljust(24, b"\0") for name, t, size, arr in c.params
-    )
-    kids, off = b"", sum(p[2] * p[3] for p in c.params)
-    for ch in c.children:
-        kids += _desc(ch, off)
-        off += _datasize(ch) * ch.arraysize
-    head = (
-        b"COL0"
-        + c.name.encode().ljust(24, b"\0")
-        + struct.pack("<5I", len(prs), len(kids), offset, _datasize(c), c.arraysize)
-    )
-    return head + prs + kids
-
-
-def build_dump(root: C, values: dict[str, int | str] | None = None, md5: str | None = None) -> bytes:
-    """An MMSXLIT blob for ``root``; ``values`` by name path ("InputChannel:3/PEQ/On")."""
-    desc = _desc(root, 0)
-    data = bytearray(_datasize(root) * root.arraysize)
-    md5 = md5 or hashlib.md5(desc).hexdigest()
-    head = (
-        b"MMSXLIT\0"
-        + root.name.encode().ljust(36, b"\0")
-        + md5.encode().ljust(36, b"\0")
-        + struct.pack("<II", len(desc), len(data))
-    )
-    blob = head + desc + bytes(data)
-    if values:
-        d = Dump(blob)
-        for path, v in values.items():
-            off, prm = d.locate(path)
-            if prm.type == STR:
-                raw = str(v).encode()[: prm.elemsize - 1].ljust(prm.elemsize, b"\0")
-            else:
-                raw = int(v).to_bytes(prm.elemsize, "little", signed=prm.type == INT)
-            data[off : off + prm.elemsize] = raw
-        blob = head + desc + bytes(data)
-    return blob
-
-
-def _band(name: str, arr: int = 1, switch: str | None = None) -> C:
-    ps = (
-        [_p("Type", UINT, 1)]
-        + ([_p(switch, UINT, 1)] if switch else [])
-        + [_p("Frequency", UINT, 4), _p("Gain", INT, 2), _p("Q", UINT, 2)]
-    )
-    return C(name, arr, ps)
-
-
-def _peq(hpf: bool, mids: int, low_switch: str | None, high_switch: str | None) -> C:
-    bank = [C("OneKnob", 1, [_p("On", UINT, 1), _p("Mode", STR, 12), _p("Depth", UINT, 1)])]
-    if hpf:
-        bank.append(C("HPF", 1, [_p("On", UINT, 1), _p("Frequency", UINT, 4), _p("Slope", UINT, 1)]))
-    bank.append(_band("BandL", switch=low_switch))
-    if mids:
-        bank.append(_band("Band", mids))
-    bank.append(_band("BandH", switch=high_switch))
-    backup = C("OneKnobBackup", 1, [], [b for b in bank[1:]])  # same bands, after Bank (as on the TF5)
-    return C("PEQ", 1, [_p("On", UINT, 1)], [C("Bank", 1, [_p("Type", STR, 8)], bank), backup])
-
-
-# InputChannel's collections on the TF5, in order: PEQ is 7 and Fader 19 on the wire.
-INPUT_CHANNEL_CHILDREN = [
-    "Label",
-    "Patch",
-    "Signal",
-    "BuiltIn",
-    "Slot",
-    "Input",
-    "DirectOut",
-    "PEQ",
-    "Gate",
-    "Comp",
-    "AutoMixer",
-    "ToMix",
-    "ToStMix",
-    "ToFX",
-    "ToMono",
-    "ToStereo",
-    "SubGroup",
-    "DCAGroup",
-    "MuteGroup",
-    "Fader",
-    "Library",
+__all__ = [  # the builders live in sim_tree.py; re-exported for the tests and console/sim.py
+    "C",
+    "MOBILE_PASSWORD",
+    "PASSWORD",
+    "SimEditor",
+    "build_dump",
+    "console_hash",
+    "default_mixing_values",
+    "default_values",
+    "dump_message",
+    "function_dump",
+    "function_tree",
+    "mixing_tree",
+    "property_tree",
+    "set_param",
+    "wire_address",
 ]
 
 
-def mixing_tree() -> C:
-    """The shape of the TF5's Mixing function (subset), same parameter names and widths, and
-    InputChannel's collections in the TF5's order so real wire addresses resolve."""
-    label = C("Label", 1, [_p("Name", STR, 64), _p("Color", STR, 8)])
-    fader = C("Fader", 1, [_p("Level", INT, 2), _p("On", UINT, 1)])
-    real = {
-        "Label": label,
-        "Patch": C("Patch", 1, [_p("Port", STR, 16)]),
-        "PEQ": _peq(True, 2, None, "LPFOn"),
-        "Fader": fader,
-    }
-    inputs = [real.get(n) or C(n, 1, [_p("Dummy", UINT, 1)]) for n in INPUT_CHANNEL_CHILDREN]
-    return C(
-        "Mixing",
-        1,
-        [],
-        [
-            C("InputChannel", 40, [], inputs),
-            C("StInChannel", 4, [], [label, _peq(False, 0, "HPFOn", "LPFOn"), fader]),
-            C("Mix", 8, [], [label, fader]),
-            C("Stereo", 2, [], [label, _peq(False, 2, "HPFOn", "LPFOn"), fader]),
-        ],
-    )
-
-
-def default_mixing_values() -> dict[str, int | str]:
-    """Ch1 as captured from the real console (guide section 5); a few others for variety."""
-    v: dict[str, int | str] = {}
-    for x in range(40):
-        b = f"InputChannel:{x}/PEQ"
-        v.update(
-            {
-                f"InputChannel:{x}/Label/Name": f"ch{x + 1}",
-                f"{b}/On": 1,
-                f"{b}/Bank/Type": "BOLD",
-                f"{b}/Bank/HPF/Frequency": 800,
-                f"{b}/Bank/HPF/Slope": 12,
-                f"{b}/Bank/BandL/Type": 1,
-                f"{b}/Bank/BandL/Frequency": 1250,
-                f"{b}/Bank/BandL/Q": 700,
-                f"{b}/Bank/Band:0/Frequency": 10000,
-                f"{b}/Bank/Band:0/Q": 700,
-                f"{b}/Bank/Band:1/Frequency": 40000,
-                f"{b}/Bank/Band:1/Q": 700,
-                f"{b}/Bank/BandH/Type": 1,
-                f"{b}/Bank/BandH/Frequency": 100000,
-                f"{b}/Bank/BandH/Q": 700,
-            }
-        )
-    b = "InputChannel:0/PEQ/Bank"
-    v.update(
-        {
-            "InputChannel:0/Label/Name": "GRA",
-            f"{b}/HPF/On": 1,
-            f"{b}/HPF/Frequency": 2000,
-            f"{b}/BandL/Type": 0,
-            f"{b}/BandL/Frequency": 1600,
-            f"{b}/BandL/Gain": -520,
-            f"{b}/BandL/Q": 140,
-            f"{b}/Band:0/Frequency": 8000,
-            f"{b}/Band:0/Gain": -1410,
-            f"{b}/Band:0/Q": 250,
-            f"{b}/Band:1/Frequency": 33500,
-            f"{b}/Band:1/Gain": -570,
-            f"{b}/Band:1/Q": 350,
-            f"{b}/BandH/Type": 1,
-            f"{b}/BandH/Frequency": 100000,
-            f"{b}/BandH/Gain": 460,
-            f"{b}/BandH/Q": 700,
-        }
-    )
-    b = "InputChannel:1/PEQ"
-    v.update(
-        {"InputChannel:1/Label/Name": "Pastor", f"{b}/On": 0, f"{b}/Bank/Band:0/Gain": 600, f"{b}/Bank/OneKnob/On": 1}
-    )
-    for x in range(2):
-        b = f"Stereo:{x}/PEQ"
-        v.update(
-            {
-                f"Stereo:{x}/Label/Name": "Stereo",
-                f"{b}/On": 1,
-                f"{b}/Bank/Type": "BOLD",
-                f"{b}/Bank/BandL/Frequency": 1250,
-                f"{b}/Bank/BandL/Q": 700,
-                f"{b}/Bank/Band:0/Frequency": 10000,
-                f"{b}/Bank/Band:0/Q": 700,
-                f"{b}/Bank/Band:1/Frequency": 40000,
-                f"{b}/Bank/Band:1/Q": 700,
-                f"{b}/Bank/BandH/Frequency": 100000,
-                f"{b}/Bank/BandH/Q": 700,
-            }
-        )
-    v["Stereo:1/PEQ/Bank/BandL/Type"] = 2  # the low band as a high-pass filter...
-    v["Stereo:1/PEQ/Bank/BandL/HPFOn"] = 1  # ...switched on
-    v["Stereo:1/PEQ/Bank/BandL/Frequency"] = 800
-    v["Stereo:1/PEQ/Bank/Band:1/Gain"] = -300
-    return v
-
-
-def property_tree() -> C:
-    return C(
-        "Property",
-        1,
-        [],
-        [
-            C("Specification", 1, [], [C("Unit", 1, [_p("Model", STR, 16)])]),
-            C("Status", 1, [], [C("CommSession", 4, [_p("ClientType", STR, 16), _p("State", UINT, 4)])]),
-            C("UserAccount", 1, [], [C("Unit", 1, [_p("Password", STR, 32)])]),
-        ],
-    )
-
-
-def wire_address(dump: Dump, path: str) -> tuple[list[int], list[int]]:
-    """Name path -> (wire path, index per level): the inverse of Dump.resolve."""
-    wp, idx, _ = dump.address(path)
-    return wp, idx
-
-
-def set_param(
-    func: str, path: list[int], idx: list[int], value: int | str, origin: int = 0xA1, vtype: int | None = None
-) -> bytes:
-    """A console -> client set-param notification (built only by the FAKE console)."""
-    if isinstance(value, str):
-        v = element(T_STR, value)
-    else:
-        v = element(vtype or (T_S32 if value < 0 else T_U32), [value])
-    return message(
-        SET_PARAM,
-        [
-            element(T_U8, b"\0"),
-            element(T_STR, func),
-            element(T_STR, func),
-            element(T_U16, [len(path)]),
-            element(T_U32, path),
-            element(T_U32, idx),
-            element(T_U32, [origin]),
-            v,
-        ],
-    )
-
-
-def dump_message(func: str, blob: bytes) -> bytes:
-    return message(
-        DUMP,
-        [
-            element(T_U8, b"\0"),
-            element(T_STR, func),
-            element(T_STR, func),
-            element(T_U16, [0]),
-            element(T_U32, []),
-            element(T_U32, []),
-            element(T_U32, [240]),
-            element(T_U8, blob),
-            element(T_U8, b""),
-        ],
-    )
-
-
-def console_hash(func: str, md5: str | None = None) -> bytes:
-    return message(
-        HASH_COMPARE,
-        [
-            element(T_U8, b"\0"),
-            element(T_STR, func),
-            element(T_U8, bytes.fromhex(md5 or DESC_MD5[func])),
-            element(T_U8, hashlib.md5(func.encode()).digest()),
-        ],
-    )
-
-
-# ---------------------------------------------------------------------- fake console
-
-
 class SimEditor:
-    """Console side of TCP 50368. Records everything the client sends in ``received``."""
+    """Console side of TCP 50368. Records everything the client sends in ``received``.
+
+    ``mixing_values``: the Mixing data (default: default_mixing_values()); ``values``: per other
+    function, values over its demo values (sim_tree.default_values). ``functions``: which it
+    serves (default all 10); a subscribe to another gets no answer.
+    """
 
     def __init__(
         self,
         mixing_values: dict[str, int | str] | None = None,
         *,
+        values: dict[str, dict[str, int | str]] | None = None,
+        functions: Iterable[str] = FUNCTIONS,
         send_on_set_client_type: bool = True,
         send_mixing_dump: bool = True,
         mixing_md5: str | None = None,
@@ -348,26 +100,38 @@ class SimEditor:
         self.send_on_set_client_type = send_on_set_client_type
         self.send_mixing_dump = send_mixing_dump
         self.mixing_md5 = mixing_md5 or DESC_MD5["Mixing"]
-        self.mixing_blob = build_dump(mixing_tree(), self.mixing_values, md5=self.mixing_md5)
-        self.mixing = Dump(self.mixing_blob)  # for computing wire addresses
-        self.property_blob = build_dump(
-            property_tree(),
-            {
-                "Specification/Unit/Model": "TF5",
-                "Status/CommSession:0/ClientType": "Editor",
-                "UserAccount/Unit/Password": PASSWORD,
-            },
-            md5=DESC_MD5["Property"],
-        )
+        self.dumps: dict[str, Dump] = {}  # function -> the desk's live data
+        self._heads: dict[str, bytes] = {}  # function -> MMSXLIT header + descriptor
+        served = set(functions) | {"Property", "Mixing"}
+        for func in (f for f in FUNCTIONS if f in served):
+            v = self.mixing_values if func == "Mixing" else {**default_values(func), **(values or {}).get(func, {})}
+            self._load(func, function_dump(func, v, self.mixing_md5 if func == "Mixing" else None))
+        self.mixing_blob = self.blob("Mixing")
+        self.property_blob = self.blob("Property")
         self.received: list[tuple[str, Message]] = []
-        self.writes: list[tuple[str, int]] = []  # (name path, value) of every set-param the client sent
-        self.on_write: Callable[[str, int], None] | None = None  # after a client's set-param is applied
+        self.writes: list[tuple[str, int | str]] = []  # (name path, value) of every Mixing set-param the client sent
+        self.all_writes: list[tuple[str, str, int | str]] = []  # (function, name path, value), every function
+        self.recalls: list[str] = []  # RecallScene NUMBERs the client sent
+        self.on_write: Callable[[str, int], None] | None = None  # after a client's Mixing set-param is applied
         self.raw: list[tuple[str, bytes]] = []
         self.srv = socket.create_server((host, port))
         self.port = self.srv.getsockname()[1]
         self.conns: list[socket.socket] = []
         self._lock = threading.Lock()
         threading.Thread(target=self._accept, daemon=True).start()
+
+    def _load(self, func: str, blob: bytes) -> None:
+        desc_len = struct.unpack_from("<I", blob, 0x50)[0]
+        self._heads[func] = blob[: 0x58 + desc_len]
+        self.dumps[func] = Dump(blob)
+
+    @property
+    def mixing(self) -> Dump:
+        return self.dumps["Mixing"]
+
+    def blob(self, func: str) -> bytes:
+        """The MMSXLIT dump of ``func`` with the desk's current values."""
+        return self._heads[func] + bytes(self.dumps[func].data)
 
     # -------------------------------------------------- server
 
@@ -377,6 +141,7 @@ class SimEditor:
                 conn, _ = self.srv.accept()
             except OSError:
                 return
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.conns.append(conn)
             threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
 
@@ -400,40 +165,53 @@ class SimEditor:
         conn.sendall(frame(tag, payload))
 
     def _respond(self, conn: socket.socket, tag: str, msg: Message) -> None:
-        if tag == "MPRO" and msg.cmd == HASH_COMPARE:
-            self._send(conn, "MPRO", console_hash("Property"))
-            self._send(conn, "MPRO", message(SYNC_OPEN))
-            self._send(conn, "MPRO", dump_message("Property", self.property_blob))
-            self._send(conn, "MPRO", message(SYNC_CLOSE))
-        elif tag == "MMIX" and msg.cmd == HASH_COMPARE:
-            self._send(conn, "MMIX", console_hash("Mixing", self.mixing_md5))
-            if self.send_mixing_dump:
-                self._send(conn, "MMIX", message(SYNC_OPEN))
-                self._send(conn, "MMIX", dump_message("Mixing", self.mixing_blob))
-                self._send(conn, "MMIX", message(SYNC_CLOSE))
-        elif tag == "MMIX" and msg.cmd == SET_PARAM:
-            e = msg.elements
-            name, _, _ = self.mixing.resolve(e[4].value, e[5].value)
-            with self._lock:
-                self.writes.append((name, e[7].value[0]))
-                self.mixing.apply(e[4].value, e[5].value, e[7].value[0])
-            if self.on_write is not None:
-                self.on_write(name, e[7].value[0])
-            if self.echo_writes:
-                self._send(
-                    conn,
-                    "MMIX",
-                    set_param("Mixing", e[4].value, e[5].value, e[7].value[0], origin=0xA0, vtype=e[7].type),
-                )
+        func = function_of_tag(tag)
+        if func in self.dumps and msg.cmd == HASH_COMPARE:
+            self._send(conn, tag, console_hash(func, self.mixing_md5 if func == "Mixing" else None))
+            if func != "Mixing" or self.send_mixing_dump:
+                with self._lock:
+                    blob = self.blob(func)
+                self._send(conn, tag, message(SYNC_OPEN))
+                self._send(conn, tag, dump_message(func, blob))
+                self._send(conn, tag, message(SYNC_CLOSE))
+        elif func in self.dumps and func != "Property" and msg.cmd == SET_PARAM:
+            self._set(conn, func, msg)
         elif tag == "EEVT" and msg.cmd == EVENT:
             name, args = msg.elements[2].value, msg.elements[3].value
             self._send(conn, "EEVT", event(name, args, reply=True))
             if name == "SetClientType":
-                prop = Dump(self.property_blob)
-                wp, idx = wire_address(prop, "Status/CommSession:1/ClientType")
+                wp, idx = wire_address(self.dumps["Property"], "Status/CommSession:1/ClientType")
                 self._send(conn, "MPRO", set_param("Property", wp, idx, args.split()[0][5:]))
                 if self.send_on_set_client_type:
                     self._send(conn, "EEVT", event("onSetClientType"))
+            elif name == "RecallScene":
+                self._recall(conn, args)
+
+    def _set(self, conn: socket.socket, func: str, msg: Message) -> None:
+        e = msg.elements
+        value: Any = e[7].value if e[7].type == T_STR else e[7].value[0]
+        dump = self.dumps[func]
+        name, _, _ = dump.resolve(e[4].value, e[5].value)
+        with self._lock:
+            dump.apply(e[4].value, e[5].value, value)
+            self.all_writes.append((func, name, value))
+            if func == "Mixing":
+                self.writes.append((name, value))
+        if func == "Mixing" and self.on_write is not None:
+            self.on_write(name, value)
+        if self.echo_writes:
+            self._send(conn, TAGS[func], set_param(func, e[4].value, e[5].value, value, origin=0xA0, vtype=e[7].type))
+
+    def _recall(self, conn: socket.socket, args: str) -> None:
+        """Like the TF5: recall, report the scene now loaded, and announce it."""
+        number = dict(t.partition(":")[::2] for t in args.split()).get("NUMBER", "")
+        with self._lock:
+            self.recalls.append(number)
+        ok = re.fullmatch(r"[AB]\d{2,3}", number) is not None and int(number[1:]) <= 99
+        if ok and "Setup" in self.dumps:
+            self.push_change("Scene/LastScene", number, func="Setup")
+            self.push_change("Scene/EditFlag", 0, func="Setup")
+        self._send(conn, "EEVT", event("onRecalledScene", f"STATUS:{RECALL_STATUS if ok else 'Error'} NUMBER:{number}"))
 
     # -------------------------------------------------- test controls
 
@@ -448,20 +226,27 @@ class SimEditor:
         for c in list(self.conns):
             c.sendall(data)
 
-    def push_change(self, path: str, value: int | str, **kw) -> None:
-        wp, idx = wire_address(self.mixing, path)
-        self.push("MMIX", set_param("Mixing", wp, idx, value, **kw))
+    def push_change(self, path: str, value: int | str, func: str = "Mixing", **kw: Any) -> None:
+        """A change "on the desk": applied to the desk's data and pushed to every client."""
+        dump = self.dumps[func]
+        wp, idx = wire_address(dump, path)
+        with self._lock:
+            dump.apply(wp, idx, value)
+        self.push(TAGS[func], set_param(func, wp, idx, value, **kw))
 
     def push_event(self, name: str, args: str = "") -> None:
         self.push("EEVT", event(name, args))
 
-    def push_dump(self, values: dict[str, int | str]) -> None:
-        """A full Mixing dump with ``values`` over the defaults (e.g. after a scene recall)."""
-        merged = {**self.mixing_values, **values}
-        blob = build_dump(mixing_tree(), merged, md5=self.mixing_md5)
-        self.push("MMIX", message(SYNC_OPEN))
-        self.push("MMIX", dump_message("Mixing", blob))
-        self.push("MMIX", message(SYNC_CLOSE))
+    def push_dump(self, values: dict[str, int | str], func: str = "Mixing") -> None:
+        """A full dump of ``func`` with ``values`` over the defaults (e.g. after a scene recall)."""
+        base = self.mixing_values if func == "Mixing" else default_values(func)
+        blob = function_dump(func, {**base, **values}, self.mixing_md5 if func == "Mixing" else None)
+        with self._lock:
+            self._load(func, blob)
+        tag = TAGS[func]
+        self.push(tag, message(SYNC_OPEN))
+        self.push(tag, dump_message(func, blob))
+        self.push(tag, message(SYNC_CLOSE))
 
     def sent_by_client(self) -> list[tuple[str, tuple[int, int, int]]]:
         with self._lock:
@@ -483,6 +268,3 @@ class SimEditor:
     def close(self) -> None:
         self.drop_connections()
         self.srv.close()
-
-
-# ---------------------------------------------------------------------- RCP (TCP 49280)

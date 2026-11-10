@@ -12,8 +12,9 @@ from flask_sock import Sock
 from ..config import TF5Config
 from ..dsp.eq import CURVE_FREQS, eq_curve
 from . import coverage
-from .editor.client import TFEditorClient
-from .editor.guard import WRITABLE, WRITE_LIMITS
+from .editor import tree
+from .editor.client import Changes, TFEditorClient
+from .editor.guard import FAMILIES, WRITABLE, WRITE_LIMITS, WriteNotAllowed, writable
 from .patch import patch_from, source_label
 from .rcp import TF5Client
 from .strip import Strip
@@ -58,6 +59,16 @@ class TF5Module:
       PUT /api/tf5/fader/<usb> {"level": raw | omitted, "on": 0 | 1 | omitted, "confirm": true}: SET that
                               input channel's fader (dB x 100, -32768 = -inf) and / or on switch (the
                               sidebar's fader and ON button: a person's drag or click; needs tf5.fader_write)
+      GET  /api/tf5/param?func=Mixing&path=DCA:0/Fader/Level
+                              any parameter: {"func", "path", "value" (raw; null if not received, or a
+                              password), "spec" (editor/tree.py schema), "family" (the enabled write family
+                              that covers it, or null), "writable"}; 404 unknown parameter / tf5.eq off
+      POST /api/tf5/param     {"func": "Mixing", "changes": [[path, raw], ...], "confirm": true}: SET any
+                              parameters a write family allows (guard.FAMILIES, each behind its tf5.*_write
+                              switch). 400 without confirm or with a bad value, 403 when no enabled family
+                              covers a path; else {"ok", "results": [{path, value, confirmed, actual}]}
+      POST /api/tf5/event/recall_scene  {"number": "A05", "confirm": true}: RECALL a scene (needs
+                              tf5.scene_recall); {"ok", "number", "confirmed", "status"}
     """
 
     name = "tf5"
@@ -79,7 +90,14 @@ class TF5Module:
         self.eq_version = 0  # bumped whenever the console's mixing data (EQ included) changes
         if cfg.eq:
             self.eq_client = TFEditorClient(
-                cfg.host, cfg.eq_port, on_change=self._eq_changed, writes=cfg.eq_write, fader_writes=cfg.fader_write
+                cfg.host,
+                cfg.eq_port,
+                on_change=self._eq_changed,
+                writes=cfg.eq_write,
+                fader_writes=cfg.fader_write,
+                families=[f.name for f in FAMILIES.values() if getattr(cfg, f.switch.removeprefix("tf5."))],
+                functions=cfg.functions,
+                scene_recall=cfg.scene_recall,
             )
 
     def _eq_changed(self) -> None:
@@ -165,6 +183,38 @@ class TF5Module:
         for r in results:
             r["path"] = r["path"].split("/", 1)[1]
         return results
+
+    def param(self, func: str, path: str) -> dict[str, Any]:
+        """Any parameter of the desk: its raw value (None until received, and always for a
+        password), its schema and whether an enabled write family covers it. KeyError if the
+        V4.55 tree has no such parameter."""
+        spec = tree.spec(func, path)
+        ec = self.eq_client
+        fam = writable(func, path, ec.enabled_families) if ec is not None else None
+        return {
+            "func": func,
+            "path": path,
+            "value": ec.get(path, func) if ec is not None else None,
+            "spec": spec.as_dict(),
+            "family": fam.name if fam else None,
+            "writable": fam is not None,
+        }
+
+    def write_params(self, func: str, changes: Changes) -> list[dict[str, Any]]:
+        """SET parameters of ``func``: ``[(name path, raw value)]``. Only on a person's request
+        (POST /api/tf5/param with confirm); only what an enabled write family allows (see
+        TFEditorClient.write)."""
+        ec = self.eq_client
+        if ec is None:
+            raise WriteNotAllowed("the console's editor protocol is off (tf5.eq = false)")
+        return ec.write(changes, func=func)
+
+    def recall_scene(self, number: str) -> dict[str, Any]:
+        """RECALL scene ``number`` ("A05") on the desk. Only on a person's request."""
+        ec = self.eq_client
+        if ec is None:
+            raise WriteNotAllowed("the console's editor protocol is off (tf5.eq = false)")
+        return ec.recall_scene(number)
 
     def eq(self, usb: int) -> dict[str, Any]:
         """EQ of the console channel feeding USB input ``usb`` and its response curve (dB)."""
@@ -255,6 +305,54 @@ class TF5Module:
             log.info("Fader set from the page on USB %d: level=%s on=%s", usb + 1, level, on)
             return jsonify({"ok": True, "results": results})
 
+        @bp.get("/param")
+        def param_get():
+            if self.eq_client is None:
+                return jsonify({"error": "tf5.eq is off"}), 404
+            func, path = request.args.get("func", "Mixing"), request.args.get("path", "")
+            try:
+                return jsonify(self.param(func, path))
+            except KeyError as e:
+                return jsonify({"error": str(e.args[0])}), 404
+
+        @bp.post("/param")
+        def param_set():
+            # Changes the desk: only a person's edit (the page sends confirm with each).
+            body = request.get_json(silent=True) or {}
+            if body.get("confirm") is not True:
+                return jsonify({"ok": False, "error": 'changing the desk needs "confirm": true'}), 400
+            func, changes = body.get("func", "Mixing"), body.get("changes")
+            if (
+                not isinstance(func, str)
+                or not isinstance(changes, list)
+                or not changes
+                or not all(
+                    isinstance(c, list)
+                    and len(c) == 2
+                    and isinstance(c[0], str)
+                    and isinstance(c[1], int | str)
+                    and not isinstance(c[1], bool)
+                    for c in changes
+                )
+            ):
+                return jsonify({"ok": False, "error": 'body needs "func" and "changes": [[path, raw value], ...]'}), 400
+            if self.eq_client is None:
+                return jsonify({"ok": False, "error": "tf5.eq is off"}), 404
+            return self._desk_call(lambda: {"results": self.write_params(func, [(c[0], c[1]) for c in changes])})
+
+        @bp.post("/event/recall_scene")
+        def recall_scene_route():
+            # Changes the desk: only a person's click (the page sends confirm with it).
+            body = request.get_json(silent=True) or {}
+            if body.get("confirm") is not True:
+                return jsonify({"ok": False, "error": 'recalling a scene needs "confirm": true'}), 400
+            number = body.get("number")
+            if not isinstance(number, str):
+                return jsonify({"ok": False, "error": 'body needs "number": "A05"'}), 400
+            if self.eq_client is None:
+                return jsonify({"ok": False, "error": "tf5.eq is off"}), 404
+            return self._desk_call(lambda: self.recall_scene(number))
+
         @bp.get("/strip/<int:usb>")
         def strip_get(usb: int):
             return jsonify(self.strip.get(usb))
@@ -276,6 +374,20 @@ class TF5Module:
             return jsonify({"ok": True, "applied": done})
 
         app.register_blueprint(bp)
+
+    @staticmethod
+    def _desk_call(call: Callable[[], dict[str, Any]]) -> Any:
+        """Run a confirmed desk change for a route: 403 not allowed, 400 refused, 503 unreachable."""
+        try:
+            result = call()
+        except (WriteNotAllowed, PermissionError) as e:
+            return jsonify({"ok": False, "error": str(e)}), 403
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+        except (ConnectionError, OSError) as e:
+            return jsonify({"ok": False, "error": f"desk not reachable: {e}"}), 503
+        log.info("Desk changed from the page: %s", result)
+        return jsonify({"ok": True, **result})
 
     def start(self) -> None:
         self.client.start()

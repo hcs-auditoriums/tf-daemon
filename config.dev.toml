@@ -1,6 +1,6 @@
 # Development config: every feature on, for use with simulated hardware.
 #   python -m tf_daemon --config config.dev.toml --demo
-# --demo also turns on tf5.eq and tf5.eq_write against the simulated console.
+# --demo also turns on tf5.eq and every write switch (tf5.eq_write, ...) against the simulated console.
 # Anything not set here comes from the defaults in tf_daemon/config.py.
 
 [server]

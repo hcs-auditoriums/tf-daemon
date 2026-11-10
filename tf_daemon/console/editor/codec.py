@@ -11,6 +11,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from .tree import DESC_MD5, TAGS  # noqa: F401  (re-exported: the guard and client use them)
+
 if TYPE_CHECKING:
     from .dump import Prm
 
@@ -32,12 +34,10 @@ DUMP = (0x01, 0x14, 0x01)  # received only; NEVER sent
 EVENT = (0x03, 0x01, 0x01)
 EVENT_REPLY = (0x03, 0x01, 0x10)
 
-# Frame tag per function. Only these two are ever subscribed.
-TAGS = {"Property": "MPRO", "Mixing": "MMIX"}
+# Frame tag and descriptor MD5 per function: tree.py (the V4.55 tree, tf5_v455.json). Which of
+# them the client subscribes is config tf5.functions; the guard refuses any other.
+# A console with other firmware answers the hash compare with its own MD5.
 EVENT_TAG = "EEVT"
-# Descriptor MD5s of the TF5 the protocol was read from (firmware specific).
-# Sent in the hash compare; a console with other firmware answers with its own.
-DESC_MD5 = {"Property": "3a7c8d4c85f89f1eaa834f96630cec3d", "Mixing": "8d0d0bdd394a9abb80ab12ed1500eddc"}
 CLIENT_TYPE = "TYPE:StageMix SYNCDIR:2"  # SYNCDIR 2 = console -> client. NEVER 1.
 ORIGIN_SELF = 0xA0  # "the sender's own change": the console applies and echoes it (guide 4.4)
 
@@ -178,15 +178,19 @@ def event(name: str, args: str = "", reply: bool = False) -> bytes:
     )
 
 
-def set_param_message(path: list[int], idx: list[int], prm: Prm, value: int) -> bytes:
-    """A Mixing set-param as TF Editor sends it (guide 4.4); used only by TFEditorClient.write."""
-    v = element(T_S32 if prm.type == 1 else T_U32, [value])
+def set_param_message(path: list[int], idx: list[int], prm: Prm, value: int | str, func: str = "Mixing") -> bytes:
+    """A set-param as TF Editor sends it (guide 4.4): e1 = e2 = the function, the value as s32 /
+    u32 / string by the parameter's type. Used only by TFEditorClient.write."""
+    if prm.type == 0:
+        v = element(T_STR, value)
+    else:
+        v = element(T_S32 if prm.type == 1 else T_U32, [value])
     return message(
         SET_PARAM,
         [
             element(T_U8, b"\0"),
-            element(T_STR, "Mixing"),
-            element(T_STR, "Mixing"),
+            element(T_STR, func),
+            element(T_STR, func),
             element(T_U16, [len(path)]),
             element(T_U32, path),
             element(T_U32, idx),

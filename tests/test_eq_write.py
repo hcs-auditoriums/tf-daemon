@@ -147,6 +147,8 @@ def test_fader_writes_need_their_own_flag(console, client_for):
     assert sent_sets(console) == []
     assert not TFEditorClient("127.0.0.1", 9, fader_writes=True).fader_writes  # and never without writes
     f = client_for(console, writes=True, fader_writes=True)
+    console.push_change(FADER_1, 0)  # from the schema default (-inf), so -inf below is a change
+    assert wait_until(lambda: f.get(FADER_1) == 0)
     res = f.write([("InputChannel:3/Fader/On", 1 - f.get("InputChannel:3/Fader/On")), (FADER_1, -32768)])
     assert all(r["confirmed"] for r in res) and [p for p, _ in console.writes] == ["InputChannel:3/Fader/On", FADER_1]
 

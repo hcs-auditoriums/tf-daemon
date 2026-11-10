@@ -12,6 +12,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from flask import Flask, jsonify
 from flask_sock import Sock
@@ -22,7 +23,7 @@ from .audio.engine import AudioEngine
 from .audio.module import AudioModule
 from .audio.sources import Source, SourceError, SynthSource, WavSource
 from .audio.stage import DeskMix, StageSettings, StageSource
-from .config import Config
+from .config import WRITE_SWITCHES, Config
 from .console.module import TF5Module
 from .console.patch import patch_from, stereo_inputs
 from .console.sim import SimConsole
@@ -133,10 +134,19 @@ def _tf5_module(
         return None
     if source == "device":
         return TF5Module(cfg.tf5, on_names, on_gains)
-    # Demo: the simulated console on free local ports, with EQ read and write on.
+    # Demo: the simulated console on free local ports, with EQ read and every write family on
+    # (it is a simulator: nothing real changes).
     assert sim is not None
+    switches: dict[str, Any] = {key: True for key in WRITE_SWITCHES}
     demo = replace(
-        cfg.tf5, host=sim.host, port=sim.rcp_port, eq_port=sim.eq_port, eq=True, eq_write=True, fader_write=True
+        cfg.tf5,
+        host=sim.host,
+        port=sim.rcp_port,
+        eq_port=sim.eq_port,
+        eq=True,
+        eq_write=True,
+        fader_write=True,
+        **switches,
     )
     return TF5Module(demo, on_names, on_gains, simulator=sim)
 
