@@ -31,7 +31,10 @@ and from the desk the fader in dB with an upright meter, `OFF` for a channel tha
 `RING` / `FEEDBACK` while a ring comes from it (never on a channel that is off: it can't be
 feeding one). Beside it a minimap shows the whole desk in small (a bar per input at its fader
 height, ringing ones blinking, a window over the tiles in view): tap or drag it to jump there.
-On a phone the View / Traces / Show menus sit behind **☰**.
+On a phone (or a phone on its side) the View / Traces / Show menus sit behind **☰**, and the page
+scrolls: the plot first, then the console strip with its fader lying across (no EQ thumbnail, the
+EQ is on the plot). A channel's Input / Gate / Comp / Sends, the mic check and an EQ band's settings
+open as a sheet from the foot of the screen (from the right on its side), clear of the plot.
 
 **Keyboard.** **/** opens a command palette on every page: type to find a command or a
 channel, Tab to move, Enter to run. Shortcuts include **Shift+← / Shift+→** (pages),

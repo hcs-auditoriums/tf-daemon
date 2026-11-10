@@ -97,17 +97,19 @@ const fmtPan = (v) => (v === 0 ? "C" : v < 0 ? `L${-v}` : `R${v}`);
 
 
 
-// A short fader (a tablet) has no room for every label: keep those at least a line apart,
-// the most useful first, and hide the rest (their ticks stay).
-const SCALE_KEEP = ["0", "-inf", "10", "-10", "-20", "-40", "-30", "-60"], SCALE_GAP = 12;
+// A short fader (a tablet; a phone's, lying across) has no room for every label: keep those
+// at least a label apart, the most useful first, and hide the rest (their ticks stay).
+const SCALE_KEEP = ["0", "-inf", "10", "-10", "-20", "-40", "-30", "-60"];
+const across = (track) => track.clientWidth > track.clientHeight;   // a phone's fader (style.css)
 const scaleFit = new ResizeObserver(([entry]) => {
-  const h = entry.contentRect.height, kept = [];
+  const flat = across(entry.target), kept = [];
+  const h = flat ? entry.contentRect.width : entry.contentRect.height, gap = flat ? 30 : 12;
   const labels = [...entry.target.parentElement.querySelectorAll(".cp-scale span")];
   for (const key of SCALE_KEEP) {
     const t = labels.find((s) => s.dataset.db === key);
     if (!t) continue;
     const y = faderPos(key === "-inf" ? null : Number(key)) * h;
-    t.hidden = kept.some((k) => Math.abs(k - y) < SCALE_GAP);
+    t.hidden = kept.some((k) => Math.abs(k - y) < gap);
     if (!t.hidden) kept.push(y);
   }
 });
@@ -191,17 +193,16 @@ function wireFader(ch, track) {
     e.preventDefault();
     track.focus();
     track.setPointerCapture(e.pointerId);
-    dragging = {
-      startY: e.clientY, startPos: faderPos(currentLevel(ch)), height: track.getBoundingClientRect().height,
-      fine: e.shiftKey,
-    };
+    const r = track.getBoundingClientRect(), flat = across(track);
+    dragging = { flat, start: flat ? e.clientX : e.clientY, startPos: faderPos(currentLevel(ch)), size: flat ? r.width : r.height, fine: e.shiftKey };
   });
   track.addEventListener("pointermove", (e) => {
     if (!dragging || !track.hasPointerCapture(e.pointerId)) return;
     const scale = e.shiftKey ? 0.2 : 1;  // Shift: fine
-    const pos = Math.min(1, Math.max(0, dragging.startPos + (dragging.startY - e.clientY) / dragging.height * scale));
+    const at = dragging.flat ? e.clientX : e.clientY, moved = dragging.flat ? at - dragging.start : dragging.start - at;
+    const pos = Math.min(1, Math.max(0, dragging.startPos + moved / dragging.size * scale));
     if (e.shiftKey !== dragging.fine) {  // re-anchor when Shift changes, so the cap doesn't jump
-      Object.assign(dragging, { startY: e.clientY, startPos: faderPos(currentLevel(ch)), fine: e.shiftKey });
+      Object.assign(dragging, { start: at, startPos: faderPos(currentLevel(ch)), fine: e.shiftKey });
       return;
     }
     setLevel(ch, posToDb(pos));
@@ -257,14 +258,13 @@ function updatePanel(ch) {
   refs.on.className = `cp-on ${isOn ? "on" : "off"}${refs.onWritable ? " writable" : ""}`;
   refs.on.textContent = isOn ? "ON" : "OFF";
   if (refs.onWritable) refs.on.setAttribute("aria-pressed", String(isOn));
-  const level = l && "level" in l ? l.level : v("Fader/Level"), pos = `${faderPos(level) * 100}%`;
+  const level = l && "level" in l ? l.level : v("Fader/Level");
   if (refs.track && refs.track.classList.contains("writable")) {
     refs.track.setAttribute("aria-valuetext", `${fmtDb(level)} dB`);
   }
   refs.cap.classList.toggle("dragging", !!dragging);
   refs.level.textContent = `${fmtDb(level)} dB`;
-  refs.fill.style.height = pos;
-  refs.cap.style.bottom = pos;
+  refs.track.style.setProperty("--p", faderPos(level));   // the fill's and the cap's (style.css)
   if (refs.panKey && p[refs.panKey]) {
     const pan = v(refs.panKey);
     refs.panVal.textContent = fmtPan(pan);
@@ -354,21 +354,21 @@ export function renderPanel() {
     const scale = el("div", "cp-scale");
     const track = el("div", "cp-track");
     for (const d of [10, 5, 0, -5, -10, -20, -30, -40, -60, null]) {
-      const pos = `${faderPos(d) * 100}%`;
+      const pos = faderPos(d);
       const labelled = d === null || [10, 0, -10, -20, -30, -40, -60].includes(d);
       if (labelled) {
         const t = el("span", d === 0 ? "zero" : "", d === null ? "−∞" : d > 0 ? `+${d}` : String(d));
-        t.style.bottom = pos;
+        t.style.setProperty("--p", pos);
         t.dataset.db = d === null ? "-inf" : d;
         scale.append(t);
       }
       const tick = el("i", d === 0 ? "zero" : labelled ? "" : "minor");
-      tick.style.bottom = pos;
+      tick.style.setProperty("--p", pos);
       track.append(tick);
     }
-    refs.fill = el("div", "cp-fill");
+    const fill = el("div", "cp-fill");
     refs.cap = el("div", "cp-cap");
-    track.append(refs.fill, refs.cap);
+    track.append(fill, refs.cap);
     fader.append(scale, track);
     faderSec.append(fader);
     scaleFit.disconnect();

@@ -1,6 +1,6 @@
 """The pages' layout and keyboard in a real (headless) browser, against the demo server: ring
 labels that never overlap, the one-line ring list, the channel tiles, the sidebar's tool row and
-fader, the phone top bar, the shortcuts and the / command palette, the RF waterfall filled on
+fader, the phone top bar and layout, the shortcuts and the / command palette, the RF waterfall filled on
 opening, and the Config page's switches. Read-only, like tests/test_browser.py (fixtures in
 conftest.py).
 """
@@ -101,6 +101,44 @@ def test_phone_top_bar_hides_the_menus_behind_one_button(page):
     page.locator("#view-menu").wait_for(state="visible", timeout=2000)
     btn.click()
     page.locator("#view-menu").wait_for(state="hidden", timeout=2000)
+
+
+BOX = "e => { const r = e.getBoundingClientRect(); return {x: r.left, y: r.top, w: r.width, h: r.height}; }"
+
+
+def test_phone_page_scrolls_with_the_strip_under_the_plot_and_sheets_for_settings(page):
+    """A phone (style.css, PHONE in audio/shared.js): the page scrolls instead of squeezing the
+    plot; the strip follows it at full width, no EQ thumbnail, its fader across; the strip's
+    settings open as a sheet at the foot of the screen (upright) or its right side (on its side)."""
+    page.set_viewport_size({"width": 390, "height": 844})
+    open_page(page, "/")
+    page.wait_for_function(TILES, timeout=8000)
+    track = page.locator("#console-panel .cp-track")
+    track.wait_for(timeout=10000)
+    sizes = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.scrollHeight, innerHeight]")
+    assert sizes[0] <= 390 and sizes[1] > sizes[2]  # scrolls down, never sideways
+    plot, panel = page.locator("#spectrum").evaluate(BOX), page.locator("#console-panel").evaluate(BOX)
+    assert plot["h"] >= 380 and panel["y"] >= plot["y"] + plot["h"] - 1 and panel["w"] == 390
+    assert not page.locator("#console-panel .cp-eq").is_visible()
+    t, cap = track.evaluate(BOX), page.locator(".cp-cap").evaluate(BOX)
+    assert t["w"] > 250 and t["h"] < 20 and cap["h"] >= 44  # across, a thumb-sized cap
+    assert t["x"] <= cap["x"] + cap["w"] / 2 <= t["x"] + t["w"]
+    assert track.evaluate("e => getComputedStyle(e).touchAction") in ("pan-y", "manipulation")  # the page still scrolls
+    page.locator(".cp-tool", has_text="IN").click()
+    sheet = page.locator("#strip-panel")
+    sheet.wait_for(timeout=3000)
+    s = sheet.evaluate(BOX)
+    assert s["x"] == 0 and s["w"] == 390 and abs(s["y"] + s["h"] - 844) <= 1
+    page.keyboard.press("Escape")
+
+    page.set_viewport_size({"width": 844, "height": 390})  # on its side
+    tabs, btn = page.locator("header .tabs").evaluate(BOX), page.locator("#menus-btn").evaluate(BOX)
+    assert abs(btn["y"] - tabs["y"]) < tabs["h"] and page.locator("header").evaluate(BOX)["h"] < 70  # one row
+    assert page.locator("#spectrum").evaluate(BOX)["h"] >= 300
+    page.locator(".cp-tool", has_text="GATE").click()
+    sheet.wait_for(timeout=3000)
+    s = sheet.evaluate(BOX)
+    assert abs(s["x"] + s["w"] - 844) <= 1 and s["y"] == 0 and s["h"] == 390 and s["w"] <= 844 * 0.52 + 1
 
 
 def test_keyboard_shortcuts_and_command_palette(page):

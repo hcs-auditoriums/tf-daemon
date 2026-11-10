@@ -8,6 +8,9 @@ export const canvas = $("spectrum");
 export const ctx = canvas.getContext("2d");
 const css = getComputedStyle(document.documentElement);
 export const color = (name) => css.getPropertyValue(name).trim();
+// A phone, upright or on its side: the page scrolls, the fader lies across, panels open as
+// sheets. The same query heads the phone rules in style.css.
+export const PHONE = matchMedia("(max-width: 720px), (max-height: 500px)");
 export const C = {
   grid: color("--grid"), gridStrong: color("--grid-strong"), muted: color("--muted"),
   avg: color("--avg"), avgFill: color("--avg-fill"), peak: color("--peak"), rta: color("--rta"),

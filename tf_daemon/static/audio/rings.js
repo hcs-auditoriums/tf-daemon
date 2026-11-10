@@ -3,7 +3,7 @@
 import { channelTile } from "./console.js";
 import { paintChannelTiles, selectInput } from "./controls.js";
 import { H, PAD, W, xOf } from "./plot.js";
-import { $, ctx, el, fmtHz, loadInt, save, state } from "./shared.js";
+import { $, ctx, el, fmtHz, loadInt, PHONE, save, state } from "./shared.js";
 
 // Ring events from the detector (tf_daemon/dsp/ring.py), for all analyzed inputs.
 // Severity: a growing ring is feedback; a sustained ring, or a tail that keeps
@@ -107,7 +107,7 @@ function renderRings() {
 
 // The list folds to its title bar (remembered in this browser); the header alert unfolds it.
 // Folded at first on a phone, where it would cover the plot.
-let ringsOpen = loadInt("tf.ringsOpen", matchMedia("(max-width: 720px)").matches ? 0 : 1) === 1;
+let ringsOpen = loadInt("tf.ringsOpen", PHONE.matches ? 0 : 1) === 1;
 function setRingsOpen(open) {
   ringsOpen = open;
   save("tf.ringsOpen", open ? 1 : 0);

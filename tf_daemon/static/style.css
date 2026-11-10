@@ -532,15 +532,17 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
 .cp-fader { display: grid; grid-template-columns: 1fr 14px 1fr; flex: 1; min-height: 150px; padding: 16px 0; }
 /* The margin clears the cap, which reaches 19px past the track on each side. */
 .cp-scale { position: relative; width: 30px; justify-self: end; margin-right: 22px; color: var(--muted); font-size: 11px; }
-.cp-scale span { position: absolute; right: 0; transform: translateY(50%); line-height: 1; }
+/* Positions along the fader: --p, 0 (−∞) to 1 (+10), set by audio/console.js on each mark and
+   on the track (the fill and the cap). Upright here; across on a phone (below). */
+.cp-scale span { position: absolute; right: 0; bottom: calc(var(--p) * 100%); transform: translateY(50%); line-height: 1; }
 .cp-scale span.zero { color: var(--text); font-weight: 700; }
-.cp-track { position: relative; width: 14px; border-radius: 7px; background: var(--bg); border: 1px solid var(--border); }
-.cp-track i { position: absolute; left: -9px; right: -9px; height: 1px; background: var(--grid-strong); }
+.cp-track { --p: 0; position: relative; width: 14px; border-radius: 7px; background: var(--bg); border: 1px solid var(--border); }
+.cp-track i { position: absolute; left: -9px; right: -9px; bottom: calc(var(--p) * 100%); height: 1px; background: var(--grid-strong); }
 .cp-track i.minor { left: -4px; right: -4px; background: var(--grid); }
 .cp-track i.zero { left: -12px; right: -12px; background: var(--muted); }
-.cp-fill { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 7px; background: var(--avg-fill); }
+.cp-fill { position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--p) * 100%); border-radius: 7px; background: var(--avg-fill); }
 .cp-cap {
-  position: absolute; left: 50%; width: 52px; height: 30px; transform: translate(-50%, 50%);
+  position: absolute; left: 50%; bottom: calc(var(--p) * 100%); width: 52px; height: 30px; transform: translate(-50%, 50%);
   border-radius: 4px; background: linear-gradient(#e8ecf1, #b9c1cb);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
@@ -563,26 +565,6 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
 .cp-extra { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
 .cp-extra dt { color: var(--muted); }
 .cp-extra dd { margin: 0; text-align: right; }
-
-@media (max-width: 720px) {
-  .workspace { flex-direction: column; }
-  .console-panel { width: 100%; min-width: 0; max-height: 45vh; border-left: 0; border-top: 1px solid var(--border); }
-  .workspace > main { min-height: 260px; }
-  /* A phone: the top bar in two rows at most (no title, the connection as its dot alone). */
-  header { gap: 8px; padding: 6px 8px; }
-  header h1 { display: none; }
-  .conn { font-size: 0; }
-  /* The audio page: tabs, the connection and ☰ on one row; a ring alert on the next; the
-     menus only while ☰ is open. */
-  header:has(#menus-btn) .status { display: contents; }
-  header:has(#menus-btn) .conn { order: 2; margin-left: auto; }
-  .menus-btn { display: block; order: 3; }
-  header:has(#menus-btn) .ring-alert { order: 4; flex: 1 0 100%; }
-  header .menus { order: 5; flex: 1 0 100%; flex-wrap: wrap; display: none; }
-  header.menus-open .menus { display: flex; }
-  .ch-step { min-height: 40px; }
-  nav button.ch-chip { min-height: 48px; }
-}
 
 /* ---------------------------------------------------------------- rings (audio page) */
 
@@ -612,10 +594,6 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
 main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { right: auto; left: 52px; }
 .ring-list[hidden] { display: none; }
 .ring-list.collapsed { width: auto; }
-@media (max-width: 720px) {
-  .ring-list, main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { left: 8px; right: 8px; width: auto; max-width: none; }
-  .ring-list.collapsed { right: auto; }
-}
 .rl-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 0 2px 4px; font-weight: 600; }
 .ring-list.collapsed .rl-head { padding-bottom: 0; }
 .rl-toggle { font: inherit; font-weight: 600; color: var(--text); background: none; border: 0; padding: 4px 2px; min-height: 28px; cursor: pointer; }
@@ -834,7 +812,6 @@ main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { ri
 .dyn-graph { position: static; display: block; width: 100%; height: 150px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
              touch-action: none; cursor: ew-resize; }
 @media (pointer: coarse) { .sp-toggle { min-height: 40px; } .sp-row input[type="range"] { height: 28px; } }
-@media (max-width: 720px) { .strip-panel { left: 8px; right: 8px; width: auto; max-width: none; top: 8px; } }
 /* A send in two lines: name, ON, PRE; then its level (and pan for a pair) with the value beside it. */
 .sp-send .sp-row { grid-template-columns: 1fr 52px; }
 .sp-send .sp-row .sp-name { display: none; }
@@ -873,3 +850,91 @@ button.help-row { cursor: pointer; }
 button.help-row:hover, button.help-row:focus-visible { background: #24435c; }
 div.help-row { color: var(--muted); }
 .help-keys { display: flex; gap: 4px; flex: none; }
+
+/* ---------------------------------------------------------------- a phone (upright or on its side)
+
+   The same query is PHONE in audio/shared.js. The page scrolls instead of fitting the screen:
+   the plot gets a fixed height (most of the screen), the console strip follows it at full
+   width with its fader lying across (a vertical swipe over it still scrolls the page) and
+   without the EQ thumbnail (the EQ is on the plot). The strip's settings, the mic check and
+   an EQ band's settings open as sheets at the screen's edge, not over the plot. */
+@media (max-width: 720px), (max-height: 500px) {
+  html, body { height: auto; min-height: 100%; }
+  main.split { flex: none; height: clamp(280px, 54svh, 560px); }
+  .workspace { flex: none; flex-direction: column; }
+  /* The top bar in one or two rows (no title, the connection as its dot alone). */
+  header { gap: 8px; padding: 6px 8px; }
+  header h1 { display: none; }
+  .status { flex: 0 1 auto; min-width: 0; }
+  .conn { font-size: 0; }
+  /* The audio page: tabs, the connection and ☰ on one row; a ring alert on the next; the
+     menus only while ☰ is open. */
+  header:has(#menus-btn) .status { display: contents; }
+  header:has(#menus-btn) .conn { order: 2; margin-left: auto; }
+  .menus-btn { display: block; order: 3; min-height: 40px; }
+  header:has(#menus-btn) .ring-alert { order: 4; flex: 1 0 100%; }
+  header .menus { order: 5; flex: 1 0 100%; flex-wrap: wrap; display: none; }
+  header.menus-open .menus { display: flex; }
+  .ch-step { min-height: 40px; }
+  nav button.ch-chip { min-height: 48px; }
+
+  /* The strip: name first (the page has scrolled the tiles away), then the tools, EQ summary
+     and Profiles, pan, ON, the fader. */
+  .console-panel { width: 100%; min-width: 0; overflow: visible; gap: 12px; padding: 12px; font-size: 13px;
+                   border-left: 0; border-top: 1px solid var(--border); }
+  .cp-head { order: -1; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; text-align: left; }
+  .cp-tools { margin: 0; gap: 6px; }
+  .cp-tool { min-height: 44px; font-size: 13px; letter-spacing: 0.02em; }
+  .console-panel .cp-eq { display: none; }
+  .cp-eqinfo { font-size: 12px; }
+  .cp-profmenu > summary { min-height: 40px; padding: 0 14px; }
+  .cp-panrow { grid-template-columns: 36px 1fr 36px; min-height: 40px; }
+  .cp-pan { height: 12px; }
+  .cp-pan span { width: 22px; height: 22px; }
+  .cp-label { font-size: 12px; }
+  /* The fader across: the track, its scale under it. */
+  .cp-fadersec { flex: none; }
+  .cp-fader { display: flex; flex-direction: column-reverse; gap: 12px; min-height: 0; padding: 26px 26px 4px; }
+  .cp-scale { width: auto; height: 14px; margin: 0; justify-self: auto; }
+  .cp-scale span { right: auto; bottom: auto; left: calc(var(--p) * 100%); transform: translateX(-50%); }
+  .cp-track { width: auto; height: 14px; }
+  .cp-track i, .cp-track i.minor, .cp-track i.zero { left: calc(var(--p) * 100%); right: auto; bottom: auto; width: 1px; height: auto; }
+  .cp-track i { top: -9px; bottom: -9px; }
+  .cp-track i.minor { top: -4px; bottom: -4px; }
+  .cp-track i.zero { top: -12px; bottom: -12px; width: 2px; }
+  .cp-fill { right: auto; top: 0; height: auto; width: calc(var(--p) * 100%); }
+  .cp-cap { left: calc(var(--p) * 100%); bottom: auto; top: 50%; width: 30px; height: 48px; transform: translate(-50%, -50%); transition-property: left; }
+  .cp-cap::after { left: 50%; right: auto; top: 7px; bottom: 7px; width: 2px; height: auto; margin: 0 0 0 -1px; }
+  .cp-fill { transition-property: width; }
+  .cp-track.writable { cursor: ew-resize; touch-action: pan-y; }
+  .cp-track.writable::before { inset: -22px -18px; }
+
+  /* Sheets: from the foot of the screen (upright), from the right (on its side). */
+  .strip-panel, .vocal-panel, .eq-pop {
+    position: fixed; inset: auto 0 0 0; z-index: 30; width: auto; max-width: none; max-height: 70svh;
+    border-radius: 12px 12px 0 0; padding-bottom: max(12px, env(safe-area-inset-bottom));
+    background: var(--panel); box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.55);
+  }
+  .eq-pop { left: 0 !important; top: auto !important; padding: 10px 16px max(12px, env(safe-area-inset-bottom)); font-size: 14px; }
+  .eqp-row { grid-template-columns: 84px 1fr 28px 40px; }
+  .eqp-num { width: 100%; }
+  .eqp-num input { flex: 1; width: auto; }
+
+  /* Rings: at the plot's foot, clear of the EQ toolbar at its top. */
+  .ring-list, main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list {
+    top: auto; bottom: 30px; left: 48px; right: 8px; width: auto; max-width: none; max-height: calc(100% - 90px);
+  }
+  .ring-list.collapsed { right: auto; }
+  .console-btn { width: 40px; height: 40px; top: 4px; right: 6px; }
+}
+@media (max-height: 500px) {
+  /* On its side: the plot fills the screen once the top bar has scrolled away; one top-bar row
+     (the ring alert beside the tabs); sheets from the right, over the plot's high end. */
+  main.split { height: max(240px, calc(100svh - 8px)); }
+  header:has(#menus-btn) .ring-alert { order: 1; flex: 1 1 0; }
+  .strip-panel, .vocal-panel, .eq-pop {
+    inset: 0 0 0 auto; width: min(380px, 52vw); max-height: none; border-radius: 12px 0 0 12px;
+    box-shadow: -8px 0 28px rgba(0, 0, 0, 0.55);
+  }
+  .eq-pop { left: auto !important; top: 0 !important; }
+}
