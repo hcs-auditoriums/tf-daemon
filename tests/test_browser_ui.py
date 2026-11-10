@@ -59,6 +59,12 @@ def test_channel_tiles_show_the_desk(page):
         "[...document.querySelectorAll('#channels .ch-chip')].some(b => b.style.getPropertyValue('--fader'))",
         timeout=8000,
     )
+    # The selected bank's right edge isn't covered by the next button (they overlap by a pixel).
+    on_top = page.evaluate(
+        """(() => { const b = document.querySelector('#banks [aria-pressed=true]'), r = b.getBoundingClientRect();
+                   return document.elementFromPoint(r.right - 0.5, r.top + r.height / 2) === b; })()"""
+    )
+    assert on_top
 
 
 def test_sidebar_tool_row_fits_and_fader_is_centred(page):

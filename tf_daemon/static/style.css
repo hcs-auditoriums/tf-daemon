@@ -68,6 +68,8 @@ nav button[aria-pressed="true"] { background: #24435c; border-color: var(--avg);
 .chbar #banks button:first-child { border-radius: 6px 0 0 6px; }
 .chbar #banks button:last-child { border-radius: 0 6px 6px 0; }
 .chbar #banks button + button { margin-left: -1px; }
+/* The neighbours overlap by a pixel: the selected one on top, or the next hides its right edge. */
+.chbar #banks button[aria-pressed="true"] { position: relative; z-index: 1; }
 .chbar #channels { flex: 1; min-width: 0; flex-wrap: nowrap; }
 .ch-step {
   flex: none; width: 48px; min-height: 48px; font: inherit; font-size: 24px; line-height: 1;
