@@ -19,6 +19,7 @@ from .meters import MeterClient
 from .patch import patch_from, source_label
 from .rcp import TF5Client
 from .strip import Strip
+from .strip_desk import DeskStrip
 
 if TYPE_CHECKING:
     from .sim import SimConsole
@@ -88,7 +89,6 @@ class TF5Module:
             log.info("tf5.username/password are set, but the TF5's remote protocol has no login; not sent")
         self.patch = patch = patch_from(cfg.usb_patch)
         self.client = TF5Client(cfg.host, cfg.port, patch, cfg.poll_s, on_names, on_gains)
-        self.strip = Strip(patch, self.client, simulator)  # gain, gate, comp, sends (strip.py)
         self.eq_client: TFEditorClient | None = None
         self.meters = (
             MeterClient(cfg.host, cfg.port, patch, cfg.meter_interval_ms, cfg.meter_point) if cfg.meters else None
@@ -105,6 +105,8 @@ class TF5Module:
                 functions=cfg.functions,
                 scene_recall=cfg.scene_recall,
             )
+        desk = DeskStrip(self.eq_client) if self.eq_client is not None else None
+        self.strip = Strip(patch, self.client, simulator, desk)  # input, EQ, dynamics, sends (strip.py)
 
     def _eq_changed(self) -> None:
         self.eq_version += 1
@@ -381,12 +383,8 @@ class TF5Module:
             changes = body.get("changes")
             if not isinstance(changes, dict) or not changes:
                 return jsonify({"ok": False, "error": 'body needs "changes": {parameter: value}'}), 400
-            try:
-                done = self.strip.put(usb, str(body.get("section")), changes, body.get("mix"))
-            except (ValueError, PermissionError) as e:
-                return jsonify({"ok": False, "error": str(e)}), 400
-            log.info("%s set from the page on USB %d: %s", body.get("section"), usb + 1, done)
-            return jsonify({"ok": True, "applied": done})
+            section, mix = str(body.get("section")), body.get("mix")
+            return self._desk_call(lambda: self.strip.put(usb, section, changes, mix))
 
         desk.register(app, bp, lambda: self.eq_client)  # /desk and its reads (scenes, recorder, FX, delay)
         app.register_blueprint(bp)

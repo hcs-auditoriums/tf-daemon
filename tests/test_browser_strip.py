@@ -72,8 +72,23 @@ def test_strip_panel_tabs_change_the_channel(page):
 
         panel.get_by_role("tab", name="Comp").click()
         panel.locator(".dyn-graph").wait_for(timeout=2000)
-        panel.get_by_role("button", name="Hard").click()
-        wait_strip(page, lambda d: d["comp"]["values"]["knee"] == "hard", "a hard knee")
+        knee = "SOFT-2" if before["comp"]["values"]["knee"] == "HARD" else "HARD"
+        panel.get_by_role("button", name=knee, exact=True).click()
+        wait_strip(page, lambda d: d["comp"]["values"]["knee"] == knee, f"knee {knee} on the desk")
+        page.wait_for_function(  # the desk's echo is reported
+            "document.querySelector('#strip-panel .sp-status').textContent === 'Confirmed by the desk.'", timeout=4000
+        )
+
+        # The Input tab: the source row (INPUT, with its port) is shown, not changeable from here.
+        panel.get_by_role("tab", name="Input").click()
+        source = panel.get_by_role("group", name="Source")
+        assert source.get_by_role("button", name="INPUT").get_attribute("aria-pressed") == "true"
+        assert source.get_by_role("button", name="USB").is_disabled()
+
+        # The EQ tab: the desk's EQ type and 1-knob EQ.
+        panel.get_by_role("tab", name="EQ").click()
+        panel.get_by_text("BOLD").wait_for(timeout=2000)
+        panel.get_by_label("Level").wait_for(timeout=2000)
 
         page.keyboard.press("Escape")
         panel.wait_for(state="hidden", timeout=2000)
@@ -82,6 +97,14 @@ def test_strip_panel_tabs_change_the_channel(page):
         level = panel.get_by_label(f"{send['name']} level")
         level.evaluate("(e) => { e.value = '500'; e.dispatchEvent(new Event('input', {bubbles: true})); }")
         wait_strip(page, lambda d: d["sends"]["mixes"][0]["level"] == -25, f"{send['name']} at -25 dB")
+
+        # A change made at the desk reaches the open panel (pushed over /ws/audio, tf5-strip).
+        panel.get_by_role("tab", name="Gate").click()
+        put("gate", {"on": gate_on})
+        page.wait_for_function(
+            f"document.querySelector('#strip-panel .sp-switches button').getAttribute('aria-pressed') === '{str(gate_on).lower()}'",
+            timeout=4000,
+        )
     finally:
         put("gate", {"on": before["gate"]["values"]["on"]})
         put("comp", {"knee": before["comp"]["values"]["knee"]})

@@ -17,7 +17,8 @@ Routes:
                                messages whenever they change. With a TF5, the
                                desk's state arrives as {"type": "tf5"} (on connect),
                                then {"type": "tf5-changes"} as values change on the
-                               desk, and {"type": "tf5-eq"} for the viewed input's EQ;
+                               desk, {"type": "tf5-eq"} for the viewed input's EQ and
+                               {"type": "tf5-strip"} for its input / dynamics (console/strip.py);
                                with tf5.meters, {"type": "tf5-meters"} level meters
                                (console/meters.py) at most every 0.1 s.
 """
@@ -37,6 +38,14 @@ from .engine import AudioEngine
 log = logging.getLogger(__name__)
 
 
+class StripFeed(Protocol):
+    """A channel's input, EQ and dynamics settings (console.strip.Strip)."""
+
+    def version(self) -> Any: ...  # changes whenever the desk's settings may have
+
+    def get(self, usb: int) -> dict[str, Any]: ...
+
+
 class ConsoleFeed(Protocol):
     """The mixing console's state, pushed to open audio pages (console.module.TF5Module)."""
 
@@ -53,6 +62,9 @@ class ConsoleFeed(Protocol):
     def eq(self, usb: int) -> dict[str, Any]: ...
 
     def meters_since(self, version: int) -> tuple[int, dict[str, Any] | None]: ...
+
+    @property
+    def strip(self) -> StripFeed: ...
 
 
 class AudioModule:
@@ -122,7 +134,7 @@ class AudioModule:
             meta_version = engine.meta_version
             ws.send(json.dumps(engine.metadata()))
             rings_version, rings_sent = None, 0.0
-            tf5_seq, eq_sent = 0, None
+            tf5_seq, eq_sent, strip_sent = 0, None, None
             if console is not None:
                 tf5_seq, snap = console.snapshot()
                 ws.send(json.dumps(snap))
@@ -141,6 +153,7 @@ class AudioModule:
                         ws.send(json.dumps(engine.rings.snapshot()))
                     if console is not None:
                         tf5_seq, eq_sent = _send_console(ws, console, tf5_seq, view, eq_sent)
+                        strip_sent = _send_strip(ws, console.strip, view, strip_sent)
                         if now - meter_sent >= 0.1:  # level meters: at most 10 a second
                             meter_version, levels = console.meters_since(meter_version)
                             if levels:
@@ -172,6 +185,19 @@ def _send_console(ws, console: ConsoleFeed, tf5_seq: int, view: list[int], eq_se
                 ws.send(json.dumps({"type": "tf5-eq", **eq}))
             eq_sent = (*key, eq)
     return tf5_seq, eq_sent
+
+
+def _send_strip(ws, strip: StripFeed, view: list[int], sent: Any) -> Any:
+    """Push the viewed input's strip (input, EQ, dynamics) when the desk's data changed and it differs."""
+    if not view:
+        return sent
+    key = (view[0], strip.version())
+    if sent is not None and key == sent[:2]:
+        return sent
+    data = strip.get(view[0])
+    if sent is None or sent[0] != view[0] or data != sent[2]:
+        ws.send(json.dumps({**data, "type": "tf5-strip"}))
+    return (*key, data)
 
 
 def _channel_arg(value: Any) -> int | None:

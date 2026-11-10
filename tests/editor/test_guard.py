@@ -235,6 +235,9 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
     needs a confirmation) and unmute.
     write() <- TF5Module.write_params (any write family; each needs its own tf5.*_write) <- only
       TF5Module's param_set <- POST /api/tf5/param ("confirm": true): a person's edit.
+    write() <- strip_desk.DeskStrip.put (input / 1-knob EQ / gate / comp; the processing, headamp
+      and phantom families) <- only Strip.put <- only TF5Module's strip_set <- PUT
+      /api/tf5/strip/<usb> ("confirm": true): a person's edit on the strip panel (added 2026-11-10).
     recall_scene() <- TF5Module.recall_scene (needs tf5.scene_recall) <- only
       TF5Module's recall_scene_route <- POST /api/tf5/event/recall_scene ("confirm": true).
     Nothing else in tf-daemon calls them."""
@@ -249,11 +252,23 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
             ("recall_scene", r"(\beq_client|\bec|self)\.recall_scene\("),
             ("apply_suggestion", r"\.apply_suggestion\("),
             ("undo", r"\.undo\("),
+            ("put", r"\.(?:strip|desk)\.put\("),
         ):
             for _ in re.finditer(pattern, code):
                 calls.setdefault(name, []).append(p.relative_to(PKG).as_posix())
-    # in write_eq, write_fader and write_params
-    assert calls.get("write") == ["console/module.py", "console/module.py", "console/module.py"]
+    # in write_eq, write_fader and write_params; and DeskStrip.put (the strip panel)
+    assert sorted(calls.get("write", [])) == ["console/module.py"] * 3 + ["console/strip_desk.py"]
+    strip_src = (PKG / "console" / "strip_desk.py").read_text(encoding="utf-8")
+    strip_defs = {m.group(1): m.start() for m in re.finditer(r"\n    def (\w+)\(", strip_src)}
+    strip_writes = [m.start() for m in re.finditer(r"\bec\.write\(", strip_src)]
+    assert [max((n for n, at in strip_defs.items() if at < w), key=lambda n: strip_defs[n]) for w in strip_writes] == [
+        "put"
+    ]
+    # DeskStrip.put only from Strip.put, and that only from the strip route, after the confirmation.
+    assert sorted(calls.get("put", [])) == ["console/module.py", "console/strip.py"]
+    strip_set = (PKG / "console" / "module.py").read_text(encoding="utf-8")
+    strip_set = strip_set[strip_set.index("def strip_set(usb: int):") :]
+    assert strip_set.index('.get("confirm") is not True') < strip_set.index("self.strip.put(")
     console_src = (PKG / "console" / "module.py").read_text(encoding="utf-8")
     assert "ec = self.eq_client" in console_src
     console_defs = {m.group(1): m.start() for m in re.finditer(r"\n    def (\w+)\(", console_src)}

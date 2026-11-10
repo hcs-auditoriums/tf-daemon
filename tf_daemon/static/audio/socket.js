@@ -9,6 +9,7 @@ import { autoRange } from "./range.js";
 import { onRings } from "./rings.js";
 import { connectWs } from "../common.js";
 import { $, state } from "./shared.js";
+import { onStripPush } from "./strip.js";
 import { wfPush } from "./waterfall.js";
 
 let sock = null;
@@ -26,6 +27,7 @@ export function connect() {
       else if (msg.type === "tf5-changes") onConsoleChanges(msg);
       else if (msg.type === "tf5-eq") onConsoleEq(msg);
       else if (msg.type === "tf5-meters") onConsoleMeters(msg);
+      else if (msg.type === "tf5-strip") onStripPush(msg);
       else onMeta(msg, ws);
     },
   });
