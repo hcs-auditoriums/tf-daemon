@@ -57,7 +57,7 @@ def test_every_simulated_device_is_up(status):
     assert m["qlxd"]["receivers"] == m["qlxd"]["online"] == 4
 
 
-@pytest.mark.parametrize("page", ["/", "/rf", "/qlxd", "/config"])
+@pytest.mark.parametrize("page", ["/", "/rf", "/qlxd", "/mix", "/config"])
 def test_pages_load(status, page):
     code, body = get(page)
     assert code == 200 and b"<html" in body.lower()
@@ -68,6 +68,14 @@ def test_channel_names_come_from_the_simulated_console(status):
     labels = {c["index"]: c["label"] for c in chans}
     assert labels[0] == "Pastor" and labels[32] == "Main L"  # config labels win
     assert labels[2] == "BGV 1"  # read from the console
+
+
+def test_the_desks_buses_dcas_and_geq_are_read(status):
+    """The Mix page's data (console/buses.py, busproc.py) and the SEND tab's sends from the desk."""
+    mix = wait_for("/api/tf5/mix", lambda d: d["synced"] and d["mute"][0]["name"] == "INPUT")
+    assert len(mix["masters"]) == 28 and mix["writable"]["mix"] and len(mix["sources"]) == 48
+    assert len(get("/api/tf5/mix/geq/st")[1]["bands"]) == 31 and get("/api/tf5/mix/eq/mtx1")[1]["eq"]
+    assert wait_for("/api/tf5/strip/1", lambda d: d["sends"].get("source") == "editor")["sends"]["pre_pan"]
 
 
 def test_desk_coverage_is_served(status):

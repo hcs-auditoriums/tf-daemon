@@ -219,6 +219,46 @@ def test_editor_has_a_single_send_path_and_one_guarded_write_builder():
     assert "SYNCDIR:1" not in everything and "TYPE:Editor" not in everything
 
 
+def _owner(src: str, pos: int) -> str:
+    """The method / function (any indent) whose body holds ``pos``."""
+    defs = [(m.start(), m.group(1)) for m in re.finditer(r"\n\s*def (\w+)\(", src)]
+    return max((d for d in defs if d[0] < pos), key=lambda d: d[0])[1]
+
+
+def _mix_page_writes_come_only_from_confirmed_routes(console_src: str) -> None:
+    """The Mix page and the SEND tab (console/buses.py, busproc.py, sends.py): TF5Module.write_params
+    <- only Buses.write <- only the setters below <- only their routes, each after confirmed()
+    (which refuses a body without "confirm": true); sends.py's put <- only module.py's strip_set,
+    after its own confirm check."""
+    src = {n: (PKG / "console" / f"{n}.py").read_text(encoding="utf-8") for n in ("buses", "busproc", "sends")}
+    assert [_owner(src["buses"], m.start()) for m in re.finditer(r"\.write_params\(", src["buses"])] == ["write"]
+    confirm = src["buses"][src["buses"].index("def confirmed()") :]
+    assert confirm.index('.get("confirm") is not True') < confirm.index("return body, None")
+    setters = {"buses": ["set_strip", "assign", "set_mute"], "busproc": ["set_geq", "set_eq"], "sends": ["put"]}
+    for name, code in src.items():
+        writers = [_owner(code, m.start()) for m in re.finditer(r"\b(?:self|self\.buses|buses)\.write\(", code)]
+        assert sorted(set(writers)) == sorted(setters[name]), (name, writers)
+    routes = {"set_strip": "mix_strip", "assign": "mix_assign", "set_mute": "mix_mute"}
+    routes |= {"set_geq": "mix_geq_set", "set_eq": "mix_eq_set"}
+    for name in ("buses", "busproc"):
+        code = src[name]
+        for setter in setters[name]:
+            uses = [_owner(code, m.start()) for m in re.finditer(rf"\bself\.{setter}\(", code)]
+            assert uses == [routes[setter]], (setter, uses)
+            route = code[code.index(f"def {routes[setter]}(") :]
+            assert (
+                route.index("body, err = confirmed()")
+                < route.index("err or desk_call(")
+                < route.index(f"self.{setter}(")
+            )
+    others = [p for p in PKG.rglob("*.py") if p.name not in ("buses.py", "busproc.py", "sends.py", "module.py")]
+    for p in others:
+        assert not re.search(r"\.(set_strip|set_mute|set_geq|set_eq|assign)\(|\bsends\.put\(", p.read_text("utf-8")), p
+    assert len(re.findall(r"\.sends\.put\(", console_src)) == 1
+    strip_set = console_src[console_src.index("def strip_set(usb: int):") :]
+    assert strip_set.index('.get("confirm") is not True') < strip_set.index("self.sends.put(")
+
+
 def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
     """write() <- TF5Module.write_eq <- either
       * vocal DeskWriter.apply_suggestion / undo <- POST /api/vocal/apply|undo ("confirm": true), or
@@ -262,7 +302,9 @@ def test_desk_writes_are_reachable_only_from_the_confirmed_routes():
         max((n for n, at in console_defs.items() if at < w), key=lambda n: console_defs[n]) for w in ec_writes
     ) == ["write_eq", "write_fader", "write_params"]
     # The generic write (any family) and the scene recall: each from its one route only, after the confirmation.
-    assert calls.get("write_params") == ["console/module.py"] and calls.get("recall_scene") == ["console/module.py"] * 2
+    assert sorted(calls.get("write_params", [])) == ["console/buses.py", "console/module.py"]
+    assert calls.get("recall_scene") == ["console/module.py"] * 2
+    _mix_page_writes_come_only_from_confirmed_routes(console_src)
     ec_recalls = [m.start() for m in re.finditer(r"\bec\.recall_scene\(", console_src)]
     owner = lambda pos: max((n for n, at in console_defs.items() if at < pos), key=lambda n: console_defs[n])  # noqa: E731
     assert [owner(w) for w in ec_recalls] == ["recall_scene"]

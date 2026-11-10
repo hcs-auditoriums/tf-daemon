@@ -44,6 +44,11 @@ tf_daemon/
   console/         ── the Yamaha TF5 over the network ──
     coverage.py    what can be read / written on the desk vs TF StageMix (docs/desk-coverage.md)
     strip.py       gain, gate, comp, sends per channel (/api/tf5/strip): RCP sends + a simulated store
+    sends.py       DeskSends: the SEND tab's sends (AUX level / ON / pre / pan, FX, MONO) from and
+                   to the desk over the editor protocol, in place of strip.py's once it is synced
+    buses.py       Buses: the Mix page (/mix, /api/tf5/mix): AUX / ST / MONO / MATRIX / DCA masters,
+                   DCA and mute group assignment, mute masters, cue; the one AUX 1-20 <-> Mix / StMix map
+    busproc.py     BusProcessing: the buses' 31-band GEQ (12-band rule) and PEQ (/api/tf5/mix/geq|eq)
     patch.py       which console source each USB capture channel carries
     rcp.py         TF5Client: names, faders, sends over RCP (TCP 49280)
     meters.py      MeterClient: level meters over RCP (mtrstart, read-only); probe CLI
@@ -73,10 +78,12 @@ tf_daemon/
     sim.py         simulated QLXD4 receivers (demo mode, tests)
     module.py      /qlxd page, HTTP + WebSocket routes
   static/          rf.html + rf.js (RF), qlxd.html + qlxd.js (wireless),
+                   mix.html + mix.js (the desk's buses, DCAs, mute groups, cue) with
+                   mix/geq.js (a bus's GEQ) and mix/peq.js (a bus's PEQ),
                    config.html + config.js, nav.js (all pages), style.css;
                    the page scripts are ES modules (no build step) sharing
-                   common.js ($, storage, JSON POST, reconnecting websocket,
-                   canvas sizing)
+                   common.js ($, el, storage, JSON POST / PUT, reconnecting websocket,
+                   canvas sizing, the fader law)
     index.html     the audio page; app.js draws it and starts everything
     audio/         its ES modules (no build step): shared.js (canvas, state),
                    plot.js (geometry, grid, traces, hover), socket.js (/ws/audio),

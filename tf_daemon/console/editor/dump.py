@@ -218,8 +218,8 @@ def dump_blob(msg: Message) -> bytes | None:
 # The mid bands as the TF5 labels them (low-mid, high-mid); numbered if a console has another count.
 MID_LABELS = ["LM", "HM"]
 
-# Console source (console/patch.py kinds) -> Mixing collection.
-COLLECTIONS = {"InCh": "InputChannel", "St": "Stereo"}
+# Console source (console/patch.py kinds, then the output buses by their own name) -> Mixing collection.
+COLLECTIONS = {"InCh": "InputChannel", "St": "Stereo", **{c: c for c in ("Stereo", "Mix", "StMix", "Matrix", "Mono")}}
 
 
 def channel_eq(dump: Dump, kind: str, x: int) -> dict[str, Any] | None:
@@ -243,6 +243,12 @@ def channel_eq(dump: Dump, kind: str, x: int) -> dict[str, Any] | None:
                 "on": bool(g(bank + "HPF/On")),
                 "freq": int(g(bank + "HPF/Frequency")) / 10,
                 "slope": int(_opt(g, bank + "HPF/Slope", 12)),
+            }
+        if _has(dump, f"{base}/Bank/LPF/On"):  # Mono only; not in the curve (dsp/eq.py)
+            eq["lpf"] = {
+                "on": bool(g(bank + "LPF/On")),
+                "freq": int(g(bank + "LPF/Frequency")) / 10,
+                "slope": int(g(bank + "LPF/Slope")),
             }
         eq["bands"].append(_band(g, bank + "BandL", "L", low=True))
         n_mid = (

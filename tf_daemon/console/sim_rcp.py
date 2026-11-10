@@ -103,8 +103,11 @@ def demo_rcp_values() -> dict[tuple[str, int, int], str]:
     for x, name in enumerate(["ST L", "ST R"]):
         v[(RCP_PREFIX["St"] + "Label/Name", x, 0)] = f'"{name}"'
         v[(RCP_PREFIX["St"] + "Fader/Level", x, 0)] = "0"
-    for m in range(20):
-        v[(RCP_PREFIX["Mix"] + "Label/Name", m, 0)] = f'"{DEMO_MIXES[m] if m < len(DEMO_MIXES) else f"Mix {m + 1}"}"'
+    for m in range(20):  # AUX 9-20 are stereo pairs, both halves named as on the desk ("Aux 9/10")
+        pair = 9 + (m - 8) // 2 * 2
+        v[(RCP_PREFIX["Mix"] + "Label/Name", m, 0)] = (
+            f'"{DEMO_MIXES[m] if m < len(DEMO_MIXES) else f"Aux{pair:>2}/{pair + 1}"}"'
+        )
     return v
 
 

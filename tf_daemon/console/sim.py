@@ -3,8 +3,9 @@
     python -m tf_daemon.console.sim                 # RCP on 49280, TF Editor on 50368
     python -m tf_daemon --demo                      # the whole app, this console in-process
 
-SimConsole runs SimRCP (sim_rcp.py) and SimEditor (sim_editor.py) as one desk: a fader
-moved on one side shows on the other, and the simulated stage hears its EQ and faders.
+SimConsole runs SimRCP (sim_rcp.py) and SimEditor (sim_editor.py) as one desk: a fader, a send
+or the stereo bus changed on one side shows on the other (``twin``), and the simulated stage
+hears its EQ and faders.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import re
 import time
 from typing import Any
 
+from .buses import N_AUX, N_FX, aux_bus, aux_send
 from .editor.dump import channel_eq
 from .sim_editor import SimEditor, default_mixing_values
 from .sim_rcp import DEMO_INPUTS, RCP_PREFIX, SimRCP
@@ -31,6 +33,28 @@ def demo_mixing_values() -> dict[str, int | str]:
     return v
 
 
+def twin(addr: str, x: int, y: int) -> str | None:
+    """The editor protocol's name path of an RCP address (as SimRCP stores it), or None."""
+    kind, _, path = addr.removeprefix("MIXER:Current/").partition("/")
+    if kind == "InCh":
+        ch = f"InputChannel:{x}"
+        if path in ("Fader/Level", "Fader/On", "ToStereo/Pan", "ToMono/Level", "ToMono/On"):
+            return f"{ch}/{path}"
+        if path.startswith("ToMix/") and y < N_AUX:
+            return f"{ch}/{aux_send(y)}/{path[6:]}"
+        if path.startswith("ToFx/") and y < N_FX:
+            return f"{ch}/ToFX:{y}/{path[5:]}"
+    elif kind == "St" and path in ("Fader/Level", "Fader/On", "Out/Balance"):
+        return f"Stereo:{x}/{path.replace('Out/', 'Output/')}"
+    elif kind == "Mix" and path == "Label/Name" and x < N_AUX:
+        return f"{aux_bus(x)}/Label/Name"
+    return None
+
+
+def _value(raw: str) -> int | str:
+    return raw.strip('"') if raw.startswith('"') else int(raw)
+
+
 class SimConsole:
     """A simulated TF5: RCP and the TF Editor protocol on one host.
 
@@ -42,10 +66,12 @@ class SimConsole:
         self.host = host
         self.rcp = SimRCP(host=host, port=rcp_port, drift_s=drift_s)
         mixing = demo_mixing_values()
-        inch = RCP_PREFIX["InCh"]
-        for x in range(40):  # one desk: the editor protocol sees the faders RCP does
-            mixing[f"InputChannel:{x}/Fader/Level"] = int(self.rcp.values.get((inch + "Fader/Level", x, 0), "-32768"))
-            mixing[f"InputChannel:{x}/Fader/On"] = int(self.rcp.values.get((inch + "Fader/On", x, 0), "1"))
+        self._paths: dict[str, tuple[str, int, int]] = {}  # editor path -> its RCP twin
+        for (addr, x, y), raw in self.rcp.values.items():  # one desk: the editor sees what RCP does
+            path = twin(addr, x, y)
+            if path is not None:
+                self._paths[path] = (addr, x, y)
+                mixing[path] = _value(raw)
         self.editor = SimEditor(mixing, host=host, port=eq_port)
         self.editor.on_write = self._editor_wrote
         self.rcp.on_set = self._rcp_set
@@ -58,19 +84,21 @@ class SimConsole:
 
     _FADER = re.compile(r"InputChannel:(\d+)/Fader/(Level|On)")
 
-    def _editor_wrote(self, path: str, value: int) -> None:
-        """A client set a fader over the editor protocol: the desk's fader moves, RCP sees it."""
-        m = self._FADER.fullmatch(path)
-        if m:
-            x = int(m.group(1))
-            self.rcp.held.add(x)
-            self.rcp.store(RCP_PREFIX["InCh"] + f"Fader/{m.group(2)}", x, 0, str(value))
+    def _editor_wrote(self, path: str, value: int | str) -> None:
+        """A client set something over the editor protocol that RCP has too (a fader, a send,
+        the stereo bus): the desk changes, RCP sees it."""
+        rcp = self._paths.get(path)
+        if rcp is None:
+            return
+        if self._FADER.fullmatch(path):
+            self.rcp.held.add(rcp[1])  # the drift leaves a fader a client set
+        self.rcp.store(*rcp, f'"{value}"' if isinstance(value, str) else str(value))
 
     def _rcp_set(self, addr: str, x: int, y: int, value: str) -> None:
-        """A fader moved "on the desk": editor-protocol clients see it too (origin: the console)."""
-        for kind in ("Level", "On"):
-            if addr == RCP_PREFIX["InCh"] + f"Fader/{kind}" and y == 0:
-                self.editor.push_change(f"InputChannel:{x}/Fader/{kind}", int(value))  # applies it too
+        """A change "on the desk": editor-protocol clients see it too (origin: the console)."""
+        path = twin(addr, x, y)
+        if path is not None:
+            self.editor.push_change(path, _value(value))  # applies it too
 
     def status(self) -> dict:
         return {
