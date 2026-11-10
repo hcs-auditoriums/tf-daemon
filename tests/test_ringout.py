@@ -178,6 +178,7 @@ def test_a_fader_moved_on_the_desk_stops_it_and_leaves_the_desk_alone():
 
 
 def test_the_page_going_away_pulls_the_faders_back(monkeypatch):
+    monkeypatch.setattr(ro, "HEARTBEAT_S", 2.0)  # the same timeout, sooner (stream time)
     desk, eng, r = rig(pa_leak_db=-40.0)
     r._sleep = lambda s: eng.run(max(s, 0.05))  # nobody touches the heartbeat
     r.start([(0, "generic", "speech")], tone=False)
@@ -186,6 +187,7 @@ def test_the_page_going_away_pulls_the_faders_back(monkeypatch):
     assert desk.level == -1000 and desk.on == 1
 
 
+@pytest.mark.slow  # a whole ring-out run (~1 s alone)
 def test_a_steady_tone_is_not_taken_for_feedback():
     desk, eng, r = rig(pa_leak_db=-40.0, tone_db=-5.0, tone_hz=1500.0)
     r.start([(0, "generic", "speech")], tone=False)
