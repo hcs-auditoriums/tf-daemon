@@ -14,7 +14,7 @@ vertical line; hovering shows frequency, how long ago, and level.
 **Editing the console, as on TF StageMix.** With the EQ shown on the spectrum (and
 `tf5.eq_write` on), drag a band's handle (frequency and gain), pinch for a bell's Q,
 double-tap a handle to put its gain back to 0 dB, or click it for its settings (type:
-bell / shelf, and LPF on the high band; values to type; locks). The toolbar at the top
+bell / shelf, and LPF on the high band; values to type; locks, after which the band shows a padlock). The toolbar at the top
 left switches the EQ and HPF on and off, undoes and redoes, and compares (A/B) with a
 copied EQ; its menu has Gain flat, Copy, Paste and Compare with before. Every value is
 held to the TF5's ranges. The console sidebar's tool row (**IN · EQ · GATE · COMP · SEND**, as

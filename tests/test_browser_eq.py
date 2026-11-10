@@ -1,5 +1,5 @@
 """EQ editing on the spectrum in a real (headless) browser, against the demo server's
-simulated desk: drag, type, locks, the toolbar (EQ / HPF on, undo, copy / paste / compare,
+simulated desk: drag, type, locks (in the settings), the toolbar (EQ / HPF on, undo, copy / paste / compare,
 gain flat), double-tap and pinch. These change the desk's EQ, each test on its own input (they
 run in parallel) and each puts it back. Fixtures in conftest.py, like tests/test_browser.py.
 """
@@ -163,10 +163,17 @@ def test_eq_bands_can_be_dragged_and_typed_on_the_spectrum(page):
         page.wait_for_function("window.tfEqBandShown() === null", timeout=3000)
         assert page.evaluate("window.tfEqReadout()") is None  # only while dragging
 
-        # Its lock (beside the label) keeps the frequency: a drag then changes only the gain.
+        # A frequency lock (in the settings; there is none to tap on the plot) keeps the
+        # frequency: a drag then changes only the gain.
         h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
-        page.mouse.click(box["x"] + h["lock"]["x"], box["y"] + h["lock"]["y"])
+        page.mouse.click(box["x"] + h["x"], box["y"] + h["y"])
+        pop.wait_for(timeout=3000)
+        pop.get_by_label("Lock Frequency").click()
         page.wait_for_function("window.tfEqHandles().find(h => h.key === 'HM').locked", timeout=3000)
+        page.keyboard.press("Escape")
+        pop.wait_for(state="detached", timeout=3000)
+        page.wait_for_timeout(400)  # not a double-tap with the click that opened the settings
+        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
         locked = desk_band("HM")
         x, y = box["x"] + h["x"], box["y"] + h["y"]
         page.mouse.move(x, y)

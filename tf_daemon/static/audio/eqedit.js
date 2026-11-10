@@ -5,8 +5,9 @@
 //   scroll on a handle  Q (bells)
 //   click a handle      its settings: type, frequency, gain, Q (HPF: on, frequency), to type in;
 //                       clicking it again closes them
-//   click its lock      locks its frequency (a drag then only changes the gain); again: unlocks
-//                       it all. The settings lock frequency, gain and Q one by one.
+//   its settings' locks keep frequency, gain or Q as they are (a drag then changes only the
+//                       rest); a locked band shows a padlock by its label. No lock to tap on the
+//                       plot itself: too small to see and too easy to hit on a touchscreen.
 //   double-tap a handle its gain back to 0 dB (as in TF StageMix)
 //   pinch               Q of the band dragged / selected, else the bell nearest the fingers
 //
@@ -18,14 +19,14 @@
 // tf_daemon/dsp/eq.py) and the desk's echo is applied when the drag ends; writes are
 // throttled to one in flight, always the latest position.
 
-import { eqHalf, eqHandles, eqLocked, eqLocks, eqY, lockSpot } from "./eq.js";
+import { eqHalf, eqHandles, eqLocked, eqLocks, eqY } from "./eq.js";
 import { fOfX, PAD, W } from "./plot.js";
 import { $, canvas, el, state } from "./shared.js";
 
 const PATH = { L: "PEQ/Bank/BandL", LM: "PEQ/Bank/Band:0", HM: "PEQ/Bank/Band:1", H: "PEQ/Bank/BandH" };
-// Fingers need more room than a mouse: handles and their locks are easier to hit on touch.
+// Fingers need more room than a mouse: handles are easier to hit on touch.
 const COARSE = matchMedia("(pointer: coarse)").matches;
-const HIT_PX = COARSE ? 18 : 9, LOCK_HIT = COARSE ? 12 : 7;
+const HIT_PX = COARSE ? 18 : 9;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 // ------------------------------------------------------------------ the desk's filter maths (dsp/eq.py)
@@ -260,19 +261,6 @@ function hit(x, y) {
   }
   return best;
 }
-// The handle whose lock is under (x, y), if any.
-function hitLock(x, y) {
-  if (!state.eq.writable) return null;
-  return eqHandles().find((h) => { const p = lockSpot(h); return Math.abs(p.x - x) <= LOCK_HIT && Math.abs(p.y - y) <= LOCK_HIT; }) || null;
-}
-// The lock beside a handle: lock its frequency; when anything is locked, unlock it all.
-function toggleLock(key) {
-  const locks = eqLocks(key);
-  if (eqLocked(key)) for (const k of Object.keys(locks)) delete locks[k];
-  else locks.freq = true;
-  if (pop && pop.dataset.key === key) showPop(key);
-  state.dirty = true;
-}
 // What a drag of this band may change: frequency (sideways) and gain (up / down), less its locks.
 function dragAxes(key, kind) {
   const locks = eqLocks(key), gain = kind !== "hpf" && kind !== "filter";
@@ -324,8 +312,6 @@ canvas.addEventListener("pointerdown", (e) => {
   if (touches.size === 2) { e.preventDefault(); startPinch(); return; }
   if (touches.size > 2) return;
   const [x, y] = local(e);
-  const l = hitLock(x, y);
-  if (l) { e.preventDefault(); toggleLock(l.key); return; }
   const h = hit(x, y);
   if (!h) { closePop(); return; }
   e.preventDefault();
@@ -347,9 +333,9 @@ canvas.addEventListener("pointermove", (e) => {
     return;
   }
   if (!drag) {
-    const h = editable() && !hitLock(x, y) && hit(x, y);
+    const h = editable() && hit(x, y);
     const axes = h && dragAxes(h.key, h.kind);
-    canvas.style.cursor = !editable() ? "" : hitLock(x, y) ? "pointer"
+    canvas.style.cursor = !editable() ? ""
       : !h ? "" : axes.freq && axes.gain ? "grab" : axes.freq ? "ew-resize" : axes.gain ? "ns-resize" : "not-allowed";
     return;
   }
@@ -512,7 +498,7 @@ export function eqEditReset() {
 }
 
 // For the browser tests: where the handles are (canvas CSS px).
-window.tfEqHandles = () => eqHandles().map((h) => ({ key: h.key, x: h.x, y: h.y, lock: lockSpot(h), locked: eqLocked(h.key) }));
+window.tfEqHandles = () => eqHandles().map((h) => ({ key: h.key, x: h.x, y: h.y, locked: eqLocked(h.key) }));
 // ... and how far this page's curve maths is from the desk's own (dB), for the EQ shown.
 window.tfEqPreviewError = () => {
   const d = state.eq;
