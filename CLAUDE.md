@@ -4,6 +4,7 @@
 
 Each module's docstring says what it does (and lists its routes); read that before the code.
 Full tree: `docs/architecture.md`.
+Ideas to build later: `docs/todo.md` (when asked to note an idea, add it there).
 
 - `tf_daemon/app.py`: builds and wires every module. `config.py`: every config key and default.
 - `audio/`: capture (`device.py` PortAudio, `sources.py` synth / WAV, `stage.py` simulated
