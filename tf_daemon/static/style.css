@@ -593,7 +593,15 @@ main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { ri
 .eqp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .eqp-x { background: none; border: 0; color: inherit; font-size: 16px; cursor: pointer; }
 .eqp-row { display: grid; grid-template-columns: 58px auto 20px 22px; gap: 4px; align-items: center; margin: 4px 0; }
-.eqp-row select { width: 100%; font: inherit; grid-column: 2 / span 2; }
+/* Bell / Shelf (/ LPF): side-by-side buttons, the look of the page tabs (.tabs). */
+.eqp-seg { grid-column: 2 / span 3; display: flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.eqp-seg button {
+  flex: 1; min-height: 30px; padding: 4px 8px; font: inherit; font-size: 13px; color: var(--muted);
+  background: none; border: 0; border-left: 1px solid var(--border); cursor: pointer;
+}
+.eqp-seg button:first-child { border-left: 0; }
+.eqp-seg button:hover { color: var(--text); background: #1e242c; }
+.eqp-seg button[aria-checked="true"] { color: var(--text); background: #24435c; font-weight: 600; }
 /* − value + : one compact control */
 .eqp-num { display: flex; height: 26px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--bg); }
 .eqp-num input { width: 58px; min-width: 0; border: 0; padding: 0 2px; text-align: center; font: inherit;
@@ -615,6 +623,7 @@ main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { ri
   .eqp-step { width: 36px; font-size: 18px; }
   .eqp-lock { width: 36px; height: 36px; }
   .eqp-x { min-width: 36px; min-height: 36px; }
+  .eqp-seg button { min-height: 40px; }
 }
 .eqp-row input[type=checkbox] { justify-self: start; }
 .eqp-unit, .eqp-note { color: var(--muted); }

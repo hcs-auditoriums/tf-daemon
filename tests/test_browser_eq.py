@@ -324,10 +324,11 @@ def test_eq_toolbar_double_tap_pinch_and_types(page):
         # The high band's types, as on StageMix: bell, shelf, LPF.
         hh = page.evaluate("window.tfEqHandles().find(h => h.key === 'H')")
         page.mouse.click(box["x"] + hh["x"], box["y"] + hh["y"])
-        pick = page.get_by_role("dialog", name="EQ H").get_by_label("Type")
-        assert pick.locator("option").all_inner_texts() == ["Bell", "Shelf", "LPF"]
-        pick.select_option("lpf")
+        pick = page.get_by_role("dialog", name="EQ H").get_by_role("radiogroup", name="Type")
+        assert pick.get_by_role("radio").all_inner_texts() == ["Bell", "Shelf", "LPF"]  # side by side, like the tabs
+        pick.get_by_role("radio", name="LPF").click()
         wait_desk(page, 1, lambda e: band(e, "H")["type"] == "lpf" and band(e, "H")["on"], "H as an LPF")
+        page.get_by_role("dialog", name="EQ H").get_by_role("radio", name="LPF", checked=True).wait_for(timeout=3000)
     finally:
         restore(1, before)
 

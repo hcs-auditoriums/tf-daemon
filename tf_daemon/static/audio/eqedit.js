@@ -461,13 +461,20 @@ export function showPop(key) {
       // Bell / shelf (and LPF on the high band); a low band set to HPF on the desk can be
       // turned back into a bell or shelf here.
       const names = { bell: "Bell", shelf: "Shelf", lpf: "LPF", hpf: "HPF" };
-      const row = el("label", "eqp-row"), sel = el("select");
-      sel.setAttribute("aria-label", "Type");
+      // Side-by-side buttons, like the page tabs: one tap, nothing to open.
+      const row = el("div", "eqp-row"), seg = el("div", "eqp-seg");
+      seg.setAttribute("role", "radiogroup");
+      seg.setAttribute("aria-label", "Type");
       const now = typeOf(b), kinds = BAND_TYPES[key].includes(now) ? BAND_TYPES[key] : [...BAND_TYPES[key], now];
-      for (const k of kinds) sel.append(new Option(names[k], k));
-      sel.value = now;
-      sel.onchange = () => { edit(key, { type: sel.value }); showPop(key); };
-      row.append(el("span", "", "Type"), sel);
+      for (const k of kinds) {
+        const opt = el("button", "", names[k]);
+        opt.type = "button";
+        opt.setAttribute("role", "radio");
+        opt.setAttribute("aria-checked", String(k === now));
+        opt.onclick = () => { if (k !== now) { edit(key, { type: k }); showPop(key); } };
+        seg.append(opt);
+      }
+      row.append(el("span", "", "Type"), seg);
       pop.append(row);
     }
     pop.append(field("Frequency", b.freq, 1, "Hz", (v) => { edit(key, { freq: v }); showPop(key); }, [key, "freq"]));
