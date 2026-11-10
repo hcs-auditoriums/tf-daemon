@@ -129,6 +129,45 @@ def test_console_panel_and_eq_from_the_simulated_desk(page):
     page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=4000)
 
 
+def test_console_icon_on_the_plot_toggles_the_sidebar(page):
+    _open(page, "/")
+    btn, panel = page.locator("#console-btn"), page.locator("#console-panel")
+    btn.wait_for(state="visible", timeout=8000)
+    panel.wait_for(state="visible", timeout=8000)
+    box, plot = btn.bounding_box(), page.locator("main").bounding_box()
+    assert box["x"] + box["width"] > plot["x"] + plot["width"] - 40 and box["y"] < plot["y"] + 40  # top right
+    btn.click()
+    panel.wait_for(state="hidden")
+    assert btn.get_attribute("aria-pressed") == "false" and not page.is_checked("#show-console")
+    page.reload()  # remembered
+    btn.wait_for(state="visible", timeout=8000)
+    assert btn.get_attribute("aria-pressed") == "false" and panel.is_hidden()
+    btn.click()
+    panel.wait_for(state="visible")
+    assert btn.get_attribute("aria-pressed") == "true" and page.is_checked("#show-console")
+
+
+def test_console_strip_fits_a_tablet_and_is_touch_sized(page):
+    page.set_viewport_size({"width": 1024, "height": 768})
+    _open(page, "/")
+    panel = page.locator("#console-panel")
+    panel.locator(".cp-head").wait_for(timeout=8000)
+    page.wait_for_function("document.querySelector('#console-panel .cp-eq')", timeout=8000)
+    assert panel.evaluate("e => e.scrollHeight <= e.clientHeight + 1")  # no scrolling
+    assert panel.bounding_box()["width"] <= 190  # skinny: the spectrum keeps the room
+    kids = panel.evaluate(
+        "e => [...e.children].map(c => c.className.split(' ')[0] + (c.classList.contains('cp-fadersec') ? '-fader' : ''))"
+    )
+    assert kids[-1] == "cp-head" and kids.index("cp-on") < kids.index("cp-section-fader")  # ON, fader, name at the foot
+    for sel in ["button.cp-on", ".cp-cap", ".cp-profmenu > summary"]:
+        assert panel.locator(sel).bounding_box()["height"] >= 30, sel
+    was = page.is_checked("#show-eq")
+    panel.locator(".cp-eq").click()  # the thumbnail shows / hides the EQ on the spectrum
+    assert page.is_checked("#show-eq") != was
+    panel.locator(".cp-eq").click()
+    assert page.is_checked("#show-eq") == was
+
+
 def test_rings_from_the_synth_tone_are_listed(page):
     _open(page, "/")  # the synth carries a steady 2.5 kHz tone: the ring detector reports it
     page.wait_for_function("!document.getElementById('ring-alert').hidden", timeout=15000)
@@ -177,6 +216,7 @@ def test_every_view_control_works_without_errors(page):
     page.locator("#console-panel").wait_for(state="hidden", timeout=2000)
     page.check("#show-console")
     page.locator("#console-panel").wait_for(state="visible", timeout=2000)
+    page.click("#view-menu summary")  # close the menu: it opens over the sidebar
     all_sends = page.locator("#console-panel .cp-sendhdr input[type=checkbox]")
     all_sends.wait_for(timeout=4000)
     all_sends.check()
@@ -228,8 +268,11 @@ def test_auto_eq_control_is_offered(page):
 
 def test_eq_profiles_save_and_delete_from_the_sidebar(page):
     _open(page, "/")
+    menu = page.locator("#console-panel .cp-profmenu > summary")
+    menu.wait_for(state="visible", timeout=10000)  # the EQ section's Profiles menu
+    menu.click()
     bar = page.locator("#console-panel .cp-profiles")
-    bar.wait_for(state="visible", timeout=10000)  # the EQ section's profile bar
+    bar.wait_for(state="visible", timeout=2000)
     name = "Browser test profile"
     page.once("dialog", lambda d: d.accept(name))  # the "Save as" prompt
     bar.get_by_role("button", name="Save as…").click()
