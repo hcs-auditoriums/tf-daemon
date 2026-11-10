@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tf-daemon · Mix</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .mx { padding: 12px 16px; display: flex; flex-direction: column; gap: 16px; }
+    .mx h2 { font-size: 13px; margin: 0 0 6px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .mx-strips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+    .mx-strip { flex: 0 0 104px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+    .mx-strip .lbl { font-size: 11px; color: var(--muted); }
+    .mx-strip .nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mx-strip input[type=range] { width: 100%; }
+    .mx-strip .val { font-size: 12px; font-variant-numeric: tabular-nums; }
+    .mx-row { display: flex; gap: 4px; flex-wrap: wrap; }
+    .mx button { font: inherit; font-size: 12px; color: var(--text); background: #1e242c; border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+    .mx button[aria-pressed="true"] { background: #24435c; border-color: var(--avg); }
+    .mx button.on[aria-pressed="true"] { background: #1f4a2c; border-color: var(--ok); }
+    .mx button.cue[aria-pressed="true"] { background: #4a3d1f; border-color: var(--peak); }
+    .mx button.mute[aria-pressed="true"] { background: #4a1f1f; border-color: var(--bad); }
+    .mx button:disabled { opacity: 0.5; cursor: default; }
+    .mx table { border-collapse: collapse; font-size: 12px; }
+    .mx th, .mx td { border-bottom: 1px solid var(--border); padding: 2px 6px; text-align: center; }
+    .mx td:first-child, .mx th:first-child { text-align: left; white-space: nowrap; }
+    .mx-scroll { overflow: auto; max-height: 420px; }
+    .mx-note { color: var(--muted); font-size: 12px; margin: 4px 0; }
+    .mx-err { color: var(--bad); font-size: 12px; }
+    .mx-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+    .geq-bands { display: grid; grid-template-columns: repeat(31, minmax(22px, 1fr)); gap: 2px; align-items: end; overflow-x: auto; }
+    .geq-band { display: flex; flex-direction: column; align-items: center; font-size: 10px; gap: 2px; }
+    .geq-band input[type=range] { writing-mode: vertical-lr; direction: rtl; height: 140px; width: 20px; }
+    .geq-band.adj .g { color: var(--eq); }
+    .geq-band.ring { outline: 1px solid var(--bad); border-radius: 4px; }
+    .peq canvas { width: 100%; height: 160px; display: block; }
+    .peq input { width: 70px; }
+  </style>
+</head>
+<body class="scroll">
+  <header>
+    <h1>tf-daemon</h1>
+    <nav class="tabs" aria-label="Pages"><a href="/">Audio</a><a href="/rf">RF</a><a href="/qlxd">Wireless</a><a href="/mix" aria-current="page">Mix</a><a href="/desk">Desk</a><a href="/config">Config</a></nav>
+    <div class="status">
+      <span id="error" class="error"></span>
+      <div id="conn" class="conn" title="Connection">connecting…</div>
+    </div>
+  </header>
+  <main class="mx">
+    <p id="mx-state" class="mx-note"></p>
+    <section aria-label="Masters"><h2>AUX · ST · MONO · MATRIX</h2><div id="mx-masters" class="mx-strips"></div></section>
+    <section aria-label="DCA"><h2>DCA</h2><div id="mx-dcas" class="mx-strips"></div></section>
+    <section id="mx-proc" class="mx-panel" aria-label="Bus processing" hidden></section>
+    <section aria-label="Mute groups"><h2>Mute masters</h2><div id="mx-mutes" class="mx-row"></div>
+      <p class="mx-note" id="mx-mutemap"></p></section>
+    <section aria-label="Assignment"><h2>DCA, mute group and cue per channel</h2><div id="mx-assign" class="mx-scroll"></div></section>
+    <p id="mx-err" class="mx-err" hidden></p>
+  </main>
+  <script src="/static/nav.js"></script>
+  <script type="module" src="/static/mix.js"></script>
+</body>
+</html>

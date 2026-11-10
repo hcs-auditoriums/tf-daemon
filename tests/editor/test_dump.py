@@ -186,7 +186,7 @@ def test_channel_eq_stereo_bus(mixing):
     assert st_r["bands"][2]["gain"] == -3.0
 
 
-@pytest.mark.parametrize("kind, x", [("InCh", 40), ("InCh", -1), ("St", 2), ("Mix", 0), ("FxRtn", 0)])
+@pytest.mark.parametrize("kind, x", [("InCh", 40), ("InCh", -1), ("St", 2), ("Mix", 8), ("Group", 0), ("FxRtn", 0)])
 def test_channel_eq_missing(mixing, kind, x):
     assert channel_eq(mixing, kind, x) is None
 

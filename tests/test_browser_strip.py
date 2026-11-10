@@ -124,10 +124,14 @@ def test_desk_meters_show_on_the_tiles_and_beside_the_fader(page):
         })()""",
         timeout=8000,
     )
-    meter = page.locator("#console-panel .cp-meter")
-    meter.wait_for(timeout=8000)
+    # One check in the page: the panel can be rebuilt once while the channel's data loads, so
+    # separate reads could land on different bars. Filled, readout in dBFS, as tall as the fader.
     page.wait_for_function(
-        "parseFloat(document.querySelector('#console-panel .cp-meter-fill').style.height) > 0", timeout=4000
+        """(() => {
+          const m = document.querySelector('#console-panel .cp-meter');
+          return !!m && parseFloat(m.firstChild.style.height) > 0
+            && (m.getAttribute('aria-valuetext') || '').includes('dBFS')
+            && m.getBoundingClientRect().height > 100;
+        })()""",
+        timeout=8000,
     )
-    assert "dBFS" in meter.get_attribute("aria-valuetext")
-    assert meter.bounding_box()["height"] > 100  # as tall as the fader

@@ -67,7 +67,7 @@ def test_handshake_sync_and_eq(console, client_for):
     assert st["descriptor_md5"] == DESC_MD5["Mixing"] and st["last_error"] is None
     assert client.eq("InCh", 0)["bands"][1]["gain"] == -14.1
     assert client.eq("St", 1)["bands"][0]["type"] == "hpf"
-    assert client.eq("InCh", 99) is None and client.eq("Mix", 0) is None
+    assert client.eq("InCh", 99) is None and client.eq("Mix", 8) is None and client.eq("Group", 0) is None
     assert client.get("InputChannel:1/Label/Name") == "Pastor" and client.get("Nope/Name") is None
     assert changes
     assert_read_only(console)

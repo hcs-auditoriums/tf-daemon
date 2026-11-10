@@ -37,6 +37,15 @@ def test_what_is_writable_matches_the_guard():
         "gate": "InputChannel:0/Gate/Bank/Gate/Threshold",
         "comp": "InputChannel:0/Comp/Bank/Compressor/Ratio",
         "input_gain": ("Processing", "BuiltIn/InputPort:0/HeadAmp/Gain"),
+        "stereo_fader": "Stereo:1/Output/Balance",
+        "mix_fader": "StMix:3/Fader/Level",
+        "dca": "InputChannel:0/DCAGroup:2/Assign",
+        "send_pre": "InputChannel:0/ToStMix:4/Pre",
+        "send_pan": "InputChannel:0/ToStMix:1/Pan",
+        "fx_sends": "InputChannel:0/ToFX:1/Level",
+        "geq": "Mix:0/GEQ/Band:3/Gain",
+        "cue": ("Volatile", "Cue/Mix:0/On"),
+        "mute_groups": ("Setup", "MuteMaster:0/On"),
     }
     for key, where in sample.items():
         func, path = where if isinstance(where, tuple) else ("Mixing", where)

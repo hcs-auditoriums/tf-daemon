@@ -5,6 +5,7 @@ import { paintChannelColors } from "./controls.js";
 import { meterBar } from "./meters.js";
 import { profileBar } from "./profiles.js";
 import { paintTools, stripTools } from "./strip.js";
+import { faderPos, posToDb } from "../common.js";
 import { $, C, el, loadInt, save, state } from "./shared.js";
 
 // Sidebar with the TF5 channel feeding the shown input: name, on, fader,
@@ -60,28 +61,6 @@ const TF_COLORS = {
   red: "#ff5d5d", pink: "#ff7ac6", purple: "#a77bff", white: "#e6e6e6",
 };
 
-// Fader position 0..1 for a level in dB (null = -inf), roughly following a
-// console fader's scale so the cap sits where it does on the desk.
-const LAW = [[10, 1], [5, 0.92], [0, 0.8], [-5, 0.69], [-10, 0.58], [-20, 0.43], [-30, 0.31],
-             [-40, 0.21], [-50, 0.13], [-60, 0.07], [-138, 0]];
-function faderPos(db) {
-  if (db === null || db === undefined) return 0;
-  if (db >= LAW[0][0]) return 1;
-  for (let i = 1; i < LAW.length; i++) {
-    const [d1, p1] = LAW[i - 1], [d0, p0] = LAW[i];
-    if (db >= d0) return p0 + (db - d0) / (d1 - d0) * (p1 - p0);
-  }
-  return 0;
-}
-function posToDb(pos) {  // the inverse: null below the bottom
-  if (pos <= 0.004) return null;
-  if (pos >= 1) return LAW[0][0];
-  for (let i = 1; i < LAW.length; i++) {
-    const [d1, p1] = LAW[i - 1], [d0, p0] = LAW[i];
-    if (pos >= p0) return d0 + (pos - p0) / (p1 - p0) * (d1 - d0);
-  }
-  return null;
-}
 const fmtDb = (db) => (db === null || db === undefined ? "−∞" : `${db > 0 ? "+" : ""}${db.toFixed(1)}`);
 const fmtPan = (v) => (v === 0 ? "C" : v < 0 ? `L${-v}` : `R${v}`);
 

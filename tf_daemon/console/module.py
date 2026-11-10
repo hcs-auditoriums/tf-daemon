@@ -12,12 +12,15 @@ from flask_sock import Sock
 from ..config import TF5Config
 from ..dsp.eq import CURVE_FREQS, eq_curve
 from . import coverage, desk
+from .buses import Buses
+from .busproc import BusProcessing
 from .editor import tree
 from .editor.client import Changes, TFEditorClient
 from .editor.guard import FAMILIES, WRITABLE, WRITE_LIMITS, WriteNotAllowed, writable
 from .meters import MeterClient
 from .patch import patch_from, source_label
 from .rcp import TF5Client
+from .sends import DeskSends
 from .strip import Strip
 from .strip_desk import DeskStrip
 
@@ -70,6 +73,9 @@ class TF5Module:
                               parameters a write family allows (guard.FAMILIES, each behind its tf5.*_write
                               switch). 400 without confirm or with a bad value, 403 when no enabled family
                               covers a path; else {"ok", "results": [{path, value, confirmed, actual}]}
+      GET/PUT /api/tf5/mix/...  the Mix page's buses, DCAs, mute groups, cue, GEQ, bus PEQ: console/buses.py,
+                              console/busproc.py (and GET /mix, the page); the SEND tab's sends come from
+                              the desk when the editor protocol has it (console/sends.py)
       POST /api/tf5/event/recall_scene  {"number": "A05", "confirm": true}: RECALL a scene (needs
                               tf5.scene_recall); {"ok", "number", "confirmed", "status"}
       GET /desk, GET /api/tf5/{scenes,recorder,fx,delay,selected}: the Desk page and its reads (desk.py)
@@ -107,6 +113,8 @@ class TF5Module:
             )
         desk = DeskStrip(self.eq_client) if self.eq_client is not None else None
         self.strip = Strip(patch, self.client, simulator, desk)  # input, EQ, dynamics, sends (strip.py)
+        self.buses = Buses(self, simulated=simulator is not None)  # the Mix page (buses.py)
+        self.sends = DeskSends(patch, self.buses, self.client.mixes)  # the SEND tab from the desk
 
     def _eq_changed(self) -> None:
         self.eq_version += 1
@@ -372,7 +380,7 @@ class TF5Module:
 
         @bp.get("/strip/<int:usb>")
         def strip_get(usb: int):
-            return jsonify(self.strip.get(usb))
+            return jsonify(self.sends.over(self.strip.get(usb)))
 
         @bp.put("/strip/<int:usb>")
         def strip_set(usb: int):
@@ -384,9 +392,13 @@ class TF5Module:
             if not isinstance(changes, dict) or not changes:
                 return jsonify({"ok": False, "error": 'body needs "changes": {parameter: value}'}), 400
             section, mix = str(body.get("section")), body.get("mix")
+            if section == "sends" and self.sends.live:
+                return self._desk_call(lambda: {"applied": self.sends.put(usb, mix, changes)})
             return self._desk_call(lambda: self.strip.put(usb, section, changes, mix))
 
         desk.register(app, bp, lambda: self.eq_client)  # /desk and its reads (scenes, recorder, FX, delay)
+        self.buses.register(app, bp, self._desk_call)  # /mix, /api/tf5/mix/* (buses.py, busproc.py)
+        BusProcessing(self.buses).register(bp, self._desk_call)
         app.register_blueprint(bp)
 
     @staticmethod

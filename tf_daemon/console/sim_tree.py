@@ -237,8 +237,13 @@ def default_mixing_values() -> dict[str, int | str]:
     v["Stereo:1/PEQ/Bank/BandL/HPFOn"] = 1  # ...switched on
     v["Stereo:1/PEQ/Bank/BandL/Frequency"] = 800
     v["Stereo:1/PEQ/Bank/Band:1/Gain"] = -300
-    for x in range(8):
-        v[f"DCA:{x}/Label/Name"] = f"DCA {x + 1}"
+    for x, name in enumerate(["VOX", "DRUMS", "BAND"] + [f"DCA {x + 1}" for x in range(3, 8)]):
+        v[f"DCA:{x}/Label/Name"] = name
+    for x, dca in ((0, 0), (1, 0), (2, 0), (3, 0), (5, 1), (6, 1), (7, 1), (8, 1), (9, 2), (10, 2), (13, 2)):
+        v[f"InputChannel:{x}/DCAGroup:{dca}/Assign"] = 1  # the demo band (sim_rcp.DEMO_INPUTS) on DCAs
+        v[f"InputChannel:{x}/MuteGroup:0/Assign"] = 1  # every used input in mute group 1 (INPUT)
+    for band, gain in ((9, -300), (15, -450), (20, -250)):  # wedge 1's GEQ notches
+        v[f"Mix:0/GEQ/Band:{band}/Gain"] = gain
     for x in range(4):  # FX 1 / 2 return on FX RTN 1L/1R, 2L/2R
         v[f"FxRtnChannel:{x}/Label/Name"] = f"FX{x // 2 + 1} {'LR'[x % 2]}"
     v.update({"Matrix:0/Label/Name": "Lobby", "Matrix:0/Delay/On": 1, "Matrix:0/Delay/Time": 12500})  # 12.5 ms

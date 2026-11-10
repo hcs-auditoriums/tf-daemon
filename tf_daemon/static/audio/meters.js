@@ -30,8 +30,18 @@ export function meterBar() {
   bar.setAttribute("role", "meter");
   bar.setAttribute("aria-label", "Level on the desk");
   bar.append(el("div", "cp-meter-fill"));
-  bar.hidden = !(meters && meters.scale && meters.connected);
+  paintBar(bar);  // a panel rebuilt between updates shows the last reading straight away
   return bar;
+}
+
+function paintBar(bar) {
+  const live = !!(meters && meters.scale && meters.connected);
+  bar.hidden = !live;
+  const [f, band, text] = reading(live ? meters.levels[state.input] : null);
+  bar.firstChild.style.height = `${f * 100}%`;
+  bar.dataset.lvl = band;
+  bar.title = `Desk meter (${meters?.point || ""}): ${text}`;
+  bar.setAttribute("aria-valuetext", text);
 }
 
 export function paintMeters() {
@@ -43,11 +53,5 @@ export function paintMeters() {
     b.dataset.lvl = band;
   }
   const bar = document.querySelector("#console-panel .cp-meter");
-  if (!bar) return;
-  bar.hidden = !live;
-  const [f, band, text] = reading(live ? meters.levels[state.input] : null);
-  bar.firstChild.style.height = `${f * 100}%`;
-  bar.dataset.lvl = band;
-  bar.title = `Desk meter (${meters?.point || ""}): ${text}`;
-  bar.setAttribute("aria-valuetext", text);
+  if (bar) paintBar(bar);
 }

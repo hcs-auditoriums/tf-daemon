@@ -120,7 +120,9 @@ function ringRow(g) {
     seen.add(x.channel);
     where.append(inputLink(x.label, x.channel, seen.size === 1));
   }
-  where.append(` · GEQ ${fmtBand(e.geq)} · ${active ? "now" : ago(Math.max(...g.events.map((x) => x.last_seen)))}`);
+  const geq = el("a", "", `GEQ ${fmtBand(e.geq)}`);   // the stereo bus's GEQ on the Mix page, that band marked
+  geq.href = `/mix?geq=st&hz=${e.geq}`;
+  where.append(" · ", geq, ` · ${active ? "now" : ago(Math.max(...g.events.map((x) => x.last_seen)))}`);
   main.append(top, where);
   const fed = g.events.find((x) => x.sources && x.sources.length);
   if (fed) main.append(sourcesLine(fed));
