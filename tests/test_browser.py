@@ -66,6 +66,19 @@ def test_page_runs_without_script_errors(page, path):
     page.wait_for_timeout(2500)  # websockets connect, the first frames arrive and are drawn
 
 
+def test_rf_and_wireless_pages_connect_and_post(page):
+    """The shared websocket and POST helpers (static/common.js) on the RF and Wireless pages."""
+    _open(page, "/rf")
+    page.wait_for_function("document.getElementById('conn').textContent.includes('sweeps')", timeout=8000)
+    page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=8000)
+    with page.expect_response("**/api/rf/reset-peak") as res:
+        page.click("#reset-peak")  # a harmless POST through postJson
+    assert res.value.ok
+    assert page.locator("#error").inner_text() == ""
+    _open(page, "/qlxd")
+    page.wait_for_function("/receivers online/.test(document.getElementById('conn').textContent)", timeout=8000)
+
+
 def test_audio_page_connects_names_inputs_and_draws(page):
     _open(page, "/")
     page.wait_for_function("document.getElementById('conn').textContent.startsWith('live')", timeout=8000)

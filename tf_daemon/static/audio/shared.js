@@ -1,7 +1,9 @@
 // What every part of the audio page shares: the spectrum canvas, colours, the
 // view state, local-storage helpers.
 
-export const $ = (id) => document.getElementById(id);
+import { $ } from "../common.js";
+
+export { $, save } from "../common.js";
 export const canvas = $("spectrum");
 export const ctx = canvas.getContext("2d");
 const css = getComputedStyle(document.documentElement);
@@ -38,7 +40,6 @@ export function loadStr(key, def, allowed) {
   try { const v = localStorage.getItem(key); return v !== null && allowed.includes(v) ? v : def; }
   catch { return def; }
 }
-export function save(key, value) { try { localStorage.setItem(key, String(value)); } catch { /* ignore */ } }
 
 // Panels that poll (the vocal assist, the ring-out popup) re-render with quietRender: only when
 // what they show changed, and never while someone is using them. Replacing the elements under

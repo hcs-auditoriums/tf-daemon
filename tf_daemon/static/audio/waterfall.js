@@ -1,5 +1,6 @@
 // The waterfall, and the Spectrum / Both / Waterfall layout.
 
+import { fitCanvas } from "../common.js";
 import { F_MAJOR, fmtF, PAD } from "./plot.js";
 import { SEV, severity } from "./rings.js";
 import { $, C, loadInt, loadStr, save, state } from "./shared.js";
@@ -73,12 +74,7 @@ export function wfRecolor() {
 }
 
 function wfResize() {
-  const dpr = window.devicePixelRatio || 1;
-  const r = wfCanvas.getBoundingClientRect();
-  wf.W = r.width; wf.H = r.height;
-  wfCanvas.width = Math.round(wf.W * dpr);
-  wfCanvas.height = Math.round(wf.H * dpr);
-  wfCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  [wf.W, wf.H] = fitCanvas(wfCanvas, wfCtx);
   wf.dirty = true;
 }
 new ResizeObserver(wfResize).observe(wfCanvas);

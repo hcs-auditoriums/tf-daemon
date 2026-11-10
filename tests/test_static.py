@@ -100,6 +100,7 @@ def undefined_constants(js: str) -> set[str]:
 
 SCRIPTS = [
     "app.js",
+    "common.js",
     "rf.js",
     "qlxd.js",
     "config.js",
@@ -129,14 +130,16 @@ def _exports(js: str) -> set[str]:
     names = set(re.findall(r"\bexport\s+(?:async\s+)?function\s+([\w$]+)", code))
     for stmt in re.findall(r"\bexport\s+(?:const|let)\s+([^;\n]+)", code):
         names |= set(re.findall(r"(?:^|,)\s*([\w$]+)\s*=(?!=)", stmt))
+    for group in re.findall(r"\bexport\s*\{([^}]*)\}", code):
+        names |= {n.split(" as ")[-1].strip() for n in group.split(",")}
     return names
 
 
-def test_audio_page_imports_resolve():
+def test_page_imports_resolve():
     """Every name a module imports is exported by the module it names (a typo there is
-    a SyntaxError that stops the whole page), and every audio module is reachable."""
+    a SyntaxError that stops the whole page), and every shared module is reachable."""
     reached = set()
-    for name in ["app.js", *[s for s in SCRIPTS if s.startswith("audio/")]]:
+    for name in [s for s in SCRIPTS if s != "nav.js"]:
         path = STATIC / name
         src = path.read_text(encoding="utf-8")
         for names, target in re.findall(r"\bimport\s*\{([^}]*)\}\s*from\s*\"([^\"]+)\"", src):
@@ -145,12 +148,13 @@ def test_audio_page_imports_resolve():
             reached.add(dest.name)
             missing = {n.strip() for n in names.split(",")} - _exports(dest.read_text(encoding="utf-8"))
             assert not missing, f"{name} imports {sorted(missing)} that {target} doesn't export"
-    assert reached == {p.name for p in (STATIC / "audio").glob("*.js")}
+    assert reached == {"common.js", *(p.name for p in (STATIC / "audio").glob("*.js"))}
 
 
-def test_audio_page_loads_as_a_module():
-    html = (STATIC / "index.html").read_text(encoding="utf-8")
-    assert '<script type="module" src="/static/app.js"></script>' in html
+@pytest.mark.parametrize(("page", "script"), [("index", "app"), ("rf", "rf"), ("qlxd", "qlxd"), ("config", "config")])
+def test_pages_load_as_modules(page, script):
+    html = (STATIC / f"{page}.html").read_text(encoding="utf-8")
+    assert f'<script type="module" src="/static/{script}.js"></script>' in html
 
 
 @pytest.mark.parametrize("page", ["index.html", "rf.html", "qlxd.html", "config.html"])
