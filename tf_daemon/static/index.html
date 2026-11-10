@@ -10,7 +10,6 @@
   <header>
     <h1>tf-daemon</h1>
     <nav class="tabs" aria-label="Pages"><a href="/" aria-current="page">Audio</a><a href="/rf">RF</a><a href="/qlxd">Wireless</a><a href="/config">Config</a></nav>
-    <nav id="channels" aria-label="Channel"></nav>
     <details class="menu" id="view-menu">
       <summary>View</summary>
       <div class="menu-panel">
@@ -68,6 +67,12 @@
       <div id="conn" class="conn" title="Connection">connecting…</div>
     </div>
   </header>
+  <div class="chbar">
+    <nav id="banks" class="seg" aria-label="Channel bank"></nav>
+    <button id="ch-prev" class="ch-step" type="button" aria-label="Previous channel" title="Previous channel">&#8249;</button>
+    <nav id="channels" aria-label="Channel"></nav>
+    <button id="ch-next" class="ch-step" type="button" aria-label="Next channel" title="Next channel">&#8250;</button>
+  </div>
   <div class="workspace">
     <main class="split">
       <div class="pane spectrum" id="spec-pane">

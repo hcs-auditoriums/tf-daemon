@@ -101,6 +101,37 @@ def test_switching_input_follows_the_buttons(page):
     )
 
 
+def test_channel_bar_banks_of_big_tiles(page):
+    page.set_viewport_size({"width": 1024, "height": 768})
+    _open(page, "/")
+    page.wait_for_function("document.querySelectorAll('#channels .ch-chip').length >= 34", timeout=8000)
+    page.locator("#channels .ch-chip", has_text="Pastor").click()
+    visible = page.locator("#channels .ch-chip:visible")
+    assert visible.count() == 8  # one bank, filling the bar: nothing to scroll
+    assert page.locator("#channels").evaluate("e => e.scrollWidth <= e.clientWidth")
+    for box in [
+        visible.first.bounding_box(),
+        page.locator("#ch-next").bounding_box(),
+        page.locator("#banks button").first.bounding_box(),
+    ]:
+        assert box["height"] >= 44 and box["width"] >= 44  # finger-sized
+    # Two taps to any input: its bank, then its tile (Main L is input 33, in the last bank).
+    page.locator("#banks button").last.click()
+    page.locator("#channels .ch-chip:visible", has_text="Main L").click()
+    page.wait_for_function("document.querySelector('#channels [aria-pressed=true]').textContent === 'Main L'")
+    # ‹ › step one input, across banks too: back from 33 to 32 shows the 25-32 bank.
+    page.click("#ch-prev")
+    page.wait_for_function("document.querySelector('#channels [aria-pressed=true]').dataset.input === '31'")
+    assert page.locator("#channels [aria-pressed=true]").is_visible()
+    assert page.locator("#banks [aria-pressed=true]").inner_text() == "25–32"
+    page.click("#ch-next")
+    page.wait_for_function("document.querySelector('#channels [aria-pressed=true]').dataset.input === '32'")
+    # The console's colours reach the tiles (the demo desk colours its channels).
+    page.wait_for_function(
+        "[...document.querySelectorAll('#channels .ch-chip')].some(b => b.style.getPropertyValue('--ch'))", timeout=8000
+    )
+
+
 def test_waterfall_layout_draws(page):
     _open(page, "/")
     page.wait_for_function("document.getElementById('conn').textContent.startsWith('live')", timeout=8000)
@@ -221,8 +252,10 @@ def test_every_view_control_works_without_errors(page):
     all_sends.wait_for(timeout=4000)
     all_sends.check()
     page.locator("#console-panel .cp-sendhdr input[type=checkbox]").uncheck()
-    page.select_option("#input", "5")  # an input with no button: analyzed while viewed
-    page.wait_for_function("document.getElementById('input').value === '5'", timeout=3000)
+    page.locator("#channels [data-input='5']").click()  # an unlisted input: analyzed while viewed
+    page.wait_for_function(
+        "document.querySelector('#channels [data-input=\"5\"]').getAttribute('aria-pressed') === 'true'", timeout=3000
+    )
     page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=8000)
     page.wait_for_timeout(500)
 
@@ -239,8 +272,9 @@ def test_ring_list_opens(page):
 def test_live_listening_starts_and_clears(page):
     _open(page, "/")
     page.locator("#mic-check").wait_for(state="visible", timeout=8000)
-    page.wait_for_function("document.getElementById('input') !== null", timeout=8000)
-    channel = int(page.locator("#input").input_value())
+    selected = page.locator("#channels [aria-pressed=true]")
+    selected.wait_for(timeout=8000)
+    channel = int(selected.get_attribute("data-input"))
     page.locator("#mic-check").click()
     panel = page.locator("#vocal-panel")
     panel.wait_for(state="visible", timeout=4000)

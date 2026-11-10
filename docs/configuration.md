@@ -11,7 +11,9 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   means `off`. Unknown keys are logged at startup and ignored.
 - `audio.device`: case-insensitive substring of the capture device name (default `"TF"`).
   `audio.channels` (34) channels are opened (a device with fewer is zero-padded),
-  and every one can be picked in the browser (the input menu). An input is
+  and every one can be picked in the browser: the channel bar under the header shows
+  the inputs in banks of 8 (tap a bank, 1–8, 9–16, …, then a tile with the input's
+  number, name and console colour), with ‹ › to step through them one by one. An input is
   analyzed only while someone views it, except the `[[channels]]` ones, which
   are always analyzed.
 - **Unplugged devices don't stop anything.** The server starts without the TF5
@@ -25,8 +27,8 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
 - `audio.samplerate`: must be 48000 (the TF5 is fixed at 48 kHz).
 - `dsp.fft_size` (32768, ~1.46 Hz bins), `dsp.hop` (2400, ~20 updates/s),
   `dsp.average_tau` (3 s).
-- `[[channels]]`: `index` (0-based device input) and `label`. These get their own
-  buttons, a name in the input menu, and continuous analysis (their average and
+- `[[channels]]`: `index` (0-based device input) and `label`. These get a name in the
+  channel bar, and continuous analysis (their average and
   peak hold are already warm when you switch to them).
 - `[synth]`: test-signal levels and the ring tone frequency/level; for the simulated
   stage also `house_mic` (input, -1 = none), `pa_leak_db` (PA level at an open mic) and
