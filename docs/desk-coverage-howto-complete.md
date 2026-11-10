@@ -427,8 +427,11 @@ limit itself. AUX 9–20 (`StMix`) have no GEQ in the tree. The desk's "GEQ on f
 | Make-up gain | `.../Gain` | `[0,9,1,2,5]` | s16 0…1800 = 0…18 dB |
 | De-esser | `Comp/Bank/DeEsser/{Threshold,Frequency,Q,Type}` | `[0,9,1,3,0..3]` | inputs only; Freq u32 800…16000 Hz ×10, Q ×1000, Type `BPF` |
 
-desk-coverage.md's note "ranges in console/strip.py SPECS: Yamaha's shared ones, to confirm on the
-TF5" can now be answered from these tables; they are the TF5's own schema.
+`console/strip.py` SPECS now take these ranges, defaults and scaling from the schema
+(`tree.spec`), and `console/strip_desk.py` reads / writes 3.3-3.5 for the strip panel (channel ->
+port as in 3.3) [VERIFIED-CODE against the simulator; the first write outside Mixing on a real desk
+is still item 2 of section 5]. The tree has `Gate` on all 40 `InputChannel`s, so the panel offers it
+on CH 33-40 too.
 
 **Stereo-input extras** (`StInChannel`): `Leveler/{On,Threshold,Gain}` `[1,6,*]`,
 `Ducker/{On,Threshold,Range,Release}` `[1,7,0..3]` and `Ducker/KeyIn_TF/Source` u32 (source ID,

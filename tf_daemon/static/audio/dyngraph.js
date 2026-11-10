@@ -5,12 +5,13 @@
 import { color } from "./shared.js";
 
 const LO = -72, HI = 6, PAD = 6;   // dB shown on both axes (the gate's threshold goes to -72)
-const KNEE_DB = { hard: 0, medium: 6, soft: 12 };
+// The desk's knee ("HARD", "SOFT-2"): its width in dB, drawn as about 3 dB per soft step.
+const kneeDb = (knee) => { const m = /^soft-?(\d*)/i.exec(knee || ""); return m ? 3 * (Number(m[1]) || 2) : 0; };
 
-// Output level for input ``x`` (dB).
-function gateOut(v, x) { return v.on === false || x >= v.threshold ? x : x + v.range; }
+// Output level for input ``x`` (dB); a gate's range of null is −∞.
+function gateOut(v, x) { return v.on === false || x >= v.threshold ? x : x + (v.range ?? -1000); }
 function compOut(v, x) {
-  const r = v.ratio === "inf" ? Infinity : v.ratio, t = v.threshold, k = KNEE_DB[v.knee] || 0;
+  const r = v.ratio === "inf" ? Infinity : v.ratio, t = v.threshold, k = kneeDb(v.knee);
   let y;
   if (k && Math.abs(x - t) <= k / 2) y = x + (1 / r - 1) * (x - t + k / 2) ** 2 / (2 * k);   // soft knee
   else y = x < t ? x : t + (x - t) / r;

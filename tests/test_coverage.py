@@ -4,7 +4,7 @@ is writable is what the write guard allows. Its route is checked in tests/test_l
 from __future__ import annotations
 
 from tf_daemon.console import coverage
-from tf_daemon.console.editor.guard import FADER_WRITABLE, WRITABLE
+from tf_daemon.console.editor.guard import FADER_WRITABLE, WRITABLE, families_for
 
 
 def test_the_doc_table_is_the_list():
@@ -21,7 +21,8 @@ def test_every_feature_is_described_once():
 
 
 def test_what_is_writable_matches_the_guard():
-    # A feature said to be written to the desk has a guard pattern for it, and nothing else is.
+    # A feature said to be written to the desk names the switch of a guard family that covers it
+    # (guard.FAMILIES), and nothing else is said to be written.
     sample = {
         "fader": "InputChannel:0/Fader/Level",
         "on": "InputChannel:0/Fader/On",
@@ -29,11 +30,18 @@ def test_what_is_writable_matches_the_guard():
         "hpf": "InputChannel:0/PEQ/Bank/HPF/Frequency",
         "hpf_slope": "InputChannel:0/PEQ/Bank/HPF/Slope",
         "one_knob_eq": "InputChannel:0/PEQ/Bank/OneKnob/On",
+        "eq_bank_type": "InputChannel:0/PEQ/Bank/Type",
         "stereo_eq": "Stereo:0/PEQ/Bank/Band:1/Gain",
         "pan": "InputChannel:0/ToStereo/Pan",
         "sends": "InputChannel:0/ToMix:0/Level",
+        "gate": "InputChannel:0/Gate/Bank/Gate/Threshold",
+        "comp": "InputChannel:0/Comp/Bank/Compressor/Ratio",
+        "input_gain": ("Processing", "BuiltIn/InputPort:0/HeadAmp/Gain"),
     }
-    for key, path in sample.items():
+    for key, where in sample.items():
+        func, path = where if isinstance(where, tuple) else ("Mixing", where)
         f = next(x for x in coverage.FEATURES if x.key == key)
-        allowed = bool(WRITABLE.fullmatch(path) or FADER_WRITABLE.fullmatch(path))
+        allowed = any(fam.switch in f.write for fam, _ in families_for(func, path))
         assert allowed == f.write.startswith("Editor"), (key, path, f.write)
+    # The original two families as the guard defines them.
+    assert WRITABLE.fullmatch(sample["peq"]) and FADER_WRITABLE.fullmatch(sample["fader"])

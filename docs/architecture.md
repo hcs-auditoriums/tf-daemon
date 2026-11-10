@@ -43,7 +43,8 @@ tf_daemon/
     db.py          dB conversions
   console/         ── the Yamaha TF5 over the network ──
     coverage.py    what can be read / written on the desk vs TF StageMix (docs/desk-coverage.md)
-    strip.py       gain, gate, comp, sends per channel (/api/tf5/strip): RCP sends + a simulated store
+    strip.py       input, 1-knob EQ, gate, comp, sends per channel (/api/tf5/strip): SPECS from the schema, RCP sends
+    strip_desk.py  the strip's input / EQ / dynamics on the desk (Editor protocol; channel -> input port)
     patch.py       which console source each USB capture channel carries
     rcp.py         TF5Client: names, faders, sends over RCP (TCP 49280)
     meters.py      MeterClient: level meters over RCP (mtrstart, read-only); probe CLI

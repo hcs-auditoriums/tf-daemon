@@ -114,6 +114,14 @@ def test_any_desk_parameter_is_read(status):
     assert tf5["eq"]["scene_recall"] and "phantom" in tf5["eq"]["write_families"]
 
 
+def test_channel_strip_is_read_from_the_desk(status):
+    """Input, 1-knob EQ, gate and comp come from the simulated desk's editor protocol (console/strip_desk.py)."""
+    d = wait_for("/api/tf5/strip/0", lambda d: d["input"].get("available") and "gain" in d["input"]["values"])
+    assert d["input"]["values"]["source"] == "INPUT" and d["input"]["port"] == "INPUT 1"
+    assert d["gate"]["values"]["type"] == "GATE" and d["eq"]["values"]["type"] == "BOLD"
+    assert d["comp"]["writable"] and "knee" not in d["comp"]["locked"]  # demo mode: every write family is on
+
+
 def test_rf_sweeps_the_receiver_range(status):
     _, qlxd = get("/api/qlxd/state")
     freqs = [r["frequency_mhz"] * 1e6 for r in qlxd["receivers"]]

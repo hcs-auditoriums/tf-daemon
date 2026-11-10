@@ -177,6 +177,17 @@ def default_mixing_values() -> dict[str, int | str]:
                 f"{b}/Bank/BandH/Type": 1,
                 f"{b}/Bank/BandH/Frequency": 100000,
                 f"{b}/Bank/BandH/Q": 700,
+                f"{b}/Bank/OneKnob/Mode": "Vocal",
+                # Dynamics as on the auditorium desk (howto 3.5), a few switched on for variety.
+                f"InputChannel:{x}/Gate/On": int(x in (5, 6)),
+                f"InputChannel:{x}/Gate/Bank/Type": "GATE",
+                f"InputChannel:{x}/Gate/Bank/Gate/Threshold": -4000 if x in (5, 6) else -2600,
+                f"InputChannel:{x}/Comp/On": int(x < 5),
+                f"InputChannel:{x}/Comp/Bank/Type": "COMP",
+                f"InputChannel:{x}/Comp/Bank/Compressor/Threshold": (-18 + x % 6) * 100,
+                f"InputChannel:{x}/Comp/Bank/Compressor/Ratio": 30,
+                f"InputChannel:{x}/Comp/Bank/Compressor/Knee": "SOFT-2",
+                f"InputChannel:{x}/Comp/Bank/DeEsser/Type": "BPF",
             }
         )
     b = "InputChannel:0/PEQ/Bank"
@@ -248,8 +259,11 @@ def default_values(func: str) -> dict[str, int | str]:
         v: dict[str, int | str] = {f"MuteMaster:{i}/Name": n for i, n in enumerate(names)}
         v.update({"Scene/LastScene": "A00", "CommSession/MobileMix/Password": MOBILE_PASSWORD})
         return v
-    if func == "Processing":
-        return {f"BuiltIn/InputPort:{p}/HeadAmp/Gain": g for p, g in enumerate((4500, 4000, 4200))}
+    if func == "Processing":  # head amps: INPUT 1-3 as captured, the rest varied; +48V on most
+        v = {f"BuiltIn/InputPort:{p}/HeadAmp/Gain": (24 + (p * 7) % 26) * 100 for p in range(32)}
+        v.update({f"BuiltIn/InputPort:{p}/HeadAmp/48V": int(p % 3 != 2) for p in range(32)})
+        v.update({f"BuiltIn/InputPort:{p}/HeadAmp/Gain": g for p, g in enumerate((4500, 4000, 4200))})
+        return v
     if func == "FX":
         return {"FX:0/Param/PluginName": "Echo", "FX:1/Param/PluginName": "MonoDelay"}
     if func == "SceneStatus":
