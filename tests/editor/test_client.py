@@ -235,6 +235,8 @@ def test_falls_back_without_on_set_client_type(client_for, monkeypatch):
     try:
         client = client_for(fake)
         wait_until(lambda: client.synced)
+        # The handshake's last frames may still be on their way to the console when synced is set.
+        wait_until(lambda: len(fake.sent_by_client()) >= len(EXPECTED_HANDSHAKE))
         assert fake.sent_by_client()[: len(EXPECTED_HANDSHAKE)] == EXPECTED_HANDSHAKE
         assert_read_only(fake)
     finally:
