@@ -101,6 +101,28 @@ def test_switching_input_follows_the_buttons(page):
     )
 
 
+def test_channel_bar_lists_every_input_and_steps(page):
+    page.set_viewport_size({"width": 1024, "height": 768})
+    _open(page, "/")
+    page.wait_for_function("document.querySelectorAll('#channels .ch-chip').length >= 34", timeout=8000)
+    bar = page.locator("#channels")
+    assert bar.evaluate("e => e.scrollWidth > e.clientWidth")  # one row that scrolls, not a wall of buttons
+    assert page.locator("#ch-next").bounding_box()["height"] >= 40  # finger-sized
+    page.locator("#channels .ch-chip", has_text="Pastor").click()
+    first = int(page.locator("#channels [aria-pressed=true]").get_attribute("data-input"))
+    page.click("#ch-next")
+    page.wait_for_function(f"document.querySelector('#channels [aria-pressed=true]').dataset.input === '{first + 1}'")
+    page.click("#ch-prev")
+    page.wait_for_function(f"document.querySelector('#channels [aria-pressed=true]').dataset.input === '{first}'")
+    # The console's colours reach the chips (the demo desk names and colours its channels).
+    page.wait_for_function(
+        "[...document.querySelectorAll('#channels .ch-chip')].some(b => b.style.getPropertyValue('--ch'))", timeout=8000
+    )
+    last = page.locator("#channels .ch-chip").last
+    last.click()
+    assert last.is_visible() and last.get_attribute("aria-pressed") == "true"
+
+
 def test_waterfall_layout_draws(page):
     _open(page, "/")
     page.wait_for_function("document.getElementById('conn').textContent.startsWith('live')", timeout=8000)
@@ -221,8 +243,10 @@ def test_every_view_control_works_without_errors(page):
     all_sends.wait_for(timeout=4000)
     all_sends.check()
     page.locator("#console-panel .cp-sendhdr input[type=checkbox]").uncheck()
-    page.select_option("#input", "5")  # an input with no button: analyzed while viewed
-    page.wait_for_function("document.getElementById('input').value === '5'", timeout=3000)
+    page.locator("#channels [data-input='5']").click()  # an unlisted input: analyzed while viewed
+    page.wait_for_function(
+        "document.querySelector('#channels [data-input=\"5\"]').getAttribute('aria-pressed') === 'true'", timeout=3000
+    )
     page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=8000)
     page.wait_for_timeout(500)
 
@@ -239,8 +263,9 @@ def test_ring_list_opens(page):
 def test_live_listening_starts_and_clears(page):
     _open(page, "/")
     page.locator("#mic-check").wait_for(state="visible", timeout=8000)
-    page.wait_for_function("document.getElementById('input') !== null", timeout=8000)
-    channel = int(page.locator("#input").input_value())
+    selected = page.locator("#channels [aria-pressed=true]")
+    selected.wait_for(timeout=8000)
+    channel = int(selected.get_attribute("data-input"))
     page.locator("#mic-check").click()
     panel = page.locator("#vocal-panel")
     panel.wait_for(state="visible", timeout=4000)

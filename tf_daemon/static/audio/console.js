@@ -1,6 +1,7 @@
 // The console sidebar: the TF5 channel on the shown input, and its EQ graph.
 
 import { eqAt, eqAvailable, eqHalf } from "./eq.js";
+import { paintChannelColors } from "./controls.js";
 import { profileBar } from "./profiles.js";
 import { $, C, el, loadInt, save, state } from "./shared.js";
 
@@ -17,6 +18,13 @@ export function onConsoleSnapshot(msg) {
   tf5 = msg;
   panelSig = null;  // rebuild
   schedulePanel();
+  paintChannelColors();
+}
+
+// The console's colour for a USB input's channel (CSS), or null when unknown.
+export function channelColor(usb) {
+  const ch = tf5?.channels?.find((c) => c.index === usb);
+  return TF_COLORS[String(ch?.params["Label/Color"]?.value || "").toLowerCase()] || null;
 }
 
 export function onConsoleChanges(msg) {
@@ -34,6 +42,7 @@ export function onConsoleChanges(msg) {
       p.value[c.y] = c.v;
     }
   }
+  if (msg.changes.some((c) => c.p === "Label/Color")) paintChannelColors();
   schedulePanel();
 }
 
