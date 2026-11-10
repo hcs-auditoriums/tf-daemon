@@ -7,6 +7,11 @@
 //                       clicking it again closes them
 //   click its lock      locks its frequency (a drag then only changes the gain); again: unlocks
 //                       it all. The settings lock frequency, gain and Q one by one.
+//   double-tap a handle its gain back to 0 dB (as in TF StageMix)
+//   pinch               Q of the band dragged / selected, else the bell nearest the fingers
+//
+// Every change is undoable (undoEq / redoEq, per input); applyEq sets a whole EQ at once (paste,
+// compare, undo). The toolbar over the plot is eqbar.js.
 //
 // Every change is a person's: each drag / entry is sent with "confirm" (PUT /api/tf5/eq/<usb>).
 // While dragging, the curve is redrawn here with the desk's own filter maths (a copy of
@@ -125,7 +130,9 @@ function limited(key, s) {
 }
 
 // The desk changes for a band's new settings (raw values: Hz x10, dB x100, Q x1000), already limited.
+const TYPE_RAW = { bell: 0, shelf: 1, lpf: 2, hpf: 2 };
 function rawFor(key, s) {
+  if (key === "EQ") return s.on === undefined ? {} : { "PEQ/On": s.on ? 1 : 0 };
   if (key === "HPF") {
     const out = {};
     if (s.freq !== undefined) out["PEQ/Bank/HPF/Frequency"] = Math.round(s.freq * 10);
@@ -137,31 +144,104 @@ function rawFor(key, s) {
   if (s.freq !== undefined) out[`${p}/Frequency`] = Math.round(s.freq * 10);
   if (s.gain !== undefined) out[`${p}/Gain`] = Math.round(s.gain * 10) * 10;
   if (s.q !== undefined) out[`${p}/Q`] = Math.round(s.q * 1000);
-  if (s.type !== undefined) out[`${p}/Type`] = s.type === "bell" ? 0 : 1;
+  if (s.type !== undefined) out[`${p}/Type`] = TYPE_RAW[s.type];
+  if (s.type === "lpf") out[`${p}/LPFOn`] = 1;  // the high band as an LPF: on (else it would be a dead band)
   return out;
 }
 
 // Change a band here (preview) and on the desk.
+// The band types a person can pick: the low band bell / shelf (an input channel has its own HPF,
+// so not HPF, as in StageMix), the high band bell / shelf / LPF.
+export const BAND_TYPES = { L: ["bell", "shelf"], H: ["bell", "shelf", "lpf"] };
+const KIND = { bell: "bell", lpf: "lpf", hpf: "hpf" };
+export const typeOf = (b) => (b.type === "low_shelf" || b.type === "high_shelf" ? "shelf" : b.type);
+
+let batch = false;   // applyEq: many edits, one step in the history
 function edit(key, s) {
   const d = state.eq, eq = d && d.eq;
   if (!eq) return;
+  if (!batch && !drag && !pinch) remember();
+  lastTap = null;   // a change between two taps: not a double-tap
   s = limited(key, s);
-  if (key === "HPF") Object.assign(eq.hpf, s);
+  if (key === "EQ") eq.on = !!s.on;
+  else if (key === "HPF") Object.assign(eq.hpf, s);
   else {
     const b = eq.bands.find((x) => x.label === key);
     if (!b) return;
     const kind = s.type === undefined ? undefined
-      : s.type === "bell" ? "bell" : key === "L" ? "low_shelf" : "high_shelf";
-    Object.assign(b, s, kind ? { type: kind } : {});
+      : KIND[s.type] || (key === "L" ? "low_shelf" : "high_shelf");
+    Object.assign(b, s, kind ? { type: kind } : {}, s.type === "lpf" ? { on: true } : {});
   }
   d.curve = eqCurve(eq, d.freqs);
   state.dirty = true;
   send(d.index, rawFor(key, s));
 }
 
+// ------------------------------------------------------------------ history, whole-EQ changes
+
+// Undo / redo per input, in this browser: the EQ as it was before each change (a drag is one).
+const history = new Map();   // input -> {undo: [eq...], redo: [eq...]}
+const UNDO_MAX = 50;
+const hist = () => { if (!history.has(state.input)) history.set(state.input, { undo: [], redo: [] }); return history.get(state.input); };
+export const eqSnapshot = () => (state.eq && state.eq.eq ? structuredClone(state.eq.eq) : null);
+function remember() {
+  const snap = eqSnapshot();
+  if (!snap) return;
+  const h = hist();
+  h.undo.push(snap);
+  if (h.undo.length > UNDO_MAX) h.undo.shift();
+  h.redo = [];
+  onHistory();
+}
+let onHistory = () => {};
+export function onEqHistory(fn) { onHistory = fn; }
+export const canUndo = () => hist().undo.length > 0;
+export const canRedo = () => hist().redo.length > 0;
+// The EQ before the first change made here to this input (what "compare with before" goes back to).
+export const eqBefore = () => hist().undo[0] || null;
+export function undoEq() { step(hist().undo, hist().redo); }
+export function redoEq() { step(hist().redo, hist().undo); }
+function step(from, to) {
+  if (!from.length || !editable()) return;
+  to.push(eqSnapshot());
+  applyEq(from.pop(), false);
+  onHistory();
+}
+
+// Set the whole EQ to ``target`` (an eq as the desk reports it): only what differs is written.
+// One step in the history unless ``record`` is false (undo / redo keep their own).
+export function applyEq(target, record = true) {
+  const eq = state.eq && state.eq.eq;
+  if (!eq || !target || !editable()) return;
+  if (record) remember();
+  batch = true;
+  try {
+    if (target.on !== eq.on) edit("EQ", { on: target.on });
+    if (target.hpf && eq.hpf) {
+      const s = {};
+      if (target.hpf.on !== eq.hpf.on) s.on = target.hpf.on;
+      if (target.hpf.freq !== eq.hpf.freq) s.freq = target.hpf.freq;
+      if (Object.keys(s).length) edit("HPF", s);
+    }
+    for (const t of target.bands || []) {
+      const b = eq.bands.find((x) => x.label === t.label);
+      if (!b || !PATH[t.label]) continue;
+      const s = {};
+      if (typeOf(t) !== typeOf(b) && (t.label === "L" || t.label === "H")) s.type = typeOf(t);
+      for (const k of ["freq", "gain", "q"]) if (t[k] !== undefined && t[k] !== b[k]) s[k] = t[k];
+      if (Object.keys(s).length) edit(t.label, s);
+    }
+  } finally {
+    batch = false;
+  }
+  if (pop) showPop(pop.dataset.key);
+}
+// A single change from the toolbar (EQ / HPF on, ...): one undoable step.
+export function editEq(key, s) { if (editable()) edit(key, s); }
+
 // ------------------------------------------------------------------ pointer: hit, drag, wheel
 
-const editable = () => state.showEq && state.eq && state.eq.writable && state.eq.index === state.input && state.eq.eq;
+export const editable = () => state.showEq && state.eq && state.eq.writable && state.eq.index === state.input && state.eq.eq;
 function hit(x, y) {
   let best = null, dist = HIT_PX;
   for (const h of eqHandles()) {
@@ -193,8 +273,46 @@ const gainAt = (y) => { const mid = eqY(0), unit = eqY(1) - mid; return clamp((y
 
 let drag = null;   // {key, kind, moved, x0, y0}
 
+// Pinch (two fingers): the Q of the band being dragged or selected when it's a bell, else of the
+// bell nearest the fingers; fingers apart widen it (lower Q), together narrow it.
+const touches = new Map();   // pointerId -> [x, y]
+let pinch = null;            // {key, d0, q0}
+const spread = () => { const [a, b] = [...touches.values()]; return Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; };
+function startPinch() {
+  const bands = state.eq.eq.bands, bell = (k) => bands.find((b) => b.label === k && b.type === "bell");
+  const mid = fOfX(([...touches.values()].reduce((s, t) => s + t[0], 0)) / 2);
+  const b = bell(drag && drag.key) || bell(state.eqSelected)
+    || bands.filter((x) => x.type === "bell").sort((x, y) => Math.abs(Math.log(x.freq / mid)) - Math.abs(Math.log(y.freq / mid)))[0];
+  if (!b || eqLocks(b.label).q) return;
+  if (!drag || !drag.moved) remember();
+  drag = null;
+  pinch = { key: b.label, d0: spread(), q0: b.q };
+  state.eqSelected = b.label;
+  state.eqEditing = true;
+  state.dirty = true;
+}
+function endPinch() {
+  pinch = null;
+  state.eqEditing = false;
+  settle();
+}
+
+// Double-tap a handle: its gain back to 0 dB (bells and shelves; not when the gain is locked).
+let lastTap = null;   // {key, t}
+function doubleTapped(key) {
+  const now = performance.now(), twice = lastTap && lastTap.key === key && now - lastTap.t < 350;
+  lastTap = twice ? null : { key, t: now };
+  const b = twice && state.eq.eq.bands.find((x) => x.label === key);
+  if (!b || b.type === "hpf" || b.type === "lpf" || eqLocks(key).gain) return twice;
+  edit(key, { gain: 0 });
+  return true;
+}
+
 canvas.addEventListener("pointerdown", (e) => {
-  if (!editable() || e.button !== 0) return;
+  if (!editable() || (e.pointerType === "mouse" && e.button !== 0)) return;
+  touches.set(e.pointerId, local(e));
+  if (touches.size === 2) { e.preventDefault(); startPinch(); return; }
+  if (touches.size > 2) return;
   const [x, y] = local(e);
   const l = hitLock(x, y);
   if (l) { e.preventDefault(); toggleLock(l.key); return; }
@@ -210,6 +328,14 @@ canvas.addEventListener("pointerdown", (e) => {
 
 canvas.addEventListener("pointermove", (e) => {
   const [x, y] = local(e);
+  if (touches.has(e.pointerId)) touches.set(e.pointerId, [x, y]);
+  if (pinch) {
+    if (touches.size === 2) {
+      edit(pinch.key, { q: Math.round(pinch.q0 * pinch.d0 / spread() * 100) / 100 });
+      if (pop) showPop(pinch.key);
+    }
+    return;
+  }
   if (!drag) {
     const h = editable() && !hitLock(x, y) && hit(x, y);
     const axes = h && dragAxes(h.key, h.kind);
@@ -222,13 +348,16 @@ canvas.addEventListener("pointermove", (e) => {
   if (axes.freq) s.freq = Math.round(fOfX(clamp(x, PAD.l, W - PAD.r)) * 10) / 10;  // not off the plot
   if (axes.gain) s.gain = Math.round(gainAt(y) * 10) / 10;
   if (!Object.keys(s).length) return;   // all locked: nothing to drag
+  if (!drag.moved) remember();          // the whole drag is one step back
   drag.moved = true;
   canvas.style.cursor = "grabbing";
   edit(drag.key, s);
   if (pop) showPop(drag.key);
 });
 
-function endDrag() {
+function endDrag(e) {
+  touches.delete(e.pointerId);
+  if (pinch) { if (touches.size < 2) endPinch(); return; }
   if (!drag) return;
   const { key, moved } = drag;
   drag = null;
@@ -236,7 +365,8 @@ function endDrag() {
   canvas.style.cursor = "";
   if (moved) settle();  // the desk's echoes of the drag are still on their way
   else if (state.eqPushed && !state.eqSettling) { state.eq = state.eqPushed; state.eqPushed = null; state.dirty = true; }
-  if (!moved) {   // a click: its settings, or closes them when they are already open
+  if (!moved && doubleTapped(key)) showPop(key);  // the second tap: gain to 0, settings stay open
+  else if (!moved) {   // a click: its settings, or closes them when they are already open
     if (pop && pop.dataset.key === key) closePop(); else showPop(key);
   }
 }
@@ -331,18 +461,18 @@ export function showPop(key) {
     pop.append(on, field("Frequency", eq.hpf.freq, 1, "Hz", (v) => { edit("HPF", { freq: v }); showPop("HPF"); }, ["HPF", "freq"]));
   } else {
     const b = eq.bands.find((x) => x.label === key);
-    if (key === "L" || key === "H") {
-      if (b.type === "hpf" || b.type === "lpf") {
-        pop.append(el("p", "eqp-note", `Used as a ${b.type.toUpperCase()} on the desk.`));
-      } else {
-        const row = el("label", "eqp-row"), sel = el("select");
-        sel.setAttribute("aria-label", "Type");
-        sel.append(new Option("Bell", "bell"), new Option("Shelf", "shelf"));
-        sel.value = b.type === "bell" ? "bell" : "shelf";
-        sel.onchange = () => edit(key, { type: sel.value });
-        row.append(el("span", "", "Type"), sel);
-        pop.append(row);
-      }
+    if (BAND_TYPES[key]) {
+      // Bell / shelf (and LPF on the high band); a low band set to HPF on the desk can be
+      // turned back into a bell or shelf here.
+      const names = { bell: "Bell", shelf: "Shelf", lpf: "LPF", hpf: "HPF" };
+      const row = el("label", "eqp-row"), sel = el("select");
+      sel.setAttribute("aria-label", "Type");
+      const now = typeOf(b), kinds = BAND_TYPES[key].includes(now) ? BAND_TYPES[key] : [...BAND_TYPES[key], now];
+      for (const k of kinds) sel.append(new Option(names[k], k));
+      sel.value = now;
+      sel.onchange = () => { edit(key, { type: sel.value }); showPop(key); };
+      row.append(el("span", "", "Type"), sel);
+      pop.append(row);
     }
     pop.append(field("Frequency", b.freq, 1, "Hz", (v) => { edit(key, { freq: v }); showPop(key); }, [key, "freq"]));
     if (b.type !== "hpf" && b.type !== "lpf") {

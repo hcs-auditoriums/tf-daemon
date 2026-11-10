@@ -76,7 +76,7 @@ tf_daemon/
                    plot.js (geometry, grid, traces, hover), socket.js (/ws/audio),
                    controls.js, console.js (sidebar), eq.js (EQ overlay),
                    range.js, rings.js, vocal.js, waterfall.js, eqedit.js (EQ
-                   editing on the spectrum), profiles.js (EQ profiles),
+                   editing on the spectrum), eqbar.js (EQ toolbar), profiles.js (EQ profiles),
                    ringout.js (ring-out dialog)
 ```
 

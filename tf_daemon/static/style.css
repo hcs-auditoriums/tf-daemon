@@ -582,3 +582,24 @@ main:has(.vocal-panel:not([hidden])) .ring-list { right: auto; left: 52px; }
   border-radius: 8px; padding: 12px 16px; cursor: pointer; width: 100%;
 }
 .ro-abort:hover, .ro-abort:focus-visible { background: #e53935; outline: none; }
+
+/* The EQ toolbar over the spectrum (audio/eqbar.js), top left under the EQ's title. */
+.eq-bar { position: absolute; top: 32px; left: 52px; z-index: 4; display: flex; gap: 4px; align-items: flex-start; }
+.eq-bar[hidden] { display: none; }
+.eqb-btn {
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--muted); background: rgba(22, 26, 32, 0.92);
+  border: 1px solid var(--border); border-radius: 6px; min-width: 34px; min-height: 30px; padding: 0 8px; cursor: pointer;
+  display: grid; place-items: center; list-style: none;
+}
+.eqb-btn::-webkit-details-marker { display: none; }
+.eqb-btn:hover:not(:disabled) { border-color: var(--muted); color: var(--text); }
+.eqb-btn:disabled { opacity: 0.4; cursor: default; }
+.eqb-btn[aria-pressed="true"] { color: #06131d; background: var(--eq); border-color: var(--eq); }
+.eqb-btn[hidden] { display: none; }
+.eqb-menu { position: relative; }
+.eqb-panel {
+  position: absolute; top: calc(100% + 4px); left: 0; display: flex; flex-direction: column; gap: 4px; padding: 6px;
+  min-width: 170px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.eqb-panel .eqb-btn { justify-items: start; color: var(--text); font-weight: 400; }
+@media (pointer: coarse) { .eqb-btn { min-width: 44px; min-height: 40px; font-size: 14px; } }

@@ -3,6 +3,7 @@
 // which one we show ({"cmd": "view"}) and pick that input's record out of each frame.
 
 import { drawEq } from "./audio/eq.js";
+import { syncEqBar } from "./audio/eqbar.js";
 import { drawGrid, drawHover, H, PAD, resize, trace, W } from "./audio/plot.js";
 import { drawRingMarkers } from "./audio/rings.js";
 import { C, ctx, state } from "./audio/shared.js";
@@ -27,6 +28,7 @@ function draw() {
   drawVocal();
   ctx.restore();
   drawHover();
+  syncEqBar();
 }
 
 // A bug in any overlay must not freeze the analyzer: log it (once a few
