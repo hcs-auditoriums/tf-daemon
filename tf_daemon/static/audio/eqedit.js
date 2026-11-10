@@ -282,7 +282,7 @@ function startPinch() {
   const bands = state.eq.eq.bands, bell = (k) => bands.find((b) => b.label === k && b.type === "bell");
   const mid = fOfX(([...touches.values()].reduce((s, t) => s + t[0], 0)) / 2);
   tapOff = null;   // a pinch, not a tap off the handles: the selection stays
-  const chosen = state.eqSelected || (drag && drag.key);
+  const chosen = state.eqSelected || (pop && pop.dataset.key) || (drag && drag.key);
   const b = chosen ? bell(chosen)
     : bands.filter((x) => x.type === "bell").sort((x, y) => Math.abs(Math.log(x.freq / mid)) - Math.abs(Math.log(y.freq / mid)))[0];
   if (!b || eqLocks(b.label).q) return;
@@ -478,9 +478,10 @@ const popSig = (key) => {
 };
 export function syncEqPop() {
   const typing = pop && document.activeElement?.tagName === "INPUT" && pop.contains(document.activeElement);
-  if (!pop || drag || pinch || typing) return;
-  if (!editable()) closePop();
-  else if (popSig(pop.dataset.key) !== pop.dataset.sig) showPop(pop.dataset.key);
+  // Never closes them: another input or the EQ hidden does that (eqEditReset); a push while
+  // the EQ is briefly not editable must not drop the selected band (a pinch is for it).
+  if (!pop || drag || pinch || typing || !editable()) return;
+  if (popSig(pop.dataset.key) !== pop.dataset.sig) showPop(pop.dataset.key);
 }
 
 export function showPop(key) {

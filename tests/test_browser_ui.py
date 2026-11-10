@@ -81,6 +81,7 @@ def test_sidebar_tool_row_fits_and_fader_is_centred(page):
     page.set_viewport_size({"width": 1024, "height": 768})
     open_page(page, "/")
     page.locator("#console-panel .cp-track").wait_for(timeout=10000)
+    page.locator("#console-panel .cp-on").wait_for(timeout=10000)  # the strip is rebuilt as the desk's EQ arrives
     clipped = page.evaluate(
         "[...document.querySelectorAll('.cp-tool')].filter(b => b.scrollWidth > b.clientWidth).map(b => b.textContent)"
     )
