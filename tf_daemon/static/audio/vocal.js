@@ -12,6 +12,17 @@ let vocal = null;                 // GET /api/vocal/status; null = module off
 let vocalOpen = false;
 state.vocalOverlay = loadInt("tf.vocalOverlay", 1) === 1;
 
+// The suggested EQ on the spectrum: Show > Suggested EQ and the panel's checkbox.
+function setVocalOverlay(on) {
+  state.vocalOverlay = on;
+  $("show-vocal").checked = on;
+  save("tf.vocalOverlay", on ? 1 : 0);
+  renderVocal();
+  state.dirty = true;
+}
+$("show-vocal").checked = state.vocalOverlay;
+$("show-vocal").onchange = (e) => setVocalOverlay(e.target.checked);
+
 // One poll loop. pollVocal(ms) moves the next poll to ``ms`` from now (a button's request
 // asks for a quick one); it never starts a second loop.
 let pollTimer = null, polling = false, stopped = false;
@@ -27,9 +38,11 @@ async function pollOnce() {
   let next = 3000;
   try {
     const r = await fetch("/api/vocal/status");
-    if (r.status === 404) { vocal = null; $("mic-check").hidden = true; stopped = true; return; }  // module off
+    if (r.status === 404) {  // module off
+      vocal = null; $("mic-check").hidden = $("vocal-toggle").hidden = true; stopped = true; return;
+    }
     vocal = await r.json();
-    $("mic-check").hidden = false;
+    $("mic-check").hidden = $("vocal-toggle").hidden = false;
     const listening = Object.values(vocal.sessions).some((s) => s.state === "listening");
     if (vocalOpen || listening) next = 500;
     renderVocal();
@@ -216,13 +229,13 @@ function suggestionItems(s, r, label, row, button) {
   for (const n of r.notes) items.push(el("p", "vp-note", n));
   const lbl = el("label", "vp-check");
   const cb = el("input"); cb.type = "checkbox"; cb.checked = state.vocalOverlay;
-  cb.onchange = () => { state.vocalOverlay = cb.checked; save("tf.vocalOverlay", cb.checked ? 1 : 0); state.dirty = true; };
+  cb.onchange = () => setVocalOverlay(cb.checked);
   lbl.append(cb, " Show suggested EQ on spectrum");
   items.push(lbl);
   if (eqAvailable && !state.showEq) {  // desk EQ readable but its overlay is off: offer the comparison
     items.push(row(button("Compare with desk EQ", () => {
       const c = $("show-eq"); c.checked = true; c.dispatchEvent(new Event("change"));
-      state.vocalOverlay = true; save("tf.vocalOverlay", 1); renderVocal();
+      setVocalOverlay(true);
     })));
   }
   const ap = s.apply;

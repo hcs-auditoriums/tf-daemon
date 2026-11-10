@@ -70,6 +70,12 @@ def test_channel_names_come_from_the_simulated_console(status):
     assert labels[2] == "BGV 1"  # read from the console
 
 
+def test_desk_coverage_is_served(status):
+    from tf_daemon.console.coverage import FEATURES
+
+    assert [f["key"] for f in get("/api/tf5/coverage")[1]["features"]] == [f.key for f in FEATURES]
+
+
 def test_console_eq_is_read(status):
     eq = wait_for("/api/tf5/eq/0", lambda e: e.get("synced"))
     assert eq["connected"] and eq["eq"]["hpf"]["freq"] > 0 and len(eq["curve"]) > 0

@@ -148,6 +148,7 @@ def test_rings_out_a_mic_notches_the_ring_and_gains_headroom():
     assert all(d <= 100 for d in rises[:5])  # the ramp itself (later rises go back to under a ring)
 
 
+@pytest.mark.slow  # simulates a ramp of several seconds (~0.5 s alone, over 2 s on a busy machine)
 def test_mute_and_cancel_mutes_at_once_and_puts_everything_back():
     desk, eng, r = rig(pa_leak_db=-40.0)  # no feedback in reach: it just ramps
     before_eq = {p: desk.raw[p] for p in PATHS}
@@ -161,7 +162,7 @@ def test_mute_and_cancel_mutes_at_once_and_puts_everything_back():
     assert desk.level == -1000  # the fader where it was
     assert {p: desk.raw[p] for p in PATHS} == before_eq  # the EQ as it was
     n = len(desk.fader_writes)
-    eng.run(2.0)
+    eng.run(ro.RAMP_EVERY_S + 0.1)  # past the next ramp step it would have taken
     assert len(desk.fader_writes) == n  # nothing moves after the cancel
     r.unmute()
     assert desk.on == 1

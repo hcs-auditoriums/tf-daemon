@@ -137,6 +137,9 @@ footer {
 /* Page-specific controls under the top bar (RF sweep form). */
 .toolbar { padding: 8px 16px; background: var(--bg); border-bottom: 1px solid var(--border); }
 
+/* The audio page's View / Traces / Show menus and Mic check: they wrap as one group. */
+.menus { display: flex; align-items: center; gap: 8px; }
+
 /* Dropdown menu (native <details>): the summary is the button. */
 .menu { position: relative; }
 .menu summary {
@@ -151,7 +154,8 @@ footer {
 .menu summary:hover { border-color: var(--muted); }
 .menu-panel {
   position: absolute; top: calc(100% + 6px); left: 0; z-index: 20; min-width: 220px;
-  display: flex; flex-direction: column; gap: 12px; padding: 12px;
+  max-width: calc(100vw - 32px); max-height: calc(100vh - 80px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 14px; padding: 12px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
@@ -159,12 +163,28 @@ footer {
 .menu-panel legend { padding: 0 0 4px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .menu-panel label { display: flex; align-items: center; gap: 8px; color: var(--text); }
 .menu-panel label[hidden] { display: none; }
-.menu-row { justify-content: space-between; }
+.menu-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .menu-panel button {
   font: inherit; color: var(--text); background: #1e242c; border: 1px solid var(--border);
   border-radius: 6px; padding: 6px 12px; cursor: pointer;
 }
 .menu-panel button:hover { border-color: var(--muted); }
+.menu-panel button:disabled { opacity: 0.45; cursor: default; }
+.menu-panel fieldset:disabled { opacity: 0.45; }
+.menu-panel .menu-mini { padding: 2px 10px; font-size: 12px; }
+/* Layout as one segmented control. */
+.seg-row { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg-row label { flex: 1; gap: 0; position: relative; }
+.seg-row input { position: absolute; inset: 0; z-index: 1; margin: 0; opacity: 0; cursor: pointer; }
+.seg-row span { flex: 1; text-align: center; padding: 6px 10px; cursor: pointer; color: var(--muted); border-left: 1px solid var(--border); }
+.seg-row label:first-child span { border-left: 0; }
+.seg-row input:checked + span { color: var(--text); background: #24435c; font-weight: 600; }
+.seg-row input:focus-visible + span { outline: 2px solid var(--avg); outline-offset: -2px; }
+/* A trace's colour beside its name, as a legend. */
+.swatch { display: inline-block; width: 14px; height: 3px; border-radius: 2px; background: var(--sw); }
+.swatch.rta { --sw: var(--rta); } .swatch.avg { --sw: var(--avg); } .swatch.peak { --sw: var(--peak); }
+.swatch.eq { --sw: var(--eq); }
+.swatch.vocal { background: repeating-linear-gradient(90deg, var(--vocal) 0 4px, transparent 4px 7px); }
 
 /* ---------------------------------------------------------------- RF page */
 
@@ -312,7 +332,7 @@ main.page {
 .workspace { flex: 1; display: flex; min-height: 0; min-width: 0; }
 .workspace > main { flex: 1; min-width: 0; }
 .console-panel {
-  width: 184px; flex: none; overflow-y: auto; position: relative;
+  width: 188px; flex: none; overflow-y: auto; position: relative;
   padding: 10px; display: flex; flex-direction: column; gap: 10px;
   background: var(--panel); border-left: 1px solid var(--border);
   font-size: 12px; font-variant-numeric: tabular-nums;
@@ -321,6 +341,23 @@ main.page {
 .cp-note { color: var(--muted); margin: 0; }
 /* The name at the foot of the strip, in the channel's colour (StageMix / the desk's scribble strip). */
 .cp-head { padding: 6px 8px; border-radius: 6px; border-top: 5px solid var(--ch); background: var(--bg); text-align: center; }
+.cp-head > span { display: block; }
+/* The tool row at the top of the strip (audio/strip.js): IN, EQ, GATE, COMP, SEND, as StageMix. */
+.cp-tools { display: flex; gap: 2px; }
+.cp-tool {
+  flex: 1 1 0; min-width: 0; min-height: 32px; padding: 0; font: inherit; font-size: 10px; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--muted); background: #1e242c; border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+  position: relative;
+}
+.cp-tool[hidden] { display: none; }
+.cp-tool:hover { color: var(--text); }
+.cp-tool.lit { color: var(--ok); }
+.cp-tool.lit.p48 { color: var(--bad); }
+.cp-tool[aria-pressed="true"] { border-color: var(--avg); color: var(--text); background: #24435c; }
+.cp-tool.lit[aria-pressed="true"]::after { content: ""; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--ok); }
+.cp-tool.p48[aria-pressed="true"]::after { background: var(--bad); }
+.cp-eqrow { display: flex; align-items: center; gap: 6px; }
+.cp-eqrow .cp-eqinfo { flex: 1; min-width: 0; }
 .cp-name { font-size: 15px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-src { color: var(--muted); font-size: 11px; }
 .cp-on {
@@ -376,24 +413,11 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
   transform: translate(-50%, -50%); background: var(--avg); box-shadow: 0 0 0 2px var(--panel);
 }
 
-.cp-sends { display: flex; flex-direction: column; gap: 5px; flex: 0 1 auto; min-height: 64px; overflow-y: auto; }
-.cp-sendhdr { position: sticky; top: 0; background: var(--panel); }
-.cp-sendhdr { display: flex; justify-content: space-between; align-items: center; }
-.cp-sendhdr h3 { margin: 0; font-size: 11px; font-weight: 400; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
-.cp-sendhdr label { display: flex; align-items: center; gap: 4px; color: var(--muted); min-height: 32px; padding-left: 8px; }
-.cp-send { display: grid; grid-template-columns: 1fr 38px; grid-template-rows: auto 4px; column-gap: 6px; align-items: center; }
-.cp-send .cp-sendbar { grid-column: 1 / -1; grid-row: 2; height: 4px; }
-.cp-send.off { opacity: 0.45; }
-.cp-sendname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cp-sendbar { height: 6px; border-radius: 3px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
-.cp-sendbar span { display: block; height: 100%; background: var(--peak); }
-.cp-sendval { text-align: right; color: var(--text); }
 /* Smooth the steps between desk updates (a moving fader sends many small changes). */
 .cp-cap { transition: bottom 90ms linear; }
 .cp-fill { transition: height 90ms linear; }
 .cp-pan span { transition: left 90ms linear; }
-.cp-sendbar span { transition: width 90ms linear; }
-@media (prefers-reduced-motion: reduce) { .cp-cap, .cp-fill, .cp-pan span, .cp-sendbar span { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .cp-cap, .cp-fill, .cp-pan span { transition: none; } }
 .cp-extra { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
 .cp-extra dt { color: var(--muted); }
 .cp-extra dd { margin: 0; text-align: right; }
@@ -433,11 +457,11 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
   background: rgba(13, 16, 20, 0.88); border: 1px solid var(--border); border-radius: 6px;
   font-size: 12px; font-variant-numeric: tabular-nums;
 }
-main:has(.vocal-panel:not([hidden])) .ring-list { right: auto; left: 52px; }
+main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { right: auto; left: 52px; }
 .ring-list[hidden] { display: none; }
 .ring-list.collapsed { width: auto; }
 @media (max-width: 720px) {
-  .ring-list, main:has(.vocal-panel:not([hidden])) .ring-list { left: 8px; right: 8px; width: auto; max-width: none; }
+  .ring-list, main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { left: 8px; right: 8px; width: auto; max-width: none; }
   .ring-list.collapsed { right: auto; }
 }
 .rl-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 0 2px 4px; font-weight: 600; }
@@ -464,9 +488,6 @@ main:has(.vocal-panel:not([hidden])) .ring-list { right: auto; left: 52px; }
 .rl-srcname.top { font-weight: 700; }
 
 /* ---------------------------------------------------------------- audio waterfall */
-
-.menu-panel fieldset.seg { flex-direction: row; flex-wrap: wrap; gap: 4px 14px; }
-.menu-panel fieldset.seg legend { width: 100%; }
 
 /* ---------------------------------------------------------------- vocal EQ assist */
 
@@ -582,3 +603,71 @@ main:has(.vocal-panel:not([hidden])) .ring-list { right: auto; left: 52px; }
   border-radius: 8px; padding: 12px 16px; cursor: pointer; width: 100%;
 }
 .ro-abort:hover, .ro-abort:focus-visible { background: #e53935; outline: none; }
+
+/* The EQ toolbar over the spectrum (audio/eqbar.js), top left under the EQ's title. */
+.eq-bar { position: absolute; top: 32px; left: 52px; z-index: 4; display: flex; gap: 4px; align-items: flex-start; }
+.eq-bar[hidden] { display: none; }
+.eqb-btn {
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--muted); background: rgba(22, 26, 32, 0.92);
+  border: 1px solid var(--border); border-radius: 6px; min-width: 34px; min-height: 30px; padding: 0 8px; cursor: pointer;
+  display: grid; place-items: center; list-style: none;
+}
+.eqb-btn::-webkit-details-marker { display: none; }
+.eqb-btn:hover:not(:disabled) { border-color: var(--muted); color: var(--text); }
+.eqb-btn:disabled { opacity: 0.4; cursor: default; }
+.eqb-btn[aria-pressed="true"] { color: #06131d; background: var(--eq); border-color: var(--eq); }
+.eqb-btn[hidden] { display: none; }
+.eqb-menu { position: relative; }
+.eqb-panel {
+  position: absolute; top: calc(100% + 4px); left: 0; display: flex; flex-direction: column; gap: 4px; padding: 6px;
+  min-width: 170px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.eqb-panel .eqb-btn { justify-items: start; color: var(--text); font-weight: 400; white-space: nowrap; }
+@media (pointer: coarse) { .eqb-btn { min-width: 44px; min-height: 40px; font-size: 14px; } }
+
+/* A channel's gain / gate / comp / sends (audio/strip.js): one panel over the plot's right side,
+   a tab per StageMix screen. Opened from the sidebar's name and Sends heading. */
+.strip-panel {
+  position: absolute; top: 44px; right: 16px; z-index: 11; width: 340px; max-width: calc(100% - 32px);
+  max-height: calc(100% - 60px); overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px;
+  background: rgba(22, 26, 32, 0.97); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.strip-panel[hidden] { display: none; }
+.sp-head { display: flex; align-items: center; gap: 6px; }
+.sp-tabs { display: flex; flex: 1; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.sp-tab { flex: 1; font: inherit; font-size: 12px; color: var(--muted); background: none; border: 0; border-left: 1px solid var(--border);
+          min-height: 32px; cursor: pointer; }
+.sp-tab:first-child { border-left: 0; }
+.sp-tab[aria-selected="true"] { color: var(--text); background: #24435c; font-weight: 600; }
+.sp-x { font: inherit; font-size: 18px; color: var(--muted); background: none; border: 0; cursor: pointer; min-width: 32px; min-height: 32px; }
+.sp-body { display: flex; flex-direction: column; gap: 10px; }
+.sp-note { margin: 0; color: var(--muted); }
+.sp-foot { font-size: 11px; border-top: 1px solid var(--border); padding-top: 6px; }
+.sp-error { margin: 0; color: var(--bad); }
+.sp-error[hidden], .sp-foot[hidden] { display: none; }
+.sp-switches { display: flex; gap: 6px; }
+.sp-toggle { font: inherit; font-weight: 600; color: var(--muted); background: #1e242c; border: 1px solid var(--border);
+             border-radius: 6px; min-height: 32px; min-width: 44px; padding: 0 10px; cursor: pointer; }
+.sp-toggle[aria-pressed="true"] { color: #06131d; background: var(--ok); border-color: var(--ok); }
+.sp-toggle.danger[aria-pressed="true"] { color: #fff; background: var(--bad); border-color: var(--bad); }
+.sp-toggle:disabled, .sp-row input:disabled { opacity: 0.45; cursor: default; }
+.sp-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; }
+.sp-name { color: var(--muted); }
+.sp-val { text-align: right; color: var(--text); font-weight: 600; }
+.sp-row input[type="range"] { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: var(--avg); }
+.sp-seg { display: flex; gap: 4px; }
+.sp-seg .sp-toggle { min-width: 0; text-transform: capitalize; font-weight: 400; }
+.sp-send { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-top: 1px solid var(--border); }
+.sp-sendhead { display: flex; gap: 6px; align-items: center; }
+.sp-sendhead .sp-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-sendhead .sp-toggle { min-height: 28px; min-width: 40px; font-size: 11px; }
+.dyn-graph { position: static; display: block; width: 100%; height: 150px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+             touch-action: none; cursor: ew-resize; }
+@media (pointer: coarse) { .sp-toggle { min-height: 40px; } .sp-row input[type="range"] { height: 28px; } }
+@media (max-width: 720px) { .strip-panel { left: 8px; right: 8px; width: auto; max-width: none; top: 8px; } }
+/* A send in two lines: name, ON, PRE; then its level (and pan for a pair) with the value beside it. */
+.sp-send .sp-row { grid-template-columns: 1fr 52px; }
+.sp-send .sp-row .sp-name { display: none; }
+.sp-send .sp-row input[type="range"] { grid-column: 1; grid-row: 1; }
+.sp-send .sp-row .sp-val { grid-column: 2; grid-row: 1; }

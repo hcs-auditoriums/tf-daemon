@@ -1,10 +1,11 @@
-// The input picker, trace toggles, View menu and Reset peak.
+// The input picker, the header menus (open / close) and the spectrum traces with Reset.
 
 import { channelColor, renderPanel } from "./console.js";
 import { eqEditReset } from "./eqedit.js";
 import { autoReset } from "./range.js";
-import { $, save, state } from "./shared.js";
+import { $, loadInt, save, state } from "./shared.js";
 import { send } from "./socket.js";
+import { stripInputChanged } from "./strip.js";
 import { renderVocal } from "./vocal.js";
 import { wfReset } from "./waterfall.js";
 
@@ -96,16 +97,37 @@ export function selectInput(index) {
   markSelected(index);
   send({ cmd: "view", channel: index });
   renderPanel();
+  stripInputChanged();
   state.dirty = true;
 }
 
-// View menu (a <details>): close on a click outside it or Escape.
-const viewMenu = $("view-menu");
-document.addEventListener("click", (e) => { if (viewMenu.open && !viewMenu.contains(e.target)) viewMenu.open = false; });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") viewMenu.open = false; });
+// The header menus (View, Traces, Show; each a <details>): one open at a time, closed by a
+// click outside it or Escape.
+const menus = [...document.querySelectorAll("header details.menu")];
+for (const m of menus) {
+  m.addEventListener("toggle", () => {
+    if (!m.open) return;
+    for (const o of menus) if (o !== m) o.open = false;
+    const panel = m.querySelector(".menu-panel");  // kept on screen (a phone's narrow top bar)
+    panel.style.left = "";
+    const over = panel.getBoundingClientRect().right - (document.documentElement.clientWidth - 8);
+    if (over > 0) panel.style.left = `${-over}px`;
+  });
+}
+document.addEventListener("click", (e) => { for (const m of menus) if (m.open && !m.contains(e.target)) m.open = false; });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") for (const m of menus) m.open = false; });
 
-$("show-avg").onchange = (e) => { state.showAvg = e.target.checked; state.dirty = true; };
-$("show-peak").onchange = (e) => { state.showPeak = e.target.checked; state.dirty = true; };
-$("show-live").onchange = (e) => { state.showLive = e.target.checked; state.dirty = true; };
-
+// Spectrum traces (remembered in this browser); Reset sits on the Peak hold row and only
+// works while that trace is shown.
+for (const [id, key, store] of [["show-live", "showLive", "tf.live"], ["show-avg", "showAvg", "tf.avg"], ["show-peak", "showPeak", "tf.peak"]]) {
+  const box = $(id);
+  state[key] = box.checked = loadInt(store, 1) === 1;
+  box.onchange = () => {
+    state[key] = box.checked;
+    save(store, box.checked ? 1 : 0);
+    $("reset-peak").disabled = !state.showPeak;
+    state.dirty = true;
+  };
+}
+$("reset-peak").disabled = !state.showPeak;
 $("reset-peak").onclick = () => send({ cmd: "reset_peak", channel: state.input });

@@ -162,6 +162,8 @@ function applyLayout() {
   $("spec-pane").hidden = state.layout === "waterfall";
   $("wf-pane").hidden = state.layout === "spectrum";
   for (const r of document.querySelectorAll('input[name="layout"]')) r.checked = r.value === state.layout;
+  $("spec-opts").disabled = state.layout === "waterfall";  // each pane's options, greyed out while it's hidden
+  $("wf-opts").disabled = state.layout === "spectrum";
   state.dirty = true; wf.dirty = true;
 }
 for (const r of document.querySelectorAll('input[name="layout"]')) {

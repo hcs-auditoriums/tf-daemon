@@ -4,85 +4,45 @@ Like tests/test_live.py these run against tests/conftest.py's private demo serve
 (or TF_DAEMON_URL); they also need Playwright's Chromium, which the dev image has.
 They catch what the Python tests can't: a script error, a page that stops
 drawing, a control that no longer does anything. Read-only, like the live tests:
-nothing here changes the server's state (no mic check is started, no peak reset).
+nothing here changes the server's state (no mic check is started, no peak reset),
+except the fader test, which puts the desk back. EQ editing is in test_browser_eq.py;
+the ``browser`` / ``page`` fixtures are in conftest.py.
 """
 
 from __future__ import annotations
 
-import os
-
 import pytest
+from helpers import DRAWN, live_url, open_page
 
-URL = os.environ.get("TF_DAEMON_URL", "").rstrip("/")
+URL = live_url()
 sync_api = pytest.importorskip("playwright.sync_api", reason="Playwright not installed (the dev image has it)")
 
 pytestmark = [pytest.mark.skipif(not URL, reason="TF_DAEMON_URL not set (no live server)"), pytest.mark.slow]
-
-# Drawn pixels on a canvas: anything that isn't the page background. Sampled on a
-# grid so it is cheap; a blank or failed canvas gives (close to) zero.
-DRAWN = """(id) => {
-  const c = document.getElementById(id);
-  if (!c || !c.width || !c.height) return 0;
-  const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
-  const bg = [d[0], d[1], d[2]];
-  let n = 0;
-  for (let i = 0; i < d.length; i += 4 * 97) {
-    if (Math.abs(d[i] - bg[0]) + Math.abs(d[i + 1] - bg[1]) + Math.abs(d[i + 2] - bg[2]) > 30) n++;
-  }
-  return n;
-}"""
-
-
-@pytest.fixture(scope="module")
-def browser():
-    with sync_api.sync_playwright() as p:
-        b = p.chromium.launch()
-        yield b
-        b.close()
-
-
-@pytest.fixture
-def page(browser):
-    """A fresh page that records every script error and console error."""
-    ctx = browser.new_context(viewport={"width": 1280, "height": 800})
-    pg = ctx.new_page()
-    pg.errors = []  # type: ignore[attr-defined]
-    pg.on("pageerror", lambda e: pg.errors.append(f"pageerror: {e}"))
-    pg.on("console", lambda m: m.type == "error" and pg.errors.append(f"console: {m.text}"))
-    yield pg
-    errors = pg.errors
-    ctx.close()
-    assert errors == [], errors
-
-
-def _open(page, path):
-    page.goto(URL + path)
-    page.wait_for_load_state("domcontentloaded")
 
 
 # Every test here fails on any script or console error (the ``page`` fixture), so each page
 # is covered by the tests that use it; /config by this one.
 def test_config_page_loads_the_config(page):
-    _open(page, "/config")
+    open_page(page, "/config")
     page.wait_for_function("document.getElementById('conn').textContent === 'connected'", timeout=8000)
     page.wait_for_function("document.getElementById('config').value.includes('[server]')", timeout=8000)
 
 
 def test_rf_and_wireless_pages_connect_and_post(page):
     """The shared websocket and POST helpers (static/common.js) on the RF and Wireless pages."""
-    _open(page, "/rf")
+    open_page(page, "/rf")
     page.wait_for_function("document.getElementById('conn').textContent.includes('sweeps')", timeout=8000)
     page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=8000)
     with page.expect_response("**/api/rf/reset-peak") as res:
         page.click("#reset-peak")  # a harmless POST through postJson
     assert res.value.ok
     assert page.locator("#error").inner_text() == ""
-    _open(page, "/qlxd")
+    open_page(page, "/qlxd")
     page.wait_for_function("/receivers online/.test(document.getElementById('conn').textContent)", timeout=8000)
 
 
 def test_audio_page_connects_names_inputs_and_draws(page):
-    _open(page, "/")
+    open_page(page, "/")
     page.wait_for_function("document.getElementById('conn').textContent.startsWith('live')", timeout=8000)
     page.wait_for_function("document.querySelectorAll('#channels button').length >= 4", timeout=8000)
     labels = page.locator("#channels button").all_inner_texts()
@@ -91,7 +51,7 @@ def test_audio_page_connects_names_inputs_and_draws(page):
 
 
 def test_switching_input_follows_the_buttons(page):
-    _open(page, "/")
+    open_page(page, "/")
     page.wait_for_function("document.querySelectorAll('#channels button').length >= 4", timeout=8000)
     page.locator("#channels button", has_text="Lead Vox").click()
     page.wait_for_function(
@@ -103,7 +63,7 @@ def test_switching_input_follows_the_buttons(page):
 
 def test_channel_bar_banks_of_big_tiles(page):
     page.set_viewport_size({"width": 1024, "height": 768})
-    _open(page, "/")
+    open_page(page, "/")
     page.wait_for_function("document.querySelectorAll('#channels .ch-chip').length >= 34", timeout=8000)
     page.locator("#channels .ch-chip", has_text="Pastor").click()
     visible = page.locator("#channels .ch-chip:visible")
@@ -133,7 +93,7 @@ def test_channel_bar_banks_of_big_tiles(page):
 
 
 def test_waterfall_layout_draws(page):
-    _open(page, "/")
+    open_page(page, "/")
     page.wait_for_function("document.getElementById('conn').textContent.startsWith('live')", timeout=8000)
     page.click("#view-menu summary")
     page.check("#layout input[value=both]")
@@ -142,7 +102,7 @@ def test_waterfall_layout_draws(page):
 
 
 def test_hover_readout_shows_a_frequency(page):
-    _open(page, "/")
+    open_page(page, "/")
     page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=8000)
     box = page.locator("#spectrum").bounding_box()
     page.mouse.move(box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5)
@@ -150,18 +110,18 @@ def test_hover_readout_shows_a_frequency(page):
 
 
 def test_console_panel_and_eq_from_the_simulated_desk(page):
-    _open(page, "/")
+    open_page(page, "/")
     panel = page.locator("#console-panel")
     panel.wait_for(state="visible", timeout=8000)
     page.wait_for_function("document.getElementById('console-panel').textContent.trim().length > 0", timeout=8000)
     page.wait_for_function("!document.getElementById('eq-toggle').hidden", timeout=8000)
-    page.click("#view-menu summary")
+    page.click("#show-menu summary")
     page.check("#show-eq")
     page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=4000)
 
 
 def test_console_icon_on_the_plot_toggles_the_sidebar(page):
-    _open(page, "/")
+    open_page(page, "/")
     btn, panel = page.locator("#console-btn"), page.locator("#console-panel")
     btn.wait_for(state="visible", timeout=8000)
     panel.wait_for(state="visible", timeout=8000)
@@ -180,7 +140,7 @@ def test_console_icon_on_the_plot_toggles_the_sidebar(page):
 
 def test_console_strip_fits_a_tablet_and_is_touch_sized(page):
     page.set_viewport_size({"width": 1024, "height": 768})
-    _open(page, "/")
+    open_page(page, "/")
     panel = page.locator("#console-panel")
     panel.locator(".cp-head").wait_for(timeout=8000)
     page.wait_for_function("document.querySelector('#console-panel .cp-eq')", timeout=8000)
@@ -205,12 +165,12 @@ def test_console_strip_fits_a_tablet_and_is_touch_sized(page):
 
 
 def test_rings_from_the_synth_tone_are_listed(page):
-    _open(page, "/")  # the synth carries a steady 2.5 kHz tone: the ring detector reports it
+    open_page(page, "/")  # the synth carries a steady 2.5 kHz tone: the ring detector reports it
     page.wait_for_function("!document.getElementById('ring-alert').hidden", timeout=15000)
 
 
 def test_mic_check_panel_opens_and_closes(page):
-    _open(page, "/")
+    open_page(page, "/")
     btn = page.locator("#mic-check")
     btn.wait_for(state="visible", timeout=8000)  # vocal assist is on in config.dev.toml
     btn.click()
@@ -220,23 +180,19 @@ def test_mic_check_panel_opens_and_closes(page):
 
 
 def test_shift_arrow_switches_pages(page):
-    _open(page, "/")
+    open_page(page, "/")
     page.keyboard.press("Shift+ArrowRight")
     page.wait_for_url(URL + "/rf", timeout=4000)
 
 
 def test_every_view_control_works_without_errors(page):
     """Runs most of the page's code: each range, trace, waterfall and panel option."""
-    _open(page, "/")
+    open_page(page, "/")
     page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=8000)
     page.click("#view-menu summary")
     for value in ["-90,-10", "-80,0", "-70,-20", "-130,0", "auto"]:
         page.select_option("#range", value)
         page.wait_for_timeout(150)
-    for box in ["#show-avg", "#show-live", "#show-peak", "#show-rings"]:
-        page.uncheck(box)
-        page.wait_for_timeout(100)
-        page.check(box)
     page.check("#layout input[value=waterfall]")
     page.select_option("#wf-source", "avg")
     page.select_option("#wf-span", "300")
@@ -245,18 +201,22 @@ def test_every_view_control_works_without_errors(page):
     page.mouse.move(box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.3)
     page.wait_for_timeout(300)
     page.check("#layout input[value=spectrum]")
-    page.click("#view-menu summary")
+    page.click("#trace-menu summary")
+    for box in ["#show-avg", "#show-live", "#show-peak"]:
+        page.uncheck(box)
+        page.wait_for_timeout(100)
+        page.check(box)
+    page.click("#show-menu summary")
+    for box in ["#show-rings", "#show-ring-list"]:
+        page.uncheck(box)
+        page.wait_for_timeout(100)
+        page.check(box)
     page.wait_for_function("!document.getElementById('console-toggle').hidden", timeout=8000)
-    page.click("#view-menu summary")
     page.uncheck("#show-console")
     page.locator("#console-panel").wait_for(state="hidden", timeout=2000)
     page.check("#show-console")
     page.locator("#console-panel").wait_for(state="visible", timeout=2000)
-    page.click("#view-menu summary")  # close the menu: it opens over the sidebar
-    all_sends = page.locator("#console-panel .cp-sendhdr input[type=checkbox]")
-    all_sends.wait_for(timeout=4000)
-    all_sends.check()
-    page.locator("#console-panel .cp-sendhdr input[type=checkbox]").uncheck()
+    page.click("#show-menu summary")  # close the menu: it opens over the sidebar
     page.locator("#channels [data-input='5']").click()  # an unlisted input: analyzed while viewed
     page.wait_for_function(
         "document.querySelector('#channels [data-input=\"5\"]').getAttribute('aria-pressed') === 'true'", timeout=3000
@@ -266,7 +226,7 @@ def test_every_view_control_works_without_errors(page):
 
 
 def test_ring_list_opens(page):
-    _open(page, "/")
+    open_page(page, "/")
     alert = page.locator("#ring-alert")
     alert.wait_for(state="visible", timeout=15000)
     alert.click()
@@ -286,7 +246,7 @@ def test_ring_list_opens(page):
 
 def test_top_bar_stays_one_row_on_a_tablet_with_a_ring_alert(page):
     page.set_viewport_size({"width": 1024, "height": 768})
-    _open(page, "/")
+    open_page(page, "/")
     alert = page.locator("#ring-alert")
     alert.wait_for(state="visible", timeout=15000)
     tabs = page.locator("header .tabs").bounding_box()
@@ -294,7 +254,7 @@ def test_top_bar_stays_one_row_on_a_tablet_with_a_ring_alert(page):
 
 
 def test_live_listening_starts_and_clears(page):
-    _open(page, "/")
+    open_page(page, "/")
     page.locator("#mic-check").wait_for(state="visible", timeout=8000)
     selected = page.locator("#channels [aria-pressed=true]")
     selected.wait_for(timeout=8000)
@@ -317,7 +277,7 @@ def test_live_listening_starts_and_clears(page):
 
 
 def test_auto_eq_control_is_offered(page):
-    _open(page, "/")  # config.dev.toml allows auto EQ; it's off until a person turns it on
+    open_page(page, "/")  # config.dev.toml allows auto EQ; it's off until a person turns it on
     page.locator("#mic-check").wait_for(state="visible", timeout=8000)
     page.locator("#mic-check").click()
     panel = page.locator("#vocal-panel")
@@ -325,7 +285,7 @@ def test_auto_eq_control_is_offered(page):
 
 
 def test_eq_profiles_save_and_delete_from_the_sidebar(page):
-    _open(page, "/")
+    open_page(page, "/")
     menu = page.locator("#console-panel .cp-profmenu > summary")
     menu.wait_for(state="visible", timeout=10000)  # the EQ section's Profiles menu
     menu.click()
@@ -343,156 +303,8 @@ def test_eq_profiles_save_and_delete_from_the_sidebar(page):
     page.wait_for_function(f"!{listed}", timeout=5000)
 
 
-def test_eq_bands_can_be_dragged_and_typed_on_the_spectrum(page):
-    import json
-    import urllib.request
-
-    def desk_band(label):
-        with urllib.request.urlopen(URL + "/api/tf5/eq/0", timeout=5) as r:
-            return next(b for b in json.loads(r.read())["eq"]["bands"] if b["label"] == label)
-
-    def put(changes):
-        req = urllib.request.Request(
-            URL + "/api/tf5/eq/0",
-            method="PUT",
-            headers={"Content-Type": "application/json"},
-            data=json.dumps({"changes": changes, "confirm": True}).encode(),
-        )
-        urllib.request.urlopen(req, timeout=10).read()
-
-    _open(page, "/")
-    page.wait_for_function("document.querySelectorAll('#channels button').length >= 1", timeout=8000)
-    page.locator("#channels button", has_text="Pastor").click()
-    page.wait_for_function("!document.getElementById('eq-toggle').hidden", timeout=8000)
-    page.click("#view-menu summary")
-    page.check("#show-eq")
-    page.click("#view-menu summary")
-    page.wait_for_function("window.tfEqHandles && window.tfEqHandles().some(h => h.key === 'HM')", timeout=8000)
-    assert page.evaluate("window.tfEqPreviewError()") < 0.05  # this page's maths = the desk's
-    before = desk_band("HM")
-    try:
-        # The HPF has no gain: its handle sits on the 0 dB line (mid-plot), not on the curve.
-        mid = page.evaluate(
-            "(() => { const c = document.getElementById('spectrum'); return (12 + c.clientHeight - 26) / 2; })()"
-        )
-        assert abs(page.evaluate("window.tfEqHandles().find(h => h.key === 'HPF').y") - mid) < 0.5
-        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
-        box = page.locator("#spectrum").bounding_box()
-        x, y = box["x"] + h["x"], box["y"] + h["y"]
-        page.mouse.move(x, y)
-        page.mouse.down()
-        for i in range(1, 6):  # drag up and a little right
-            page.mouse.move(x + 4 * i, y - 6 * i)
-        # The dragged band's own curve is drawn under the total.
-        page.wait_for_function("(window.tfEqBandShown() || {}).key === 'HM'", timeout=3000)
-        assert page.evaluate("window.tfEqBandShown().peak") > 0
-        readout = page.evaluate("window.tfEqReadout()")  # its values beside the handle
-        assert "Hz" in readout and "dB" in readout and "Q " in readout
-        page.mouse.up()
-        page.wait_for_function("1", timeout=1000)
-        wait = 0
-        while desk_band("HM")["gain"] <= before["gain"] and wait < 50:
-            page.wait_for_timeout(100)
-            wait += 1
-        assert desk_band("HM")["gain"] > before["gain"]  # dragged up: more gain on the desk
-        # The click must land where the handle is now: wait until it has stopped moving (the
-        # desk's echoes of the drag arrive for a moment after the release).
-        page.wait_for_function(
-            """() => new Promise((ok) => {
-                const at = () => JSON.stringify(window.tfEqHandles().find((h) => h.key === 'HM'));
-                const a = at(); setTimeout(() => ok(at() === a), 400);
-            })""",
-            timeout=8000,
-        )
-        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
-        page.mouse.click(box["x"] + h["x"], box["y"] + h["y"])  # a click: its settings
-        pop = page.get_by_role("dialog", name="EQ HM")
-        pop.wait_for(timeout=3000)
-        pop.get_by_label("Gain", exact=True).fill("-2.5")
-        pop.get_by_label("Gain", exact=True).press("Enter")
-        page.wait_for_timeout(200)
-        for _ in range(50):
-            if desk_band("HM")["gain"] == -2.5:
-                break
-            page.wait_for_timeout(100)
-        assert desk_band("HM")["gain"] == -2.5
-        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
-        page.mouse.click(box["x"] + h["x"], box["y"] + h["y"])  # clicked again: closed
-        pop.wait_for(state="detached", timeout=3000)
-        page.mouse.click(box["x"] + h["x"], box["y"] + h["y"])  # and again: open
-        pop.wait_for(timeout=3000)
-        page.keyboard.press("Escape")  # deselected: only the total curve
-        page.wait_for_function("window.tfEqBandShown() === null", timeout=3000)
-        assert page.evaluate("window.tfEqReadout()") is None  # only while dragging
-
-        # Its lock (beside the label) keeps the frequency: a drag then changes only the gain.
-        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
-        page.mouse.click(box["x"] + h["lock"]["x"], box["y"] + h["lock"]["y"])
-        page.wait_for_function("window.tfEqHandles().find(h => h.key === 'HM').locked", timeout=3000)
-        locked = desk_band("HM")
-        x, y = box["x"] + h["x"], box["y"] + h["y"]
-        page.mouse.move(x, y)
-        page.mouse.down()
-        for i in range(1, 6):  # up and well to the right
-            page.mouse.move(x + 10 * i, y - 6 * i)
-        assert "[locked]" in page.evaluate("window.tfEqReadout()")
-        page.mouse.up()
-        for _ in range(50):
-            if desk_band("HM")["gain"] > locked["gain"]:
-                break
-            page.wait_for_timeout(100)
-        moved = desk_band("HM")
-        assert moved["gain"] > locked["gain"] and moved["freq"] == locked["freq"]
-
-        # The settings: + steps the gain, and the locked frequency can't be typed in.
-        page.wait_for_function(
-            """() => new Promise((ok) => {
-                const at = () => JSON.stringify(window.tfEqHandles().find((h) => h.key === 'HM'));
-                const a = at(); setTimeout(() => ok(at() === a), 400);
-            })""",
-            timeout=8000,
-        )
-        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
-        page.mouse.click(box["x"] + h["x"], box["y"] + h["y"])
-        pop.wait_for(timeout=3000)
-        assert pop.get_by_label("Frequency", exact=True).is_disabled()
-        pop.get_by_label("Gain up").click()
-        for _ in range(50):
-            if desk_band("HM")["gain"] == moved["gain"] + 0.5:
-                break
-            page.wait_for_timeout(100)
-        assert desk_band("HM")["gain"] == moved["gain"] + 0.5
-        pop.get_by_label("Lock Frequency").click()  # unlocked again
-        assert not pop.get_by_label("Frequency", exact=True).is_disabled()
-        page.wait_for_function("!window.tfEqHandles().find(h => h.key === 'HM').locked", timeout=3000)
-
-        # Dragged far past the plot's corner: the handle stays on the plot, the desk within its range.
-        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
-        page.mouse.move(box["x"] + h["x"], box["y"] + h["y"])
-        page.mouse.down()
-        for i in range(1, 6):
-            page.mouse.move(box["x"] + h["x"] + 400 * i, box["y"] + h["y"] - 200 * i)
-        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
-        page.mouse.up()
-        assert 0 <= h["x"] <= box["width"] and 0 <= h["y"] <= box["height"], h
-        for _ in range(50):
-            if desk_band("HM")["gain"] == 18:
-                break
-            page.wait_for_timeout(100)
-        assert desk_band("HM")["gain"] == 18 and desk_band("HM")["freq"] <= 20000
-    finally:  # leave the shared demo desk as it was
-        band = "PEQ/Bank/Band:1"
-        put(
-            [
-                [f"{band}/Gain", round(before["gain"] * 100)],
-                [f"{band}/Frequency", round(before["freq"] * 10)],
-                [f"{band}/Q", round(before["q"] * 1000)],
-            ]
-        )
-
-
 def test_mic_type_and_eq_style_pickers_and_ring_out_setup(page):
-    _open(page, "/")  # config.dev.toml / --demo: the desk's faders are writable, so ring-out is offered
+    open_page(page, "/")  # config.dev.toml / --demo: the desk's faders are writable, so ring-out is offered
     page.locator("#mic-check").wait_for(state="visible", timeout=8000)
     page.locator("#mic-check").click()
     panel = page.locator("#vocal-panel")
@@ -514,7 +326,7 @@ def test_vocal_panel_keeps_its_controls_between_polls_and_polls_once(page):
     # click or reopen started another poll loop on top of the last.
     seen = []
     page.on("request", lambda r: "/api/vocal/status" in r.url and seen.append(r.url))
-    _open(page, "/")
+    open_page(page, "/")
     page.locator("#mic-check").wait_for(state="visible", timeout=8000)
     for _ in range(4):  # open / close / open ...: each used to add a loop
         page.locator("#mic-check").click()
@@ -548,7 +360,7 @@ def test_sidebar_fader_and_on_set_the_desk(page):
         )
         urllib.request.urlopen(req, timeout=10).read()
 
-    _open(page, "/")
+    open_page(page, "/")
     page.wait_for_function("document.querySelectorAll('#channels button').length >= 1", timeout=8000)
     page.locator("#channels button", has_text="Pastor").click()
     track = page.locator("#console-panel .cp-track.writable")
@@ -579,3 +391,45 @@ def test_sidebar_fader_and_on_set_the_desk(page):
         )
     finally:  # leave the shared demo desk as it was
         put({"level": -32768 if level0 is None else round(level0 * 100), "on": on0})
+
+
+def test_view_traces_and_show_menus(page):
+    """The header menus: one open at a time; each option where it belongs, and remembered."""
+    open_page(page, "/")
+    page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=8000)
+    menus = ["#view-menu", "#trace-menu", "#show-menu"]
+    for m in menus:
+        page.click(f"{m} summary")
+        assert [page.locator(o).evaluate("e => e.open") for o in menus] == [o == m for o in menus]
+    page.click("#spectrum", position={"x": 5, "y": 5})  # a click outside closes it
+    assert not page.locator("#show-menu").evaluate("e => e.open")
+
+    # Traces: Reset sits on the Peak hold row and only works while that trace is shown; remembered.
+    page.click("#trace-menu summary")
+    assert page.is_enabled("#reset-peak")
+    page.uncheck("#show-peak")
+    assert page.is_disabled("#reset-peak")
+    page.reload()
+    page.click("#trace-menu summary")
+    assert not page.is_checked("#show-peak") and page.is_disabled("#reset-peak")
+    page.check("#show-peak")
+
+    # View: the waterfall's options are greyed out while it isn't shown.
+    page.click("#view-menu summary")
+    page.check("#layout input[value=spectrum]")
+    assert page.locator("#wf-opts").evaluate("e => e.disabled")
+    page.check("#layout input[value=both]")
+    assert not page.locator("#wf-opts").evaluate("e => e.disabled")
+    page.check("#layout input[value=spectrum]")
+
+    # Show: ring markers and the ring list are separate; the suggested EQ follows the mic-check panel's box.
+    page.wait_for_function("!document.getElementById('ring-alert').hidden", timeout=15000)
+    page.click("#show-menu summary")
+    page.uncheck("#show-rings")
+    page.locator("#ring-list").wait_for(state="visible", timeout=2000)
+    page.uncheck("#show-ring-list")
+    page.locator("#ring-list").wait_for(state="hidden", timeout=2000)
+    page.check("#show-ring-list")
+    page.check("#show-rings")
+    page.wait_for_function("!document.getElementById('vocal-toggle').hidden", timeout=8000)
+    assert page.is_checked("#show-vocal")

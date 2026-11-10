@@ -42,6 +42,8 @@ tf_daemon/
     eq.py          the console EQ's response curve (TF Editor's maths)
     db.py          dB conversions
   console/         ── the Yamaha TF5 over the network ──
+    coverage.py    what can be read / written on the desk vs TF StageMix (docs/desk-coverage.md)
+    strip.py       gain, gate, comp, sends per channel (/api/tf5/strip): RCP sends + a simulated store
     patch.py       which console source each USB capture channel carries
     rcp.py         TF5Client: names, faders, sends over RCP (TCP 49280)
     module.py      TF5Module: /api/tf5/* routes, console data for the audio page
@@ -76,7 +78,8 @@ tf_daemon/
                    plot.js (geometry, grid, traces, hover), socket.js (/ws/audio),
                    controls.js, console.js (sidebar), eq.js (EQ overlay),
                    range.js, rings.js, vocal.js, waterfall.js, eqedit.js (EQ
-                   editing on the spectrum), profiles.js (EQ profiles),
+                   editing on the spectrum), eqbar.js (EQ toolbar), strip.js +
+                   dyngraph.js (gain / gate / comp / sends panel), profiles.js (EQ profiles),
                    ringout.js (ring-out dialog)
 ```
 
@@ -89,7 +92,7 @@ Data flow:
    viewing), and runs one analyzer per input: Blackman-Harris window →
    `rfft` → power → exponential average + peak hold + this hop's power as the
    real-time trace (full FFT resolution) →
-   max-reduce into 1/48-octave display bins (50 Hz–16 kHz, 400 bins) → dBFS.
+   max-reduce into 1/48-octave display bins (20 Hz–20 kHz as on the TF5, 479 bins) → dBFS.
    All buffers are preallocated.
 3. The frame is encoded as int16 centi-dB and published to a `FrameHub` that
    keeps only the latest frame.

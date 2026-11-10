@@ -10,7 +10,9 @@ A test not marked ``slow`` fails if it runs longer than SLOW_LIMIT_S, so the qui
 (``-m "not slow"``) stays quick. Mark a test that takes a second or more.
 
 Also the fixtures several test files share: ``console`` (a simulated TF Editor
-endpoint) and ``client_for`` (TF Editor clients on it, stopped after the test).
+endpoint), ``client_for`` (TF Editor clients on it, stopped after the test), and for the
+browser tests ``browser`` (headless Chromium) and ``page`` (a page that fails the test on
+any script or console error).
 """
 
 from __future__ import annotations
@@ -142,3 +144,26 @@ def client_for():
     yield make
     for c in clients:
         c.stop()
+
+
+@pytest.fixture(scope="module")
+def browser():
+    sync_api = pytest.importorskip("playwright.sync_api", reason="Playwright not installed (the dev image has it)")
+    with sync_api.sync_playwright() as p:
+        b = p.chromium.launch()
+        yield b
+        b.close()
+
+
+@pytest.fixture
+def page(browser):
+    """A fresh page that records every script error and console error."""
+    ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+    pg = ctx.new_page()
+    pg.errors = []  # type: ignore[attr-defined]
+    pg.on("pageerror", lambda e: pg.errors.append(f"pageerror: {e}"))
+    pg.on("console", lambda m: m.type == "error" and pg.errors.append(f"console: {m.text}"))
+    yield pg
+    errors = pg.errors
+    ctx.close()
+    assert errors == [], errors

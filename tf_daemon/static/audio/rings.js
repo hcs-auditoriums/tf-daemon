@@ -9,7 +9,8 @@ import { $, ctx, el, loadInt, save, state } from "./shared.js";
 // coming back at the same frequency, is a ring; a single tail is only possible
 // (a slowly decaying instrument note can look like one) and raises no alert.
 state.rings = [];
-state.showRings = loadInt("tf.rings", 1) === 1;
+state.showRings = loadInt("tf.rings", 1) === 1;       // markers on the spectrum / waterfall
+state.showRingList = loadInt("tf.ringList", 1) === 1;  // the list over the plot
 export const SEV = {
   feedback: { label: "FEEDBACK", color: "#ff5d5d", rank: 3 },
   ring: { label: "RING", color: "#ff9f43", rank: 2 },
@@ -49,12 +50,13 @@ function renderRings() {
     alert.title = `Show ${e.label}`;
     alert.onclick = () => {
       if (e.channel !== state.input) selectInput(e.channel);
+      if (!state.showRingList) setShowRingList(true);
       if (!ringsOpen) setRingsOpen(true);
     };
   }
 
   const list = $("ring-list");
-  list.hidden = !state.showRings || !state.rings.length;
+  list.hidden = !state.showRingList || !state.rings.length;
   if (list.hidden) return;
   const groups = groupRings(state.rings);
   const head = el("div", "rl-head");
@@ -179,7 +181,14 @@ $("show-rings").checked = state.showRings;
 $("show-rings").onchange = (e) => {
   state.showRings = e.target.checked;
   save("tf.rings", state.showRings ? 1 : 0);
-  renderRings();
   state.dirty = true;
 };
+function setShowRingList(on) {
+  state.showRingList = on;
+  $("show-ring-list").checked = on;
+  save("tf.ringList", on ? 1 : 0);
+  renderRings();
+}
+$("show-ring-list").checked = state.showRingList;
+$("show-ring-list").onchange = (e) => setShowRingList(e.target.checked);
 setInterval(() => { if (state.rings.length) renderRings(); }, 5000);  // keep "x s ago" current

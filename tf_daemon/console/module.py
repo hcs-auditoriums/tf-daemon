@@ -11,10 +11,12 @@ from flask_sock import Sock
 
 from ..config import TF5Config
 from ..dsp.eq import CURVE_FREQS, eq_curve
+from . import coverage
 from .editor.client import TFEditorClient
 from .editor.guard import WRITABLE, WRITE_LIMITS
 from .patch import patch_from, source_label
 from .rcp import TF5Client
+from .strip import Strip
 
 if TYPE_CHECKING:
     from .sim import SimConsole
@@ -72,6 +74,7 @@ class TF5Module:
             log.info("tf5.username/password are set, but the TF5's remote protocol has no login; not sent")
         self.patch = patch = patch_from(cfg.usb_patch)
         self.client = TF5Client(cfg.host, cfg.port, patch, cfg.poll_s, on_names, on_gains)
+        self.strip = Strip(patch, self.client, simulator)  # gain, gate, comp, sends (strip.py)
         self.eq_client: TFEditorClient | None = None
         self.eq_version = 0  # bumped whenever the console's mixing data (EQ included) changes
         if cfg.eq:
@@ -190,6 +193,10 @@ class TF5Module:
         def status():
             return jsonify(self.status())
 
+        @bp.get("/coverage")
+        def desk_coverage():  # what can be read / written on the desk (docs/desk-coverage.md)
+            return jsonify({"features": coverage.as_dicts()})
+
         @bp.get("/channels")
         def channels():
             return jsonify({"connected": client.connected, "channels": client.channels(), "mixes": client.mixes()})
@@ -247,6 +254,26 @@ class TF5Module:
                 return jsonify({"ok": False, "error": f"desk not reachable: {e}"}), 503
             log.info("Fader set from the page on USB %d: level=%s on=%s", usb + 1, level, on)
             return jsonify({"ok": True, "results": results})
+
+        @bp.get("/strip/<int:usb>")
+        def strip_get(usb: int):
+            return jsonify(self.strip.get(usb))
+
+        @bp.put("/strip/<int:usb>")
+        def strip_set(usb: int):
+            # {"section": "gate", "changes": {"threshold": -40}, "confirm": true}; sends add "mix".
+            body = request.get_json(silent=True) or {}
+            if body.get("confirm") is not True:
+                return jsonify({"ok": False, "error": 'changing the desk needs "confirm": true'}), 400
+            changes = body.get("changes")
+            if not isinstance(changes, dict) or not changes:
+                return jsonify({"ok": False, "error": 'body needs "changes": {parameter: value}'}), 400
+            try:
+                done = self.strip.put(usb, str(body.get("section")), changes, body.get("mix"))
+            except (ValueError, PermissionError) as e:
+                return jsonify({"ok": False, "error": str(e)}), 400
+            log.info("%s set from the page on USB %d: %s", body.get("section"), usb + 1, done)
+            return jsonify({"ok": True, "applied": done})
 
         app.register_blueprint(bp)
 

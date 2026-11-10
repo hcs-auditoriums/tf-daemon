@@ -1,7 +1,7 @@
 // The console's EQ for the shown input, overlaid on the spectrum (editing: eqedit.js).
 
 import { drawPanelEq, rebuildPanel, schedulePanel } from "./console.js";
-import { bandCurve, eqEditReset } from "./eqedit.js";
+import { bandCurve, eqCurve, eqEditReset } from "./eqedit.js";
 import { H, PAD, W, xOf } from "./plot.js";
 import { $, C, ctx, fmtHz, loadInt, save, state } from "./shared.js";
 
@@ -42,8 +42,28 @@ $("show-eq").onchange = (e) => {
 };
 
 // EQ value (dB) at f, interpolated on the curve's log-spaced points.
+// The curve as drawn: this page's copy of the desk's filter maths (eqedit.js, checked against
+// the desk's own curve by the browser tests) at ``n`` points across the plot's span plus each
+// band's own frequency, not the desk's 241 points: a Q 10 bell is narrower than their spacing
+// and would be drawn as a spike that misses its peak. Kept until the EQ or the span changes.
+let smooth = { key: null, freqs: [], curve: [] };
+export function smoothCurve(d, n) {
+  const eq = d && d.eq;
+  if (!eq) return { freqs: [], curve: [] };
+  const lo = state.logMin ?? Math.log10(20), hi = state.logMax ?? Math.log10(20000);
+  const key = JSON.stringify([eq, n, lo, hi]);
+  if (smooth.key !== key) {
+    const freqs = Array.from({ length: n }, (_, i) => 10 ** (lo + (hi - lo) * i / (n - 1)));
+    for (const f of [eq.hpf && eq.hpf.freq, ...eq.bands.map((b) => b.freq)]) if (f > 10 ** lo && f < 10 ** hi) freqs.push(f);
+    freqs.sort((a, b) => a - b);
+    smooth = { key, freqs, curve: eqCurve(eq, freqs) };
+  }
+  return smooth;
+}
+
 export function eqAt(f) {
   const d = state.eq;
+  if (d && d.eq) return eqCurve(d.eq, [f])[0];   // exact, at that frequency
   if (!d || !d.freqs || !d.freqs.length) return null;
   const fr = d.freqs, c = d.curve;
   if (f <= fr[0]) return c[0];
@@ -121,13 +141,14 @@ export function drawEq() {
   ctx.globalAlpha = 1;
   const eq = d.eq;
   if (!eq || !d.freqs.length) return;
+  const sc = smoothCurve(d, Math.max(200, Math.round(x1 - x0)));   // a point per pixel
 
   // Shade between the curve and 0 dB, as the TF5's EQ screen does (only when on).
   if (eq.on) {
     ctx.beginPath();
-    d.freqs.forEach((f, i) => { const x = xOf(f), y = yEq(d.curve[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
-    ctx.lineTo(xOf(d.freqs[d.freqs.length - 1]), yEq(0));
-    ctx.lineTo(xOf(d.freqs[0]), yEq(0));
+    sc.freqs.forEach((f, i) => { const x = xOf(f), y = yEq(sc.curve[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    ctx.lineTo(xOf(sc.freqs[sc.freqs.length - 1]), yEq(0));
+    ctx.lineTo(xOf(sc.freqs[0]), yEq(0));
     ctx.closePath();
     ctx.fillStyle = C.eqFill;
     ctx.fill();
@@ -135,7 +156,7 @@ export function drawEq() {
   }
 
   // The selected (or dragged) band's own part of the curve, under the total: what it adds.
-  drawBand(d);
+  drawBand(d, sc.freqs);
 
   // The response curve (clipped by the plot, not flattened onto its edge); dashed
   // and dim when the EQ is switched off on the desk.
@@ -143,7 +164,7 @@ export function drawEq() {
   ctx.lineWidth = 2;
   if (!eq.on) ctx.setLineDash([6, 4]);
   ctx.beginPath();
-  d.freqs.forEach((f, i) => { const x = xOf(f), y = yEq(d.curve[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+  sc.freqs.forEach((f, i) => { const x = xOf(f), y = yEq(sc.curve[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
   ctx.stroke();
   ctx.setLineDash([]);
 
@@ -226,24 +247,26 @@ function drawReadout(d) {
   readoutShown = parts.map(([t, k]) => (locks[k] ? `[locked] ${t}` : t)).join(sep);
 }
 window.tfEqReadout = () => readoutShown;
+// For the browser tests: the highest point of the curve as drawn, and of the desk's own points.
+window.tfEqPeaks = () => ({ drawn: Math.max(...smoothCurve(state.eq, 1000).curve), desk: Math.max(...state.eq.curve) });
 
 // The selected band's contribution: its own curve (thin, light) with its area to 0 dB tinted,
 // so it reads apart from the total drawn over it. Skipped when the band is off or flat.
 let bandShown = null;   // {key, peak} last drawn, for the browser tests
-function drawBand(d) {
+function drawBand(d, freqs) {
   bandShown = null;
   const key = state.eqSelected;
   if (!key) return;
-  const curve = bandCurve(d.eq, key, d.freqs);
+  const curve = bandCurve(d.eq, key, freqs);
   const peak = Math.max(...curve.map(Math.abs));
   if (peak < 0.05) return;
   const path = () => {
     ctx.beginPath();
-    d.freqs.forEach((f, i) => { const x = xOf(f), y = eqY(curve[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    freqs.forEach((f, i) => { const x = xOf(f), y = eqY(curve[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
   };
   path();
-  ctx.lineTo(xOf(d.freqs[d.freqs.length - 1]), eqY(0));
-  ctx.lineTo(xOf(d.freqs[0]), eqY(0));
+  ctx.lineTo(xOf(freqs[freqs.length - 1]), eqY(0));
+  ctx.lineTo(xOf(freqs[0]), eqY(0));
   ctx.closePath();
   ctx.globalAlpha = 1;
   ctx.fillStyle = C.eqBandFill;

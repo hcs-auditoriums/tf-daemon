@@ -431,6 +431,14 @@ class TF5Client:
         except ValueError:
             return None
 
+    def raw(self, usb: int, path: str, y: int = 0) -> str | None:
+        """A parameter of the channel on USB input ``usb`` as RCP last reported it (raw text)."""
+        src = self.patch[usb] if 0 <= usb < len(self.patch) else None
+        if src is None:
+            return None
+        with self._lock:
+            return self._values.get((src[0], src[1], path, y))
+
     def gains(self) -> dict[int, float | None]:
         """Per USB input whose channel state is known: fader dB, or None if off or at -inf."""
         out: dict[int, float | None] = {}

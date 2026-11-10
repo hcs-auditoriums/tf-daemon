@@ -10,58 +10,79 @@
   <header>
     <h1>tf-daemon</h1>
     <nav class="tabs" aria-label="Pages"><a href="/" aria-current="page">Audio</a><a href="/rf">RF</a><a href="/qlxd">Wireless</a><a href="/config">Config</a></nav>
-    <details class="menu" id="view-menu">
-      <summary>View</summary>
-      <div class="menu-panel">
-        <fieldset class="seg" id="layout">
-          <legend>Layout</legend>
-          <label><input type="radio" name="layout" value="spectrum" checked> Spectrum</label>
-          <label><input type="radio" name="layout" value="both"> Both</label>
-          <label><input type="radio" name="layout" value="waterfall"> Waterfall</label>
-        </fieldset>
-        <fieldset>
-          <legend>Traces</legend>
-          <label><input type="checkbox" id="show-avg" checked> Average</label>
-          <label><input type="checkbox" id="show-live" checked> Real-time</label>
-          <label><input type="checkbox" id="show-peak" checked> Peak hold</label>
-        </fieldset>
-        <label class="menu-row">Range
-          <select id="range">
-            <option value="auto" selected>Auto</option>
-            <option value="-90,-10">−90…−10 dB</option>
-            <option value="-80,0">−80…0 dB</option>
-            <option value="-70,-20">−70…−20 dB</option>
-            <option value="-130,0">−130…0 dB (noise floor)</option>
-          </select>
-        </label>
-        <fieldset>
-          <legend>Waterfall</legend>
-          <label class="menu-row">History
-            <select id="wf-span">
-              <option value="10">10 s</option>
-              <option value="30">30 s</option>
-              <option value="60">1 min</option>
-              <option value="120">2 min</option>
-              <option value="300">5 min</option>
+    <div class="menus">
+      <details class="menu" id="view-menu">
+        <summary>View</summary>
+        <div class="menu-panel">
+          <fieldset>
+            <legend>Layout</legend>
+            <div class="seg-row" id="layout" role="radiogroup" aria-label="Layout">
+              <label><input type="radio" name="layout" value="spectrum" checked><span>Spectrum</span></label>
+              <label><input type="radio" name="layout" value="both"><span>Both</span></label>
+              <label><input type="radio" name="layout" value="waterfall"><span>Waterfall</span></label>
+            </div>
+          </fieldset>
+          <label class="menu-row" title="Level scale of the spectrum and the waterfall's colours">Range
+            <select id="range">
+              <option value="auto" selected>Auto</option>
+              <option value="-90,-10">−90…−10 dB</option>
+              <option value="-80,0">−80…0 dB</option>
+              <option value="-70,-20">−70…−20 dB</option>
+              <option value="-130,0">−130…0 dB (noise floor)</option>
             </select>
           </label>
-          <label class="menu-row">Source
-            <select id="wf-source">
-              <option value="live">Real-time</option>
-              <option value="avg">Average (3 s)</option>
-            </select>
-          </label>
-        </fieldset>
-        <fieldset>
-          <legend>Show</legend>
-          <label><input type="checkbox" id="show-rings" checked> Rings</label>
-          <label id="console-toggle" hidden><input type="checkbox" id="show-console" checked> Console</label>
-          <label id="eq-toggle" hidden title="EQ set on the console for this channel (read-only; curve is approximate)"><input type="checkbox" id="show-eq"> EQ</label>
-        </fieldset>
-        <button id="reset-peak" type="button">Reset peak hold</button>
-      </div>
-    </details>
-    <button id="mic-check" class="mic-btn" type="button" aria-expanded="false" hidden>Mic check</button>
+          <fieldset id="wf-opts">
+            <legend>Waterfall</legend>
+            <label class="menu-row">History
+              <select id="wf-span">
+                <option value="10">10 s</option>
+                <option value="30">30 s</option>
+                <option value="60">1 min</option>
+                <option value="120">2 min</option>
+                <option value="300">5 min</option>
+              </select>
+            </label>
+            <label class="menu-row">Source
+              <select id="wf-source">
+                <option value="live">Real-time</option>
+                <option value="avg">Average (3 s)</option>
+              </select>
+            </label>
+          </fieldset>
+        </div>
+      </details>
+      <details class="menu" id="trace-menu">
+        <summary>Traces</summary>
+        <div class="menu-panel">
+          <fieldset id="spec-opts">
+            <legend>Spectrum traces</legend>
+            <label><input type="checkbox" id="show-live" checked><i class="swatch rta"></i> Real-time</label>
+            <label><input type="checkbox" id="show-avg" checked><i class="swatch avg"></i> Average</label>
+            <div class="menu-row">
+              <label><input type="checkbox" id="show-peak" checked><i class="swatch peak"></i> Peak hold</label>
+              <button id="reset-peak" class="menu-mini" type="button" title="Clear the peak-hold trace for this input">Reset</button>
+            </div>
+          </fieldset>
+        </div>
+      </details>
+      <details class="menu" id="show-menu">
+        <summary>Show</summary>
+        <div class="menu-panel">
+          <fieldset>
+            <legend>On the plot</legend>
+            <label title="Ring / feedback markers on the spectrum and waterfall"><input type="checkbox" id="show-rings" checked> Ring markers</label>
+            <label id="eq-toggle" hidden title="The EQ set on the console for this channel"><input type="checkbox" id="show-eq"><i class="swatch eq"></i> Desk EQ</label>
+            <label id="vocal-toggle" hidden title="The vocal assist's suggested EQ, after a mic check"><input type="checkbox" id="show-vocal" checked><i class="swatch vocal"></i> Suggested EQ</label>
+          </fieldset>
+          <fieldset>
+            <legend>Panels</legend>
+            <label id="console-toggle" hidden><input type="checkbox" id="show-console" checked> Console sidebar</label>
+            <label title="The list of rings heard on any input"><input type="checkbox" id="show-ring-list" checked> Ring list</label>
+          </fieldset>
+        </div>
+      </details>
+      <button id="mic-check" class="mic-btn" type="button" aria-expanded="false" hidden>Mic check</button>
+    </div>
     <div class="status">
       <button id="ring-alert" class="ring-alert" type="button" hidden></button>
       <div id="conn" class="conn" title="Connection">connecting…</div>
@@ -82,11 +103,13 @@
         <canvas id="waterfall" aria-label="Waterfall"></canvas>
       </div>
       <div id="readout" class="readout"></div>
+      <div id="eq-bar" class="eq-bar" role="toolbar" aria-label="EQ" hidden></div>
       <button id="console-btn" class="console-btn" type="button" aria-label="Console sidebar" aria-pressed="true" hidden>
         <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 2v12M8 2v12M13 2v12" stroke="currentColor" stroke-width="1.2" fill="none"/><rect x="1.5" y="9" width="3" height="2" rx=".5"/><rect x="6.5" y="4" width="3" height="2" rx=".5"/><rect x="11.5" y="7" width="3" height="2" rx=".5"/></svg>
       </button>
       <div id="ring-list" class="ring-list" hidden></div>
       <div id="vocal-panel" class="vocal-panel" hidden></div>
+      <div id="strip-panel" class="strip-panel" role="dialog" aria-label="Channel processing" hidden></div>
     </main>
     <aside id="console-panel" class="console-panel" aria-label="Console channel" hidden></aside>
   </div>
