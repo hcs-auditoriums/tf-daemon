@@ -16,7 +16,9 @@ every StageMix feature and how far tf-daemon has it. Each row says:
 To add a feature's protocol: record its parameter names from a real desk (the read-only probe,
 `python -m tf_daemon.console.editor`, dumps the Mixing tree), read it in
 `console/editor/dump.py`, model it in `console/sim_editor.py`, and if it is to be written,
-add it to `guard.py` deliberately (with tests in `tests/editor/test_guard.py`).
+add it to `guard.py` deliberately (with tests in `tests/editor/test_guard.py`). The address,
+type and range of every feature still missing are in
+[desk-coverage-howto-complete.md](desk-coverage-howto-complete.md).
 
 The table is generated from `tf_daemon/console/coverage.py` (also served at
 `GET /api/tf5/coverage`); edit that file and run `python -m tf_daemon.console.coverage`.
