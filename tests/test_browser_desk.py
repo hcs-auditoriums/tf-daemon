@@ -105,3 +105,20 @@ def test_recorder_fx_and_delay(page):
         changes = [["FX:1/Bypass", bypass], ["FX:1/Param/Bank/Value:2", -12]]
         post("/api/tf5/param", {"func": "FX", "changes": changes, "confirm": True})
         post("/api/tf5/param", {"func": "Mixing", "changes": [["Matrix:1/Delay/Time", time]], "confirm": True})
+
+
+@pytest.mark.parametrize("path", ["/desk", "/mix"])
+def test_a_watching_page_makes_no_requests(page, path):
+    """The Desk and Mix pages get the desk's data pushed over WS /ws/tf5 (console/feed.py): once
+    loaded, a page that only watches sends no HTTP requests at all (it used to poll every second)."""
+    open_page(page, path)
+    page.wait_for_function(  # the socket open and the desk's data in
+        "(() => { const c = document.getElementById('conn');"
+        " return c.classList.contains('ok') || c.textContent === 'connected'; })()",
+        timeout=8000,
+    )
+    page.wait_for_load_state("networkidle")
+    requests = []
+    page.on("request", lambda r: requests.append(r.url) if r.resource_type != "websocket" else None)
+    page.wait_for_timeout(3000)  # the watching window itself: polling would show up here
+    assert requests == [], requests

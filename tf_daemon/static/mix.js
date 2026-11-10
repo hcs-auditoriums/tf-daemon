@@ -1,15 +1,15 @@
 // The Mix page: the desk's AUX / ST / MONO / MATRIX masters and DCAs (fader, ON, balance, cue),
 // the mute masters, each channel's DCA / mute group assignment and cue, and per bus its PEQ and
-// GEQ (mix/peq.js, mix/geq.js). Data: GET /api/tf5/mix, polled with ?since so a change at the
-// desk shows within a second; edits: PUT /api/tf5/mix/... with confirm (console/buses.py).
+// GEQ (mix/peq.js, mix/geq.js). Data: pushed over WS /ws/tf5 (mix/feed.js) whenever the desk changes;
+// edits: PUT /api/tf5/mix/... with confirm (console/buses.py).
 
 import { $, el, faderPos, posToDb, putJson } from "./common.js";
+import { startFeed } from "./mix/feed.js";
 import { openGeq } from "./mix/geq.js";
 import { openPeq } from "./mix/peq.js";
 
-let data = null, version = null, sig = null;
+let data = null, sig = null;
 const refs = new Map();   // strip / source key -> {update(entry)}
-const POLL_MS = 700;
 
 const fmtDb = (raw) => (raw === null || raw === undefined || raw <= -32768 ? "−∞" : `${raw > 0 ? "+" : ""}${(raw / 100).toFixed(1)}`);
 const fmtBal = (v) => (v === 0 ? "C" : v < 0 ? `L${-v}` : `R${v}`);
@@ -31,7 +31,7 @@ async function flush(path) {
   const d = await putJson(path, { ...body, confirm: true });
   busy.delete(path);
   error(d.ok ? (d.results || []).some((r) => !r.confirmed) ? "The desk didn't confirm the change." : "" : `Not set: ${d.error}`);
-  if (pending.has(path)) flush(path); else poll(true);
+  if (pending.has(path)) flush(path); else if (data) render();  // a refused edit shows the desk's value again
 }
 const setStrip = (key, values) => send(`/api/tf5/mix/strip/${key}`, values);
 
@@ -145,7 +145,7 @@ function assignTable() {
   $("mx-assign").replaceChildren(t, el("h2", "", "FX mute groups"), fx);
 }
 
-// ------------------------------------------------------------------ render, poll
+// ------------------------------------------------------------------ render
 
 function render() {
   const s = JSON.stringify([data.masters.map((m) => m.key), data.sources.length, data.fx.length]);
@@ -166,21 +166,10 @@ function render() {
     : `${data.simulated ? "Simulated desk. " : ""}${data.writable.mix ? "" : "Read only (tf5.mix_write is off). "}`;
 }
 
-let timer = null;
-async function poll(now) {
-  clearTimeout(timer);
-  try {
-    const r = await fetch(`/api/tf5/mix${version === null || now ? "" : `?since=${version}`}`);
-    const conn = $("conn");
-    if (r.status === 404) { conn.textContent = "no TF5"; return; }
-    const d = await r.json();
-    conn.textContent = "connected";
-    if (!d.unchanged) { data = d; render(); }
-    version = d.version;
-  } catch { $("conn").textContent = "server unreachable"; }
-  timer = setTimeout(poll, POLL_MS);
-}
-poll();
+startFeed({
+  onData: (d) => { data = d; render(); },
+  onState: (up) => { $("conn").textContent = up ? "connected" : "server unreachable"; },
+});
 
 // /mix?geq=st&hz=2500 (a ring's GEQ band, from the ring list) opens that GEQ with the band marked.
 const q = new URLSearchParams(location.search);

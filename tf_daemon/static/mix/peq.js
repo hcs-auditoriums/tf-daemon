@@ -4,9 +4,9 @@
 // halves are written together.
 
 import { el, fitCanvas, putJson } from "../common.js";
+import { onDeskChange } from "./feed.js";
 import { takePanel } from "./geq.js";
 
-const POLL_MS = 1000;
 const css = getComputedStyle(document.documentElement);
 const color = (n) => css.getPropertyValue(n).trim();
 // Band label -> its path under PEQ (mid bands by index), and the L / H band types (enum 0-2).
@@ -116,5 +116,6 @@ export function openPeq(panel, key, label) {
   const wrap = el("div", "peq");
   wrap.append(cv);
   p.body.append(top, wrap, table);
-  (async function loop() { await load(); if (p.mine()) setTimeout(loop, POLL_MS); })();
+  load();
+  onDeskChange(load, p.mine);  // re-read only when the desk changed (WS /ws/tf5)
 }

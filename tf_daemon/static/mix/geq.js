@@ -4,11 +4,12 @@
 // (GET /api/audio/rings, its "geq" band). Data: GET / PUT /api/tf5/mix/geq/<key>.
 
 import { el, putJson } from "../common.js";
+import { onDeskChange } from "./feed.js";
 
-const POLL_MS = 1000;
+const RINGS_MS = 2000;  // the ring marks follow the room, not the desk: refreshed while open
 const fmtF = (f) => (f >= 1000 ? `${+(f / 1000).toFixed(f >= 10000 ? 0 : 2)}k` : `${f}`);
 
-// The panel shows one editor at a time: each open() takes it over, and the others' polls stop.
+// The panel shows one editor at a time: each open() takes it over, and the others stop updating.
 export function takePanel(panel, title) {
   const token = String(Math.random());
   panel.dataset.owner = token;
@@ -110,5 +111,11 @@ export function openGeq(panel, key, label, focusHz) {
   const top = el("div", "mx-row");
   top.append(on, link, sideSel, flat, count);
   p.body.append(top, bands);
-  (async function loop() { await load(); if (p.mine()) setTimeout(loop, POLL_MS); })();
+  load();
+  onDeskChange(load, p.mine);  // re-read only when the desk changed (WS /ws/tf5)
+  (async function ringLoop() {
+    if (!p.mine()) return;
+    if (data && !busy) update(await rings());
+    setTimeout(ringLoop, RINGS_MS);
+  })();
 }

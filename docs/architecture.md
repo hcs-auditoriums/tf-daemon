@@ -58,6 +58,7 @@ tf_daemon/
     scenes.py        scene banks A/B, current scene, recall (store / undo: no known command)
     recorder.py      USB recorder status, read-only (TRANSPORT_OPS: verified op strings go here)
     effects.py       FX 1/2, insert FX (raw parameter values), ST IN / matrix delay
+    feed.py        WS /ws/tf5: the Desk and Mix pages' data, pushed when its version changes (no polling)
     sim.py         simulated TF5 (demo mode, tests): sim_rcp.py + sim_editor.py as one desk
     sim_rcp.py     its RCP side
     sim_editor.py  its TF Editor side: all 10 functions, set-param echo, scene recall
@@ -84,7 +85,7 @@ tf_daemon/
     module.py      /qlxd page, HTTP + WebSocket routes
   static/          rf.html + rf.js (RF), qlxd.html + qlxd.js (wireless),
                    mix.html + mix.js (the desk's buses, DCAs, mute groups, cue) with
-                   mix/geq.js (a bus's GEQ) and mix/peq.js (a bus's PEQ),
+                   mix/geq.js (a bus's GEQ), mix/peq.js (a bus's PEQ) and mix/feed.js (WS /ws/tf5),
                    config.html + config.js, nav.js (all pages), style.css;
                    desk.html + desk.js + desk.css (scenes, recorder, FX, delay)
                    with desk/: scenes.js, recorder.js, effects.js, ui.js;

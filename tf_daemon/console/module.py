@@ -17,6 +17,7 @@ from .busproc import BusProcessing
 from .editor import tree
 from .editor.client import Changes, TFEditorClient
 from .editor.guard import FAMILIES, WRITABLE, WRITE_LIMITS, WriteNotAllowed, writable
+from .feed import Feed
 from .meters import MeterClient
 from .patch import patch_from, source_label
 from .rcp import TF5Client
@@ -54,6 +55,7 @@ class TF5Module:
     module owns: closed when it stops, its counters reported in its status.
 
     Routes:
+      WS  /ws/tf5             the Desk and Mix pages' data, pushed when it changes (console/feed.py)
       GET /api/tf5/status     connection state, discovered parameters
       GET /api/tf5/meters     level meters per USB input (tf5.meters; console/meters.py), 404 when off
       GET /api/tf5/channels   per USB input: console source and its settings; mix names
@@ -399,6 +401,7 @@ class TF5Module:
         desk.register(app, bp, lambda: self.eq_client)  # /desk and its reads (scenes, recorder, FX, delay)
         self.buses.register(app, bp, self._desk_call)  # /mix, /api/tf5/mix/* (buses.py, busproc.py)
         BusProcessing(self.buses).register(bp, self._desk_call)
+        Feed(self.status, lambda: self.eq_client, self.buses).register(sock)  # WS /ws/tf5 (feed.py)
         app.register_blueprint(bp)
 
     @staticmethod

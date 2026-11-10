@@ -179,6 +179,27 @@ def test_audio_websocket_streams_metadata_console_meters_and_spectra(status):
         ws.close()
 
 
+def test_desk_websocket_pushes_the_areas_a_page_asks_for(status):
+    """WS /ws/tf5 (console/feed.py): the Desk and Mix pages' data, sent at once, then only on change."""
+    from simple_websocket import Client
+
+    ws = Client.connect(URL.replace("http", "ws", 1) + "/ws/tf5")
+    try:
+        ws.send(json.dumps({"areas": ["status", "scenes", "fx", "mix"]}))
+        got: dict = {}
+        deadline = time.time() + 10
+        while len(got) < 4 and time.time() < deadline:
+            m = ws.receive(timeout=1)
+            if m:
+                d = json.loads(m)
+                got[d["type"]] = d
+        assert set(got) == {"status", "scenes", "fx", "mix"}, set(got)
+        assert got["status"]["data"]["eq"] and got["fx"]["units"] and got["mix"]["masters"]
+        assert any(not s["stored"] for s in got["scenes"]["scenes"])  # every slot; the page filters
+    finally:
+        ws.close()
+
+
 @pytest.mark.parametrize("path", ["/ws/rf", "/ws/qlxd"])
 def test_other_websockets_send_a_snapshot(status, path):
     from simple_websocket import Client
