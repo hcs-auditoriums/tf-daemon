@@ -300,6 +300,8 @@ class AudioEngine:
 
     def metadata(self) -> dict[str, Any]:
         a = self.analyzer
+        with self._lock:
+            bus = self._bus_inputs
         return {
             "type": "meta",
             "samplerate": a.samplerate,
@@ -309,7 +311,11 @@ class AudioEngine:
             "average_tau": self.cfg.dsp.average_tau,
             "db_floor": self.cfg.dsp.db_floor,
             "source": self.source.name,
-            "channels": [{"index": c.index, "label": c.label, "pinned": c.index in self._pinned} for c in self.inputs],
+            # bus: carries a mix (Main L/R), so it hears every ring; the pages say so rather than list it.
+            "channels": [
+                {"index": c.index, "label": c.label, "pinned": c.index in self._pinned, "bus": c.index in bus}
+                for c in self.inputs
+            ],
             "freqs": [round(float(f), 2) for f in a.bins.centers],
         }
 

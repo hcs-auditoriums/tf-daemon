@@ -1,7 +1,7 @@
 // The console sidebar: the TF5 channel on the shown input, and its EQ graph.
 
 import { eqAt, eqAvailable, eqHalf, smoothCurve } from "./eq.js";
-import { paintChannelColors } from "./controls.js";
+import { paintChannelTiles } from "./controls.js";
 import { profileBar } from "./profiles.js";
 import { paintTools, stripTools } from "./strip.js";
 import { $, C, el, loadInt, save, state } from "./shared.js";
@@ -18,13 +18,22 @@ export function onConsoleSnapshot(msg) {
   tf5 = msg;
   panelSig = null;  // rebuild
   schedulePanel();
-  paintChannelColors();
+  paintChannelTiles();
 }
 
-// The console's colour for a USB input's channel (CSS), or null when unknown.
-export function channelColor(usb) {
-  const ch = tf5?.channels?.find((c) => c.index === usb);
-  return TF_COLORS[String(ch?.params["Label/Color"]?.value || "").toLowerCase()] || null;
+// What a channel tile shows for a USB input's channel: the console's colour (CSS), whether
+// it is on and where its fader sits (0..1); each null when unknown (no TF5, nothing patched).
+export function channelTile(usb) {
+  const ch = tf5?.connected ? tf5.channels?.find((c) => c.index === usb) : null;
+  if (!ch) return { color: null, on: null, pos: null };
+  const p = ch.params, l = localFor(usb);
+  const on = l && "on" in l ? l.on : p["Fader/On"]?.value;
+  const level = l && "level" in l ? l.level : p["Fader/Level"]?.value;
+  return {
+    color: TF_COLORS[String(p["Label/Color"]?.value || "").toLowerCase()] || null,
+    on: on === undefined ? null : on !== 0,
+    pos: "Fader/Level" in p || (l && "level" in l) ? faderPos(level) : null,
+  };
 }
 
 export function onConsoleChanges(msg) {
@@ -42,7 +51,7 @@ export function onConsoleChanges(msg) {
       p.value[c.y] = c.v;
     }
   }
-  if (msg.changes.some((c) => c.p === "Label/Color")) paintChannelColors();
+  if (msg.changes.some((c) => c.p.startsWith("Label/") || c.p.startsWith("Fader/"))) paintChannelTiles();
   schedulePanel();
 }
 

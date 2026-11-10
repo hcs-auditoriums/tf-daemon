@@ -12,9 +12,9 @@ On the waterfall, speech shows as gliding harmonics and a ring as a straight
 vertical line; hovering shows frequency, how long ago, and level.
 
 **Editing the console, as on TF StageMix.** With the EQ shown on the spectrum (and
-`tf5.eq_write` on), drag a band's handle (frequency and gain), pinch for a bell's Q,
+`tf5.eq_write` on), drag a band's handle (frequency and gain), pinch for the Q of the selected bell (the one whose settings are open; with none selected, the bell nearest your fingers),
 double-tap a handle to put its gain back to 0 dB, or click it for its settings (type:
-bell / shelf, and LPF on the high band; values to type; locks). The toolbar at the top
+bell / shelf, and LPF on the high band; values to type; locks, after which the band shows a padlock). The toolbar at the top
 left switches the EQ and HPF on and off, undoes and redoes, and compares (A/B) with a
 copied EQ; its menu has Gain flat, Copy, Paste and Compare with before. Every value is
 held to the TF5's ranges. The console sidebar's tool row (**IN · EQ · GATE · COMP · SEND**, as
@@ -25,13 +25,24 @@ StageMix's; each lit when that part is on, IN red with +48V) opens the channel's
 can be read and written for yet, and which are only simulated in demo mode, is in
 [Desk coverage](desk-coverage.md).
 
-**Shift+← / Shift+→** switches between the pages (Audio, RF, Wireless, Config),
-except while typing or choosing in a field. The Config page checks for updates by
-itself when it opens.
+**The channel bar** shows banks of 8 inputs as tiles: number, name and the console's colour,
+and from the desk a bar for the fader, `OFF` (dimmed) for a channel that is off, and a dot
+while a ring comes from it. On a phone the View / Traces / Show menus sit behind **☰**.
+
+**Keyboard.** **/** opens a command palette on every page: type to find a command or a
+channel, Tab to move, Enter to run. Shortcuts include **Shift+← / Shift+→** (pages),
+**[ ]** and **1–8** (channels), **E** (desk EQ), **Ctrl+Z / Ctrl+Shift+Z** (EQ undo / redo)
+and **F** (full screen); **?** lists every command on the page, and [Keyboard](keyboard.md)
+has them all.
+
+**Config page.** Switches for the settings changed most (desk EQ and fader editing, auto EQ,
+the tinySA staying connected) write config.toml at once, keeping its comments; the file is
+also editable as text. Update and restart ask first. The page checks for updates by itself
+when it opens.
 
 A second page, **`/rf`**, is an RF spectrum analyzer for a **tinySA** on USB
 serial (connect, sweep, live trace + peak hold, waterfall, and lines at the
-QLX-D receivers' frequencies), ported from
+QLX-D receivers' frequencies; the waterfall opens filled with the recent sweeps), ported from
 tinysa-visualizer. A third page, **`/qlxd`**, is a read-only, low-effort
 Wireless Workbench: battery runtime and RF/antenna status of **Shure QLXD4**
 receivers found on a (link-local) network interface. Each is its own module; see
@@ -45,12 +56,17 @@ time, plus whatever input someone is viewing. A ring shows up as:
 - a **header alert** (`RING 2.50 kHz · Main L`; pulsing red `FEEDBACK` when it
   is growing). Click it to show that input.
 - a **marker** on the spectrum at the ring's frequency (dashed once it's gone,
-  for five minutes).
-- the **Rings list** (bottom left of the spectrum): frequency, input, the
-  nearest 1/3-octave **GEQ band** to pull down, how often it came back (`×3`)
-  and when. **Ignore** stops reporting a frequency (a steady tone that isn't
-  feedback, until restart); **Clear** forgets past rings. **Rings** in the
-  **View** menu hides the markers and the list (the alert stays).
+  for five minutes). Rings whose labels would overlap share one: `5 rings 275–431 Hz`,
+  in the worst one's colour.
+- a **dot on the channel tile** of the input it comes from (red for feedback).
+- the **Rings list** (top right of the spectrum), one line per ring: frequency, how
+  often it came back (`×3`), the nearest 1/3-octave **GEQ band** to pull down, the
+  input it comes from (`← Pastor`) and when. Tap a line for the details: every input
+  that heard it (the mains, which hear every ring, are only mentioned) and the inputs
+  feeding it. **Ignore** stops reporting a frequency (a steady tone that isn't
+  feedback, until restart); **Clear** forgets past rings. The list folds to its title
+  while an EQ band is dragged or its settings are open. **Show** hides the markers and
+  the list (the alert stays).
 
 **Which input is ringing.** For a ring on the mains (the TF's St L/R on USB
 33/34, or the pinned inputs without a TF5), the list and the alert also name the

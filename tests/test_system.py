@@ -48,6 +48,31 @@ def test_config_edit_validates_before_writing(client_for, tmp_path):
     assert list(tmp_path.iterdir()) == [path]  # no temp files left behind
 
 
+def test_switches_edit_the_file_in_place(client_for, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("# mine\n[tf5]\neq = true\neq_write = false   # ask first\n\n[server]\nport = 8080\n")
+    client = client_for(path)
+    got = client.get("/api/system/config").get_json()
+    assert got["switches"]["tf5.eq_write"] is False and "tf5.eq_write" in got["labels"]
+
+    r = client.put("/api/system/switch", json={"key": "tf5.eq_write", "on": True}).get_json()
+    assert r["ok"] and r["switches"]["tf5.eq_write"] is True
+    assert "eq_write = true   # ask first\n" in path.read_text()  # changed in place, comment kept
+    client.put("/api/system/switch", json={"key": "tf5.fader_write", "on": True})  # missing: added under [tf5]
+    client.put("/api/system/switch", json={"key": "rf.auto_connect", "on": False})  # no [rf]: added at the end
+    assert path.read_text() == (
+        "# mine\n[tf5]\nfader_write = true\neq = true\neq_write = true   # ask first\n\n[server]\nport = 8080\n"
+        "\n[rf]\nauto_connect = false\n"
+    )
+
+    # A switch the config can't take is refused, the file left as it was.
+    before = path.read_text()
+    r = client.put("/api/system/switch", json={"key": "tf5.eq_write", "on": False})  # fader_write needs it
+    assert r.status_code == 400 and "fader_write" in r.get_json()["error"]
+    assert client.put("/api/system/switch", json={"key": "server.port", "on": True}).status_code == 400
+    assert path.read_text() == before
+
+
 def test_config_editing_disabled_without_path(client_for):
     client = client_for(None)
     assert client.get("/api/system/config").status_code == 404

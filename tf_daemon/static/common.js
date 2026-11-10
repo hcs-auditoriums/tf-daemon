@@ -1,7 +1,13 @@
-// What every page shares: element lookup, local storage, JSON POST, the reconnecting
+// What every page shares: element lookup and creation, local storage, JSON POST, the reconnecting
 // websocket and HiDPI canvas sizing. Native ES module, no build step.
 
 export const $ = (id) => document.getElementById(id);
+export function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
 
 // Local storage can be missing or full (private windows); a page then just forgets.
 export function loadItem(key, def) {

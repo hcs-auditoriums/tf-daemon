@@ -1,6 +1,6 @@
 // The input picker, the header menus (open / close) and the spectrum traces with Reset.
 
-import { channelColor, renderPanel } from "./console.js";
+import { channelTile, renderPanel } from "./console.js";
 import { eqEditReset } from "./eqedit.js";
 import { autoReset } from "./range.js";
 import { $, loadInt, save, state } from "./shared.js";
@@ -42,7 +42,7 @@ export function buildChannelPicker() {
     b.onclick = () => selectInput(ch.index);
     nav.appendChild(b);
   }
-  paintChannelColors();
+  paintChannelTiles();
   showBank(bankOf(state.input));
 }
 
@@ -55,13 +55,25 @@ function showBank(n) {
   for (const b of $("banks").querySelectorAll("button")) b.setAttribute("aria-pressed", String(Number(b.dataset.bank) === n));
 }
 
-// The console's channel colours on the chips (when the TF5 is read; called as they change).
-export function paintChannelColors() {
-  for (const b of $("channels").querySelectorAll(".ch-chip")) {
-    const c = channelColor(Number(b.dataset.input));
-    if (c) b.style.setProperty("--ch", c);
-    else b.style.removeProperty("--ch");
-  }
+// What the desk says about each tile's channel: its colour (the top edge), on or off (an off
+// channel is dimmed), its fader (a bar along the bottom), and a dot while a ring comes from it
+// (state.ringingInputs, from rings.js). Once a frame at most: a moving fader sends many changes.
+let tilesQueued = false;
+export function paintChannelTiles() {
+  if (tilesQueued) return;
+  tilesQueued = true;
+  requestAnimationFrame(() => {
+    tilesQueued = false;
+    for (const b of $("channels").querySelectorAll(".ch-chip")) {
+      const usb = Number(b.dataset.input), t = channelTile(usb), ring = state.ringingInputs?.get(usb);
+      if (t.color) b.style.setProperty("--ch", t.color); else b.style.removeProperty("--ch");
+      if (t.pos === null) b.style.removeProperty("--fader"); else b.style.setProperty("--fader", `${(t.pos * 100).toFixed(1)}%`);
+      b.classList.toggle("off", t.on === false);
+      if (ring) b.dataset.ring = ring; else delete b.dataset.ring;
+      const name = state.meta.channels.find((c) => c.index === usb)?.label ?? "";
+      b.title = `Input ${usb + 1}${t.on === false ? " · off" : ""}${ring ? ` · ${ring === "feedback" ? "feedback" : "ring"} from ${name}` : ""}`;
+    }
+  });
 }
 
 export function markSelected(index) {
@@ -116,6 +128,12 @@ for (const m of menus) {
 }
 document.addEventListener("click", (e) => { for (const m of menus) if (m.open && !m.contains(e.target)) m.open = false; });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") for (const m of menus) m.open = false; });
+
+// ☰ (a phone): the menus row shown or hidden.
+$("menus-btn").onclick = () => {
+  const open = document.querySelector("header").classList.toggle("menus-open");
+  $("menus-btn").setAttribute("aria-expanded", String(open));
+};
 
 // Spectrum traces (remembered in this browser); Reset sits on the Peak hold row and only
 // works while that trace is shown.

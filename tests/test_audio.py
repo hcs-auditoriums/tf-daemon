@@ -112,6 +112,7 @@ def test_engine_end_to_end_with_synth():
         pinned = [(c["index"], c["label"]) for c in meta["channels"] if c["pinned"]]
         assert pinned == [(32, "Main L"), (33, "Main R")] and len(meta["channels"]) == 34
         assert meta["channels"][0]["label"] == "Ch 1"
+        assert [c["index"] for c in meta["channels"] if c["bus"]] == [32, 33]  # the mains: rings there are a mix
         assert client.post("/api/audio/reset-peak", json={"channel": 33}).get_json() == {"ok": True}
         assert client.post("/api/audio/reset-peak", json={"channel": 5}).status_code == 400  # not analyzed
         assert client.get("/api/status").get_json()["modules"]["audio"]["frames"] >= 1

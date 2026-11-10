@@ -88,6 +88,23 @@ document.addEventListener("click", (e) => { if (menu.open && !menu.contains(e.ta
 
 bar.append(eqOn, hpfOn, undo, redo, ab, menu);
 
+// The toolbar's actions for the keyboard and the command palette (keys.js): each presses its
+// button, so a shortcut does exactly what a tap does, and only while the button could be pressed.
+export function eqCommands() {
+  const cmd = (title, b, keys) => ({ title, keys, group: "EQ", when: () => !bar.hidden && !b.disabled && !b.hidden, run: () => b.click() });
+  return [
+    cmd("Undo", undo, ["mod+z"]),
+    cmd("Redo", redo, ["mod+shift+z", "mod+y"]),
+    cmd("EQ on / off", eqOn),
+    cmd("HPF on / off", hpfOn),
+    cmd("Compare (A/B)", ab),
+    cmd("Gain flat", items.flat),
+    cmd("Copy", items.copy),
+    cmd("Paste", items.paste),
+    cmd(items.before.textContent, items.before),
+  ];
+}
+
 // Kept in step with the EQ shown (called each frame the plot is drawn; it only touches the DOM
 // when something changed).
 let shown = null;

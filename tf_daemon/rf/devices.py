@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -154,10 +155,18 @@ def basic_input_for(start_hz: int, stop_hz: int) -> str:
 
 
 class SimTinySA(RFDevice):
-    name = "demo"
+    """Noise around -80 dBm and carriers: those ``carriers()`` lists ([(Hz, dBm)], wired in
+    app.py to the demo's wireless transmitters), plus one that belongs to nothing; without
+    ``carriers``, three at fixed fractions of the span."""
 
-    def __init__(self, seed: int | None = None) -> None:
+    name = "demo"
+    STRAY = (0.42, -66.0)  # the unexplained carrier: (position in the span, dBm)
+
+    def __init__(
+        self, seed: int | None = None, carriers: Callable[[], list[tuple[float, float]]] | None = None
+    ) -> None:
         self._rng = np.random.default_rng(seed)
+        self._carriers = carriers
 
     def open(self) -> str:
         return "Demo device (synthetic spectrum)"
@@ -169,7 +178,14 @@ class SimTinySA(RFDevice):
         span = stop_hz - start_hz
         freqs = np.linspace(start_hz, stop_hz, points)
         levels = self._rng.normal(-80.0, 2.0, points)
-        # Carriers at fixed fractions of the span: (position, level dBm, width / span).
-        for pos, dbm, bw in ((0.2, -30.0, 0.005), (0.5, -45.0, 0.003), (0.75, -55.0, 0.004)):
-            levels += np.exp(-0.5 * ((freqs - (start_hz + span * pos)) / (span * bw / 2)) ** 2) * (dbm + 80.0)
+        if self._carriers is None:  # (centre Hz, level dBm, width Hz)
+            peaks = [
+                (start_hz + span * pos, dbm, span * bw)
+                for pos, dbm, bw in ((0.2, -30.0, 0.005), (0.5, -45.0, 0.003), (0.75, -55.0, 0.004))
+            ]
+        else:
+            stray = (start_hz + span * self.STRAY[0], self.STRAY[1], 150_000.0)
+            peaks = [(hz, dbm, 150_000.0) for hz, dbm in self._carriers()] + [stray]
+        for hz, dbm, width in peaks:
+            levels += np.exp(-0.5 * ((freqs - hz) / (width / 2)) ** 2) * max(0.0, dbm + 80.0)
         return levels.astype(np.float32)

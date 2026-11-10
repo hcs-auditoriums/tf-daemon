@@ -168,8 +168,8 @@ export function drawEq() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // A handle per band (filled when it does something) and the HPF (eqHandles), with its
-  // lock beside the label when the EQ can be edited.
+  // A handle per band (filled when it does something) and the HPF (eqHandles); a padlock
+  // beside the label of a band with a lock set (in its settings), only to show it.
   ctx.lineWidth = 1.5;
   for (const h of eqHandles()) {
     const big = h.key === state.eqSelected;
@@ -177,30 +177,24 @@ export function drawEq() {
     if (h.active) ctx.fill(); else ctx.stroke();
     ctx.textAlign = "center"; ctx.textBaseline = "bottom";
     ctx.fillText(h.label, h.x, h.y - (big ? 8 : 6));
-    if (d.writable) drawLock(lockSpot(h), eqLocked(h.key));
+    if (d.writable && eqLocked(h.key)) drawLock(lockSpot(h));
   }
   ctx.globalAlpha = 1; ctx.lineWidth = 1;
   drawReadout(d);
 }
 
-// Where a handle's lock is: just right of its label (canvas CSS px).
-export function lockSpot(h) {
+// Where a locked handle's padlock is: just right of its label (canvas CSS px).
+function lockSpot(h) {
   ctx.font = "11px system-ui, sans-serif";
   const big = h.key === state.eqSelected;
   return { x: h.x + ctx.measureText(h.label).width / 2 + 7, y: h.y - (big ? 8 : 6) - 6 };
 }
-// A small padlock centred on p: closed and solid when locked, open and faint when not.
-function drawLock(p, locked) {
-  const a = ctx.globalAlpha;
-  ctx.globalAlpha = a * (locked ? 1 : 0.4);
+// A small closed padlock centred on p.
+function drawLock(p) {
   ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  if (locked) ctx.arc(p.x, p.y - 1, 2.3, Math.PI, 0);
-  else { ctx.arc(p.x + 3, p.y - 2.5, 2.3, Math.PI, 0); }
-  ctx.stroke();
-  ctx.beginPath(); ctx.rect(p.x - 3.5, p.y - 1, 7, 5.5);
-  if (locked) ctx.fill(); else ctx.stroke();
-  ctx.globalAlpha = a; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(p.x, p.y - 1, 2.3, Math.PI, 0); ctx.stroke();
+  ctx.beginPath(); ctx.rect(p.x - 3.5, p.y - 1, 7, 5.5); ctx.fill();
+  ctx.lineWidth = 1.5;
 }
 
 // While a band is dragged: its values in a small tag beside the handle (Hz; dB and Q where

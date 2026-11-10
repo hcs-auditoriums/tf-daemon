@@ -10,7 +10,8 @@
   <header>
     <h1>tf-daemon</h1>
     <nav class="tabs" aria-label="Pages"><a href="/" aria-current="page">Audio</a><a href="/rf">RF</a><a href="/qlxd">Wireless</a><a href="/config">Config</a></nav>
-    <div class="menus">
+    <button id="menus-btn" class="menus-btn" type="button" aria-expanded="false" aria-controls="menus" aria-label="Menus" title="View, Traces, Show, Mic check">&#9776;</button>
+    <div class="menus" id="menus">
       <details class="menu" id="view-menu">
         <summary>View</summary>
         <div class="menu-panel">
@@ -114,7 +115,7 @@
     <aside id="console-panel" class="console-panel" aria-label="Console channel" hidden></aside>
   </div>
   <footer id="info"></footer>
-  <script src="/static/nav.js"></script>
+  <script type="module" src="/static/keys.js"></script>
   <script type="module" src="/static/app.js"></script>
 </body>
 </html>

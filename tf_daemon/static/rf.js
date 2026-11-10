@@ -2,6 +2,7 @@
 // Protocol: see tf_daemon/rf/engine.py (JSON state snapshots over /ws/rf) and module.py.
 
 import { $, connectWs, fitCanvas, loadItem, postJson, save } from "./common.js";
+import { addCommands } from "./keys.js";
 const canvas = $("spectrum");
 const ctx = canvas.getContext("2d");
 const wfCanvas = $("waterfall");
@@ -86,13 +87,32 @@ let wsOpen = false;
 
 function connect() {
   connectWs("/ws/rf", {
-    onOpen: () => { wsOpen = true; renderStatus(); },
+    onOpen: () => { wsOpen = true; renderStatus(); loadHistory(); },
     onClose: () => { wsOpen = false; renderStatus(); },
     onMessage: (data) => {
       const msg = JSON.parse(data);
       if (msg.type === "state") onState(msg);
     },
   });
+}
+
+// The sweeps the server kept (GET /api/rf/history): the waterfall is full as soon as the page
+// opens. Rows that came over the websocket meanwhile stay on top.
+async function loadHistory() {
+  let h;
+  try { h = await (await fetch("/api/rf/history")).json(); } catch { return; }
+  if (!h.rows || !h.rows.length) return;
+  const sw = state.sweep;
+  if (sw && (sw.start_hz !== h.start_hz || sw.stop_hz !== h.stop_hz || sw.points !== h.points)) return;
+  const rows = h.rows.reverse().map((r) => Float32Array.from(r));   // newest first
+  if (!sw) {
+    state.sweep = { start_hz: h.start_hz, stop_hz: h.stop_hz, points: h.points };
+    state.lastSweeps = h.sweeps;
+    state.live = rows[0];
+  }
+  const newer = sw ? Math.max(0, Math.min(state.wfRows.length, state.lastSweeps - h.sweeps)) : 0;
+  state.wfRows = [...state.wfRows.slice(0, newer), ...rows].slice(0, WF_ROWS);
+  rebuildWaterfall();
 }
 
 function onState(s) {
@@ -440,3 +460,15 @@ renderStatus();
 connect();
 fetchReceivers();
 requestAnimationFrame(loop);
+
+// The command palette (keys.js): the toolbar's buttons and boxes, as they are now.
+const press = (id) => () => $(id).click();
+addCommands(() => [
+  { title: $("connect").textContent, group: "RF", when: () => !$("connect").disabled, run: press("connect") },
+  { title: $("scan").textContent, group: "RF", keys: ["s"], when: () => !$("scan").disabled, run: press("scan") },
+  { title: "Reset peak hold", group: "RF", when: () => !$("reset-peak").disabled, run: press("reset-peak") },
+  { title: "Fit to receivers", group: "RF", when: () => !$("rx-controls").hidden, run: press("fit-rx") },
+  { title: "Peak hold on / off", group: "RF", run: press("show-peak") },
+  { title: "Waterfall on / off", group: "RF", run: press("show-wf") },
+  { title: "Receiver lines on / off", group: "RF", when: () => !$("rx-controls").hidden, run: press("show-rx") },
+]);

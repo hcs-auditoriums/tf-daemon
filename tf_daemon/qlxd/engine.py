@@ -253,7 +253,8 @@ class QLXDEngine:
         return n
 
     def frequencies(self) -> list[dict[str, Any]]:
-        """Known receivers for other modules: ``[{key, name, device_id, frequency_mhz, online, last_seen}]``.
+        """Known receivers for other modules: ``[{key, name, device_id, frequency_mhz, online, last_seen,
+        rf_dbm}]`` (``rf_dbm``: the transmitter's level at the receiver, None when offline).
 
         Live values win over the catalog, so a just-retuned receiver shows its
         new frequency immediately.
@@ -275,6 +276,7 @@ class QLXDEngine:
                         "frequency_mhz": e["frequency_mhz"],
                         "online": key in live,
                         "last_seen": e["last_seen"],
+                        "rf_dbm": live[key]["rf_dbm"] if key in live else None,
                     }
                 )
         return sorted(out, key=lambda d: d["frequency_mhz"])

@@ -1,5 +1,5 @@
 """EQ editing on the spectrum in a real (headless) browser, against the demo server's
-simulated desk: drag, type, locks, the toolbar (EQ / HPF on, undo, copy / paste / compare,
+simulated desk: drag, type, locks (in the settings), the toolbar (EQ / HPF on, undo, copy / paste / compare,
 gain flat), double-tap and pinch. These change the desk's EQ, each test on its own input (they
 run in parallel) and each puts it back. Fixtures in conftest.py, like tests/test_browser.py.
 """
@@ -163,10 +163,17 @@ def test_eq_bands_can_be_dragged_and_typed_on_the_spectrum(page):
         page.wait_for_function("window.tfEqBandShown() === null", timeout=3000)
         assert page.evaluate("window.tfEqReadout()") is None  # only while dragging
 
-        # Its lock (beside the label) keeps the frequency: a drag then changes only the gain.
+        # A frequency lock (in the settings; there is none to tap on the plot) keeps the
+        # frequency: a drag then changes only the gain.
         h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
-        page.mouse.click(box["x"] + h["lock"]["x"], box["y"] + h["lock"]["y"])
+        page.mouse.click(box["x"] + h["x"], box["y"] + h["y"])
+        pop.wait_for(timeout=3000)
+        pop.get_by_label("Lock Frequency").click()
         page.wait_for_function("window.tfEqHandles().find(h => h.key === 'HM').locked", timeout=3000)
+        page.keyboard.press("Escape")
+        pop.wait_for(state="detached", timeout=3000)
+        page.wait_for_timeout(400)  # not a double-tap with the click that opened the settings
+        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
         locked = desk_band("HM")
         x, y = box["x"] + h["x"], box["y"] + h["y"]
         page.mouse.move(x, y)
@@ -269,6 +276,32 @@ def test_eq_toolbar_double_tap_pinch_and_types(page):
         )
         wait_desk(page, 1, lambda e: band(e, "HM")["q"] < 1, "a lower HM Q after the pinch")
 
+        # With a band selected (its settings open), a pinch is for it, wherever the fingers are:
+        # here right over HM, while LM is the one selected.
+        lm = "PEQ/Bank/Band:0"
+        put_eq(1, [[f"{lm}/Gain", -400], [f"{lm}/Q", 2000]])  # a mid band: always a bell
+        wait_desk(page, 1, lambda e: band(e, "LM")["gain"] == -4 and band(e, "LM")["q"] == 2, "LM a -4 dB bell")
+        hm_q = band(desk_eq(1), "HM")["q"]
+        page.wait_for_timeout(500)
+        lmh = page.evaluate("window.tfEqHandles().find(h => h.key === 'LM')")
+        page.mouse.click(box["x"] + lmh["x"], box["y"] + lmh["y"])
+        page.get_by_role("dialog", name="EQ LM").wait_for(timeout=3000)
+        page.evaluate(
+            """([x, y]) => {
+                const c = document.getElementById('spectrum'), r = c.getBoundingClientRect();
+                const ev = (type, id, dx) => c.dispatchEvent(new PointerEvent(type, {pointerId: id, pointerType: 'touch',
+                    clientX: r.left + x + dx, clientY: r.top + y, bubbles: true, isPrimary: id === 31}));
+                ev('pointerdown', 31, -20); ev('pointerdown', 32, 20);
+                for (const d of [30, 45, 60]) { ev('pointermove', 31, -d); ev('pointermove', 32, d); }
+                ev('pointerup', 32, 60); ev('pointerup', 31, -60);
+            }""",
+            [x, y],
+        )
+        wait_desk(page, 1, lambda e: band(e, "LM")["q"] < 1, "a lower LM Q after the pinch")
+        assert band(desk_eq(1), "HM")["q"] == hm_q  # the band under the fingers is untouched
+        page.get_by_role("dialog", name="EQ LM").wait_for(timeout=1000)  # still selected, settings open
+        page.keyboard.press("Escape")
+
         # EQ on / off from the toolbar.
         eq_btn = bar.get_by_role("button", name="EQ", exact=True)
         eq_btn.click()
@@ -317,10 +350,11 @@ def test_eq_toolbar_double_tap_pinch_and_types(page):
         # The high band's types, as on StageMix: bell, shelf, LPF.
         hh = page.evaluate("window.tfEqHandles().find(h => h.key === 'H')")
         page.mouse.click(box["x"] + hh["x"], box["y"] + hh["y"])
-        pick = page.get_by_role("dialog", name="EQ H").get_by_label("Type")
-        assert pick.locator("option").all_inner_texts() == ["Bell", "Shelf", "LPF"]
-        pick.select_option("lpf")
+        pick = page.get_by_role("dialog", name="EQ H").get_by_role("radiogroup", name="Type")
+        assert pick.get_by_role("radio").all_inner_texts() == ["Bell", "Shelf", "LPF"]  # side by side, like the tabs
+        pick.get_by_role("radio", name="LPF").click()
         wait_desk(page, 1, lambda e: band(e, "H")["type"] == "lpf" and band(e, "H")["on"], "H as an LPF")
+        page.get_by_role("dialog", name="EQ H").get_by_role("radio", name="LPF", checked=True).wait_for(timeout=3000)
     finally:
         restore(1, before)
 

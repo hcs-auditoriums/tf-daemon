@@ -1,7 +1,7 @@
 // tf-daemon config / update page. Native ES module, no build step.
 // API: see tf_daemon/system.py.
 
-import { $ } from "./common.js";
+import { $, el } from "./common.js";
 const short = (rev) => (rev ? rev.slice(0, 7) : "unknown");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -139,13 +139,61 @@ async function loadConfig() {
     $("config").value = r.text;
     $("config-path").textContent = r.path;
     setMsg("config-msg", "");
+    renderSwitches(r.labels, r.switches);
   } catch (e) {
     $("config").disabled = $("save").disabled = $("save-restart").disabled = true;
     setMsg("config-msg", e.message, true);
   }
 }
 
+// The on / off settings changed most (system.py SWITCHES): each written to the file at once.
+let switchLabels = {};
+function renderSwitches(labels, values) {
+  switchLabels = labels;
+  $("switches-card").hidden = !values;
+  if (!values) return;
+  $("switches").replaceChildren(...Object.entries(labels).map(([key, text]) => {
+    const box = el("input");
+    box.type = "checkbox";
+    box.checked = values[key];
+    box.onchange = () => setSwitch(key, box);
+    const label = el("label");
+    label.append(box, el("span", "", text), el("code", "", key));
+    return label;
+  }));
+}
+
+async function setSwitch(key, box) {
+  if ($("config").value !== savedText) {
+    box.checked = !box.checked;
+    setMsg("switch-msg", "Save or discard your edits to config.toml first", true);
+    return;
+  }
+  setMsg("switch-msg", "saving…");
+  try {
+    const r = await api("PUT", "/api/system/switch", { key, on: box.checked });
+    savedText = $("config").value = r.text;
+    renderSwitches(switchLabels, r.switches);
+    setMsg("switch-msg", "saved; restart to apply");
+  } catch (e) {
+    box.checked = !box.checked;
+    setMsg("switch-msg", e.message, true);
+  }
+}
+
+const RESTART_ASK = "Restart tf-daemon now? Every page loses its live view for a few seconds.";
+$("restart").addEventListener("click", async () => {
+  if (!confirm(RESTART_ASK)) return;
+  try {
+    await api("POST", "/api/system/restart");
+    await waitForRestart(revision);
+  } catch (e) {
+    setMsg("switch-msg", e.message, true);
+  }
+});
+
 async function save(restart) {
+  if (restart && !confirm(RESTART_ASK)) return;
   setMsg("config-msg", "saving…");
   try {
     await api("PUT", "/api/system/config", { text: $("config").value });
@@ -182,6 +230,9 @@ window.addEventListener("beforeunload", (e) => {
       $("update").disabled = $("check").disabled = true;
       await followUpdate();
       $("update").disabled = $("check").disabled = false;
+    } else if (window.location.hash === "#update") {   // "Update now…" in the command palette
+      history.replaceState(null, "", window.location.pathname);
+      $("update").click();
     } else {
       checkForUpdates();  // on opening the page, so "Latest" is filled in without a click
     }

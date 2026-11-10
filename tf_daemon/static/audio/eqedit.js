@@ -5,8 +5,9 @@
 //   scroll on a handle  Q (bells)
 //   click a handle      its settings: type, frequency, gain, Q (HPF: on, frequency), to type in;
 //                       clicking it again closes them
-//   click its lock      locks its frequency (a drag then only changes the gain); again: unlocks
-//                       it all. The settings lock frequency, gain and Q one by one.
+//   its settings' locks keep frequency, gain or Q as they are (a drag then changes only the
+//                       rest); a locked band shows a padlock by its label. No lock to tap on the
+//                       plot itself: too small to see and too easy to hit on a touchscreen.
 //   double-tap a handle its gain back to 0 dB (as in TF StageMix)
 //   pinch               Q of the band dragged / selected, else the bell nearest the fingers
 //
@@ -18,14 +19,14 @@
 // tf_daemon/dsp/eq.py) and the desk's echo is applied when the drag ends; writes are
 // throttled to one in flight, always the latest position.
 
-import { eqHalf, eqHandles, eqLocked, eqLocks, eqY, lockSpot } from "./eq.js";
+import { eqHalf, eqHandles, eqLocked, eqLocks, eqY } from "./eq.js";
 import { fOfX, PAD, W } from "./plot.js";
 import { $, canvas, el, state } from "./shared.js";
 
 const PATH = { L: "PEQ/Bank/BandL", LM: "PEQ/Bank/Band:0", HM: "PEQ/Bank/Band:1", H: "PEQ/Bank/BandH" };
-// Fingers need more room than a mouse: handles and their locks are easier to hit on touch.
+// Fingers need more room than a mouse: handles are easier to hit on touch.
 const COARSE = matchMedia("(pointer: coarse)").matches;
-const HIT_PX = COARSE ? 18 : 9, LOCK_HIT = COARSE ? 12 : 7;
+const HIT_PX = COARSE ? 18 : 9;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 // ------------------------------------------------------------------ the desk's filter maths (dsp/eq.py)
@@ -260,19 +261,6 @@ function hit(x, y) {
   }
   return best;
 }
-// The handle whose lock is under (x, y), if any.
-function hitLock(x, y) {
-  if (!state.eq.writable) return null;
-  return eqHandles().find((h) => { const p = lockSpot(h); return Math.abs(p.x - x) <= LOCK_HIT && Math.abs(p.y - y) <= LOCK_HIT; }) || null;
-}
-// The lock beside a handle: lock its frequency; when anything is locked, unlock it all.
-function toggleLock(key) {
-  const locks = eqLocks(key);
-  if (eqLocked(key)) for (const k of Object.keys(locks)) delete locks[k];
-  else locks.freq = true;
-  if (pop && pop.dataset.key === key) showPop(key);
-  state.dirty = true;
-}
 // What a drag of this band may change: frequency (sideways) and gain (up / down), less its locks.
 function dragAxes(key, kind) {
   const locks = eqLocks(key), gain = kind !== "hpf" && kind !== "filter";
@@ -283,16 +271,20 @@ const gainAt = (y) => { const mid = eqY(0), unit = eqY(1) - mid; return clamp((y
 
 let drag = null;   // {key, kind, moved, x0, y0}
 
-// Pinch (two fingers): the Q of the band being dragged or selected when it's a bell, else of the
-// bell nearest the fingers; fingers apart widen it (lower Q), together narrow it.
+// Pinch (two fingers): the Q of the selected band (tapped, its settings open, or the one a
+// finger is on); only with none selected, the bell nearest the fingers. A selected band
+// without a Q (a shelf, the HPF) is left alone rather than another band changed. Fingers
+// apart widen it (lower Q), together narrow it.
 const touches = new Map();   // pointerId -> [x, y]
 let pinch = null;            // {key, d0, q0}
 const spread = () => { const [a, b] = [...touches.values()]; return Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; };
 function startPinch() {
   const bands = state.eq.eq.bands, bell = (k) => bands.find((b) => b.label === k && b.type === "bell");
   const mid = fOfX(([...touches.values()].reduce((s, t) => s + t[0], 0)) / 2);
-  const b = bell(drag && drag.key) || bell(state.eqSelected)
-    || bands.filter((x) => x.type === "bell").sort((x, y) => Math.abs(Math.log(x.freq / mid)) - Math.abs(Math.log(y.freq / mid)))[0];
+  tapOff = null;   // a pinch, not a tap off the handles: the selection stays
+  const chosen = state.eqSelected || (drag && drag.key);
+  const b = chosen ? bell(chosen)
+    : bands.filter((x) => x.type === "bell").sort((x, y) => Math.abs(Math.log(x.freq / mid)) - Math.abs(Math.log(y.freq / mid)))[0];
   if (!b || eqLocks(b.label).q) return;
   if (!drag || !drag.moved) remember();
   drag = null;
@@ -306,6 +298,10 @@ function endPinch() {
   state.eqEditing = false;
   settle();
 }
+
+// A touch off the handles deselects (closes the settings) only once it lifts as a tap: the
+// first finger of a pinch must not drop the band the pinch is for.
+let tapOff = null;   // pointerId of such a touch
 
 // Double-tap a handle: its gain back to 0 dB (bells and shelves; not when the gain is locked).
 let lastTap = null;   // {key, t}
@@ -324,10 +320,8 @@ canvas.addEventListener("pointerdown", (e) => {
   if (touches.size === 2) { e.preventDefault(); startPinch(); return; }
   if (touches.size > 2) return;
   const [x, y] = local(e);
-  const l = hitLock(x, y);
-  if (l) { e.preventDefault(); toggleLock(l.key); return; }
   const h = hit(x, y);
-  if (!h) { closePop(); return; }
+  if (!h) { if (e.pointerType === "touch") tapOff = e.pointerId; else closePop(); return; }
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
   drag = { key: h.key, kind: h.kind, moved: false, x0: x, y0: y };
@@ -347,9 +341,9 @@ canvas.addEventListener("pointermove", (e) => {
     return;
   }
   if (!drag) {
-    const h = editable() && !hitLock(x, y) && hit(x, y);
+    const h = editable() && hit(x, y);
     const axes = h && dragAxes(h.key, h.kind);
-    canvas.style.cursor = !editable() ? "" : hitLock(x, y) ? "pointer"
+    canvas.style.cursor = !editable() ? ""
       : !h ? "" : axes.freq && axes.gain ? "grab" : axes.freq ? "ew-resize" : axes.gain ? "ns-resize" : "not-allowed";
     return;
   }
@@ -367,6 +361,7 @@ canvas.addEventListener("pointermove", (e) => {
 
 function endDrag(e) {
   touches.delete(e.pointerId);
+  if (tapOff === e.pointerId) { tapOff = null; if (e.type === "pointerup") closePop(); }
   if (pinch) { if (touches.size < 2) endPinch(); return; }
   if (!drag) return;
   const { key, moved } = drag;
@@ -475,13 +470,20 @@ export function showPop(key) {
       // Bell / shelf (and LPF on the high band); a low band set to HPF on the desk can be
       // turned back into a bell or shelf here.
       const names = { bell: "Bell", shelf: "Shelf", lpf: "LPF", hpf: "HPF" };
-      const row = el("label", "eqp-row"), sel = el("select");
-      sel.setAttribute("aria-label", "Type");
+      // Side-by-side buttons, like the page tabs: one tap, nothing to open.
+      const row = el("div", "eqp-row"), seg = el("div", "eqp-seg");
+      seg.setAttribute("role", "radiogroup");
+      seg.setAttribute("aria-label", "Type");
       const now = typeOf(b), kinds = BAND_TYPES[key].includes(now) ? BAND_TYPES[key] : [...BAND_TYPES[key], now];
-      for (const k of kinds) sel.append(new Option(names[k], k));
-      sel.value = now;
-      sel.onchange = () => { edit(key, { type: sel.value }); showPop(key); };
-      row.append(el("span", "", "Type"), sel);
+      for (const k of kinds) {
+        const opt = el("button", "", names[k]);
+        opt.type = "button";
+        opt.setAttribute("role", "radio");
+        opt.setAttribute("aria-checked", String(k === now));
+        opt.onclick = () => { if (k !== now) { edit(key, { type: k }); showPop(key); } };
+        seg.append(opt);
+      }
+      row.append(el("span", "", "Type"), seg);
       pop.append(row);
     }
     pop.append(field("Frequency", b.freq, 1, "Hz", (v) => { edit(key, { freq: v }); showPop(key); }, [key, "freq"]));
@@ -512,7 +514,7 @@ export function eqEditReset() {
 }
 
 // For the browser tests: where the handles are (canvas CSS px).
-window.tfEqHandles = () => eqHandles().map((h) => ({ key: h.key, x: h.x, y: h.y, lock: lockSpot(h), locked: eqLocked(h.key) }));
+window.tfEqHandles = () => eqHandles().map((h) => ({ key: h.key, x: h.x, y: h.y, locked: eqLocked(h.key) }));
 // ... and how far this page's curve maths is from the desk's own (dB), for the EQ shown.
 window.tfEqPreviewError = () => {
   const d = state.eq;
