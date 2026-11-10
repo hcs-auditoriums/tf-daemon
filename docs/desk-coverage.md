@@ -35,7 +35,7 @@ The table is generated from `tf_daemon/console/coverage.py` (also served at
 | CUE | Home (fader) | no | no | no | no |  |
 | DCA faders and assignment | Home, Custom fader bank | no | no | no | no | DCAGroup is in the Editor dump; parameter names not recorded yet |
 | Mute groups and master mutes | Utility | no | no | no | no | MuteGroup is in the Editor dump; parameter names not recorded yet |
-| Level meters | Home (meters) | no | no | no | no | YMDP UDP framing known (guides/tf5_api.md section 8); block-to-meter mapping pending |
+| Level meters | Home (meters) | RCP (mtr, unverified on a real TF5) | no | yes | view | Input channels + stereo bus, console/meters.py (tf5.meters); YMDP mapping pending (guide section 8) |
 | Sends to AUX mixes: level, ON | Send to, Sends on fader | RCP | no | yes | edit | ToMix/Level, ToMix/On for 20 mixes; edited on the simulated desk only (no RCP / Editor write yet) |
 | Send pre / post fader | Send to, Sends on fader | no | no | app | edit | Simulated by the app |
 | Send pan (stereo AUX) | Send to, Sends on fader | no | no | app | edit | Simulated by the app; stereo pairs |

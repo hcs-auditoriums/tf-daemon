@@ -4,6 +4,7 @@
 import { onConsoleChanges, onConsoleSnapshot } from "./console.js";
 import { buildChannelPicker, markSelected, selectInput } from "./controls.js";
 import { onConsoleEq } from "./eq.js";
+import { onConsoleMeters } from "./meters.js";
 import { autoRange } from "./range.js";
 import { onRings } from "./rings.js";
 import { connectWs } from "../common.js";
@@ -24,6 +25,7 @@ export function connect() {
       else if (msg.type === "tf5") onConsoleSnapshot(msg);
       else if (msg.type === "tf5-changes") onConsoleChanges(msg);
       else if (msg.type === "tf5-eq") onConsoleEq(msg);
+      else if (msg.type === "tf5-meters") onConsoleMeters(msg);
       else onMeta(msg, ws);
     },
   });

@@ -138,6 +138,12 @@ phantom_write = false     # +48V and the phantom master
 label_write = false       # channel names, colours, icons
 fx_write = false          # FX / insert FX bypass, mix balance, parameters
 scene_recall = false      # recall a scene
+# Level meters on the audio page's channel bar and console strip, read over RCP
+# (mtrstart; only reads, changes nothing on the desk). Unverified on a real TF5:
+# probe with `python -m tf_daemon.console.meters --host <console-ip>`.
+meters = true
+meter_interval_ms = 100
+meter_point = "PreFader"    # input channels: PreHPF, PreEQ, PreFader or PostOn
 
 # Named inputs. index is the 0-based capture channel on the device. Every input
 # can be viewed in the browser; these get buttons and are always analyzed, the

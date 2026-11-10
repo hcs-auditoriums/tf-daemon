@@ -81,6 +81,14 @@ nav button.ch-chip {
 nav button.ch-chip[hidden] { display: none; }
 nav button.ch-chip::before { content: attr(data-num); display: block; margin-bottom: 2px; font-size: 10px; font-weight: 400; color: var(--muted); line-height: 1; }
 nav button.ch-chip.unnamed { color: var(--muted); }
+/* The desk's level meter along the tile's foot (audio/meters.js). */
+nav button.ch-chip { position: relative; }
+nav button.ch-chip.metered::after {
+  content: ""; position: absolute; left: 0; bottom: 0; height: 4px; width: calc(var(--lvl, 0) * 100%);
+  background: var(--ok); transition: width 90ms linear;
+}
+nav button.ch-chip[data-lvl="warm"]::after, .cp-meter[data-lvl="warm"] .cp-meter-fill { background: var(--peak); }
+nav button.ch-chip[data-lvl="hot"]::after, .cp-meter[data-lvl="hot"] .cp-meter-fill { background: var(--bad); }
 @media (max-width: 720px) {
   .chbar { flex-wrap: wrap; }
   .chbar #channels { order: 3; flex: 1 0 100%; flex-wrap: wrap; }
@@ -402,6 +410,9 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
   border-radius: 4px; background: linear-gradient(#e8ecf1, #b9c1cb);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
+.cp-meter { position: relative; width: 8px; border-radius: 2px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
+.cp-meter[hidden] { display: none; }
+.cp-meter-fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--ok); transition: height 90ms linear; }
 .cp-cap::after { content: ""; position: absolute; left: 6px; right: 6px; top: 50%; height: 2px; margin-top: -1px; background: #1b2028; }
 
 .cp-panrow { display: grid; grid-template-columns: 30px 1fr 30px; align-items: center; gap: 8px; }
@@ -417,7 +428,7 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
 .cp-cap { transition: bottom 90ms linear; }
 .cp-fill { transition: height 90ms linear; }
 .cp-pan span { transition: left 90ms linear; }
-@media (prefers-reduced-motion: reduce) { .cp-cap, .cp-fill, .cp-pan span { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .cp-cap, .cp-fill, .cp-pan span, .cp-meter-fill { transition: none; } }
 .cp-extra { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
 .cp-extra dt { color: var(--muted); }
 .cp-extra dd { margin: 0; text-align: right; }

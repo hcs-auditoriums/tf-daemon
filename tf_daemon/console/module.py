@@ -15,6 +15,7 @@ from . import coverage
 from .editor import tree
 from .editor.client import Changes, TFEditorClient
 from .editor.guard import FAMILIES, WRITABLE, WRITE_LIMITS, WriteNotAllowed, writable
+from .meters import MeterClient
 from .patch import patch_from, source_label
 from .rcp import TF5Client
 from .strip import Strip
@@ -50,6 +51,7 @@ class TF5Module:
 
     Routes:
       GET /api/tf5/status     connection state, discovered parameters
+      GET /api/tf5/meters     level meters per USB input (tf5.meters; console/meters.py), 404 when off
       GET /api/tf5/channels   per USB input: console source and its settings; mix names
       GET /api/tf5/eq/<usb>   EQ of the console channel on that USB input + its curve
                               (404 when tf5.eq is off)
@@ -87,6 +89,9 @@ class TF5Module:
         self.client = TF5Client(cfg.host, cfg.port, patch, cfg.poll_s, on_names, on_gains)
         self.strip = Strip(patch, self.client, simulator)  # gain, gate, comp, sends (strip.py)
         self.eq_client: TFEditorClient | None = None
+        self.meters = (
+            MeterClient(cfg.host, cfg.port, patch, cfg.meter_interval_ms, cfg.meter_point) if cfg.meters else None
+        )
         self.eq_version = 0  # bumped whenever the console's mixing data (EQ included) changes
         if cfg.eq:
             self.eq_client = TFEditorClient(
@@ -112,6 +117,9 @@ class TF5Module:
 
     def changes_since(self, seq: int) -> tuple[int, dict[str, Any] | None]:
         return self.client.changes_since(seq)
+
+    def meters_since(self, version: int) -> tuple[int, dict[str, Any] | None]:
+        return (version, None) if self.meters is None else self.meters.since(version)
 
     @property
     def eq_writable(self) -> bool:
@@ -242,6 +250,12 @@ class TF5Module:
         @bp.get("/status")
         def status():
             return jsonify(self.status())
+
+        @bp.get("/meters")
+        def meters():
+            if self.meters is None:
+                return jsonify({"error": "tf5.meters is off"}), 404
+            return jsonify({**self.meters.levels(), "status": self.meters.status()})
 
         @bp.get("/coverage")
         def desk_coverage():  # what can be read / written on the desk (docs/desk-coverage.md)
@@ -393,16 +407,21 @@ class TF5Module:
         self.client.start()
         if self.eq_client is not None:
             self.eq_client.start()
+        if self.meters is not None:
+            self.meters.start()
 
     def stop(self) -> None:
         self.client.stop()
         if self.eq_client is not None:
             self.eq_client.stop()
+        if self.meters is not None:
+            self.meters.stop()
         if self.simulator is not None:
             self.simulator.close()
 
     def status(self) -> dict[str, Any]:
         st = self.client.status()
         st["eq"] = self.eq_client.status() if self.eq_client is not None else None
+        st["meters"] = self.meters.status() if self.meters is not None else None
         st["simulator"] = self.simulator.status() if self.simulator is not None else None
         return st

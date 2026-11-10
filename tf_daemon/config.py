@@ -363,6 +363,9 @@ class TF5Config(Section):
     label_write: bool = False  # strip names, colours, icons
     fx_write: bool = False  # FX / insert FX bypass, mix balance, parameters
     scene_recall: bool = False  # recall a scene (RecallScene event)
+    meters: bool = True  # read level meters (RCP mtrstart; read-only, console/meters.py)
+    meter_interval_ms: int = 100  # how often the console sends them
+    meter_point: str = "PreFader"  # input channels' meter: PreHPF | PreEQ | PreFader | PostOn
 
     def validate(self) -> None:
         _check_source("tf5", self.source, DEVICE_SOURCES)
@@ -378,6 +381,10 @@ class TF5Config(Section):
                 parse_patch_entry(entry)
             except ValueError as e:
                 raise ConfigError(f"[tf5] {e}") from None
+        if not 20 <= self.meter_interval_ms <= 2000:
+            raise ConfigError("tf5.meter_interval_ms must be between 20 and 2000")
+        if self.meter_point not in ("PreHPF", "PreEQ", "PreFader", "PostOn"):
+            raise ConfigError(f"tf5.meter_point must be PreHPF, PreEQ, PreFader or PostOn, got {self.meter_point!r}")
         if self.eq_write and not self.eq:
             raise ConfigError("tf5.eq_write needs tf5.eq = true (EQ is written over the same connection)")
         if self.fader_write and not self.eq_write:

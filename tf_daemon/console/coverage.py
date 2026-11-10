@@ -103,11 +103,11 @@ FEATURES: list[Feature] = [
         "meters",
         "Level meters",
         "Home (meters)",
+        "RCP (mtr, unverified on a real TF5)",
         "no",
-        "no",
-        "no",
-        "no",
-        "YMDP UDP framing known (guides/tf5_api.md section 8); block-to-meter mapping pending",
+        "yes",
+        "view",
+        "Input channels + stereo bus, console/meters.py (tf5.meters); YMDP mapping pending (guide section 8)",
     ),
     # ---------------------------------------------------------------- sends
     Feature(

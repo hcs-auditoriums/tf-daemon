@@ -46,6 +46,7 @@ tf_daemon/
     strip.py       gain, gate, comp, sends per channel (/api/tf5/strip): RCP sends + a simulated store
     patch.py       which console source each USB capture channel carries
     rcp.py         TF5Client: names, faders, sends over RCP (TCP 49280)
+    meters.py      MeterClient: level meters over RCP (mtrstart, read-only); probe CLI
     module.py      TF5Module: /api/tf5/* routes, console data for the audio page
     sim.py         simulated TF5 (demo mode, tests): sim_rcp.py + sim_editor.py as one desk
     sim_rcp.py     its RCP side
@@ -83,7 +84,7 @@ tf_daemon/
                    range.js, rings.js, vocal.js, waterfall.js, eqedit.js (EQ
                    editing on the spectrum), eqbar.js (EQ toolbar), strip.js +
                    dyngraph.js (gain / gate / comp / sends panel), profiles.js (EQ profiles),
-                   ringout.js (ring-out dialog)
+                   ringout.js (ring-out dialog), meters.js (the desk's level meters)
 ```
 
 Data flow:
