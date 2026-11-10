@@ -3,7 +3,7 @@
 import { eqAvailable, eqHalf, eqY } from "./eq.js";
 import { H, PAD, W, xOf } from "./plot.js";
 import { micKey, openRingoutSetup, styleKey } from "./ringout.js";
-import { $, C, color, ctx, el, loadInt, loadStr, quietRender, save, state } from "./shared.js";
+import { $, C, color, ctx, el, fmtHz, loadInt, loadStr, quietRender, save, state } from "./shared.js";
 
 // Optional module (vocal.enabled): during a mic check, listen to the shown
 // input while the person talks and suggest HPF / PEQ settings. Suggestions
@@ -84,17 +84,16 @@ $("mic-check").onclick = () => {
   if (vocalOpen) pollVocal();
 };
 
-const fmtFreq = (f) => (f >= 1000 ? `${+(f / 1000).toFixed(2)} kHz` : `${Math.round(f)} Hz`);
 const fmtGain = (g) => `${g > 0 ? "+" : g < 0 ? "−" : ""}${Math.abs(g).toFixed(1)} dB`;
 
 // The band's current setting on the desk, when the console EQ is readable.
 function currentSetting(eq, band) {
   if (!eq) return null;
-  if (band === "HPF") return eq.hpf && eq.hpf.on ? `HPF ${fmtFreq(eq.hpf.freq)}` : "HPF off";
+  if (band === "HPF") return eq.hpf && eq.hpf.on ? `HPF ${fmtHz(eq.hpf.freq)}` : "HPF off";
   const b = eq.bands.find((x) => x.label === band);
   if (!b) return null;
-  if (b.type === "hpf" || b.type === "lpf") return `${b.type.toUpperCase()} ${fmtFreq(b.freq)}`;
-  return b.gain ? `${fmtGain(b.gain)} @ ${fmtFreq(b.freq)}, Q ${b.q}` : "flat";
+  if (b.type === "hpf" || b.type === "lpf") return `${b.type.toUpperCase()} ${fmtHz(b.freq)}`;
+  return b.gain ? `${fmtGain(b.gain)} @ ${fmtHz(b.freq)}, Q ${b.q}` : "flat";
 }
 
 export function renderVocal() {
@@ -207,9 +206,9 @@ function suggestionItems(s, r, label, row, button) {
   const headRow = el("tr");
   ["Band", "Suggested", "For"].concat(cur ? ["Now"] : []).forEach((h) => headRow.append(el("th", "", h)));
   table.append(headRow);
-  if (r.hpf) table.append(tr(["HPF", fmtFreq(r.hpf.freq), r.hpf.issue].concat(cur ? [currentSetting(cur, "HPF") || "–"] : [])));
+  if (r.hpf) table.append(tr(["HPF", fmtHz(r.hpf.freq), r.hpf.issue].concat(cur ? [currentSetting(cur, "HPF") || "–"] : [])));
   for (const b of r.bands) {
-    table.append(tr([b.band, `${fmtGain(b.gain)} @ ${fmtFreq(b.freq)}, Q ${b.q}`, b.issue]
+    table.append(tr([b.band, `${fmtGain(b.gain)} @ ${fmtHz(b.freq)}, Q ${b.q}`, b.issue]
       .concat(cur ? [currentSetting(cur, b.band) || "–"] : []), b.kind));
   }
   if (!r.bands.length) table.append(tr(["", "No EQ moves needed", "close to the reference speech spectrum"].concat(cur ? [""] : [])));

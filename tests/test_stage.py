@@ -60,7 +60,7 @@ def level_at(x, f, nfft=1 << 15):
 
 def test_the_mains_carry_the_desk_eq():
     eq = bell(1000.0, 10.0, 1.0)
-    _, x = run(Desk(0.0, eq), 6.0)
+    _, x = run(Desk(0.0, eq), 3.0)
     for f in (300.0, 1000.0, 3000.0):
         measured = level_at(x[:, 32], f) - level_at(x[:, 0], f)
         assert measured == pytest.approx(float(eq_curve(eq, np.array([f]))[0]), abs=1.0), f

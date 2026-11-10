@@ -3,19 +3,24 @@
 //   drag a handle       frequency (left / right) and gain (up / down); the HPF and filter
 //                       bands move sideways only
 //   scroll on a handle  Q (bells)
-//   click a handle      its settings: type, frequency, gain, Q (HPF: on, frequency), to type in
+//   click a handle      its settings: type, frequency, gain, Q (HPF: on, frequency), to type in;
+//                       clicking it again closes them
+//   click its lock      locks its frequency (a drag then only changes the gain); again: unlocks
+//                       it all. The settings lock frequency, gain and Q one by one.
 //
 // Every change is a person's: each drag / entry is sent with "confirm" (PUT /api/tf5/eq/<usb>).
 // While dragging, the curve is redrawn here with the desk's own filter maths (a copy of
 // tf_daemon/dsp/eq.py) and the desk's echo is applied when the drag ends; writes are
 // throttled to one in flight, always the latest position.
 
-import { eqHalf, eqHandles, eqY } from "./eq.js";
+import { eqHalf, eqHandles, eqLocked, eqLocks, eqY, lockSpot } from "./eq.js";
 import { fOfX } from "./plot.js";
 import { $, canvas, el, state } from "./shared.js";
 
 const PATH = { L: "PEQ/Bank/BandL", LM: "PEQ/Bank/Band:0", HM: "PEQ/Bank/Band:1", H: "PEQ/Bank/BandH" };
-const HIT_PX = 9;
+// Fingers need more room than a mouse: handles and their locks are easier to hit on touch.
+const COARSE = matchMedia("(pointer: coarse)").matches;
+const HIT_PX = COARSE ? 18 : 9, LOCK_HIT = COARSE ? 12 : 7;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 // ------------------------------------------------------------------ the desk's filter maths (dsp/eq.py)
@@ -48,18 +53,23 @@ function sectionDb(kind, freq, gain, q, f) {
     const im = c[1] * Math.sin(w) + c[2] * Math.sin(2 * w); return Math.hypot(re, im); };
   return 20 * Math.log10(Math.max(mag(b) / mag(a), 1e-12));
 }
-export function eqCurve(eq, freqs) {
-  return freqs.map((f) => {
-    if (!eq || !eq.on) return 0;
-    let db = 0;
-    if (eq.hpf && eq.hpf.on) db += sectionDb(eq.hpf.slope === 6 ? "hpf1" : "hpf", eq.hpf.freq, 0, BUTTERWORTH_Q, f);
-    for (const b of eq.bands) {
-      if (b.type === "hpf" || b.type === "lpf") { if (b.on !== false) db += sectionDb(b.type, b.freq, 0, BUTTERWORTH_Q, f); }
-      else if (b.gain !== 0) db += sectionDb(b.type, b.freq, b.gain, b.q, f);
-    }
-    return db;
-  });
+// What one band ("HPF", "L", "LM", "HM", "H") adds at f (dB): nothing when it's off or flat.
+function bandDb(eq, key, f) {
+  if (key === "HPF") {
+    const h = eq.hpf;
+    return h && h.on ? sectionDb(h.slope === 6 ? "hpf1" : "hpf", h.freq, 0, BUTTERWORTH_Q, f) : 0;
+  }
+  const b = eq.bands.find((x) => x.label === key);
+  if (!b) return 0;
+  if (b.type === "hpf" || b.type === "lpf") return b.on !== false ? sectionDb(b.type, b.freq, 0, BUTTERWORTH_Q, f) : 0;
+  return b.gain !== 0 ? sectionDb(b.type, b.freq, b.gain, b.q, f) : 0;
 }
+const KEYS = (eq) => ["HPF", ...eq.bands.map((b) => b.label)];
+export function eqCurve(eq, freqs) {
+  return freqs.map((f) => (!eq || !eq.on ? 0 : KEYS(eq).reduce((db, k) => db + bandDb(eq, k, f), 0)));
+}
+// One band's own part of the curve (drawn under it while that band is selected / dragged).
+export const bandCurve = (eq, key, freqs) => freqs.map((f) => bandDb(eq, key, f));
 
 // ------------------------------------------------------------------ writes (throttled)
 
@@ -148,6 +158,24 @@ function hit(x, y) {
   }
   return best;
 }
+// The handle whose lock is under (x, y), if any.
+function hitLock(x, y) {
+  if (!state.eq.writable) return null;
+  return eqHandles().find((h) => { const p = lockSpot(h); return Math.abs(p.x - x) <= LOCK_HIT && Math.abs(p.y - y) <= LOCK_HIT; }) || null;
+}
+// The lock beside a handle: lock its frequency; when anything is locked, unlock it all.
+function toggleLock(key) {
+  const locks = eqLocks(key);
+  if (eqLocked(key)) for (const k of Object.keys(locks)) delete locks[k];
+  else locks.freq = true;
+  if (pop && pop.dataset.key === key) showPop(key);
+  state.dirty = true;
+}
+// What a drag of this band may change: frequency (sideways) and gain (up / down), less its locks.
+function dragAxes(key, kind) {
+  const locks = eqLocks(key), gain = kind !== "hpf" && kind !== "filter";
+  return { freq: !locks.freq, gain: gain && !locks.gain };
+}
 const local = (e) => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
 const gainAt = (y) => { const mid = eqY(0), unit = eqY(1) - mid; return clamp((y - mid) / unit, -eqHalf(), eqHalf()); };
 
@@ -155,7 +183,10 @@ let drag = null;   // {key, kind, moved, x0, y0}
 
 canvas.addEventListener("pointerdown", (e) => {
   if (!editable() || e.button !== 0) return;
-  const [x, y] = local(e), h = hit(x, y);
+  const [x, y] = local(e);
+  const l = hitLock(x, y);
+  if (l) { e.preventDefault(); toggleLock(l.key); return; }
+  const h = hit(x, y);
   if (!h) { closePop(); return; }
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
@@ -168,15 +199,20 @@ canvas.addEventListener("pointerdown", (e) => {
 canvas.addEventListener("pointermove", (e) => {
   const [x, y] = local(e);
   if (!drag) {
-    canvas.style.cursor = editable() && hit(x, y) ? "grab" : "";
+    const h = editable() && !hitLock(x, y) && hit(x, y);
+    const axes = h && dragAxes(h.key, h.kind);
+    canvas.style.cursor = !editable() ? "" : hitLock(x, y) ? "pointer"
+      : !h ? "" : axes.freq && axes.gain ? "grab" : axes.freq ? "ew-resize" : axes.gain ? "ns-resize" : "not-allowed";
     return;
   }
   if (!drag.moved && Math.hypot(x - drag.x0, y - drag.y0) < 3) return;
+  const axes = dragAxes(drag.key, drag.kind), s = {};
+  if (axes.freq) s.freq = Math.round(fOfX(x) * 10) / 10;
+  if (axes.gain) s.gain = Math.round(gainAt(y) * 10) / 10;
+  if (!Object.keys(s).length) return;   // all locked: nothing to drag
   drag.moved = true;
   canvas.style.cursor = "grabbing";
-  const freq = Math.round(fOfX(x) * 10) / 10;
-  const sideways = drag.kind === "hpf" || drag.kind === "filter";
-  edit(drag.key, sideways ? { freq } : { freq, gain: Math.round(gainAt(y) * 10) / 10 });
+  edit(drag.key, s);
   if (pop) showPop(drag.key);
 });
 
@@ -188,7 +224,9 @@ function endDrag() {
   canvas.style.cursor = "";
   if (moved) settle();  // the desk's echoes of the drag are still on their way
   else if (state.eqPushed && !state.eqSettling) { state.eq = state.eqPushed; state.eqPushed = null; state.dirty = true; }
-  if (!moved) showPop(key);   // a click: its settings
+  if (!moved) {   // a click: its settings, or closes them when they are already open
+    if (pop && pop.dataset.key === key) closePop(); else showPop(key);
+  }
 }
 canvas.addEventListener("pointerup", endDrag);
 canvas.addEventListener("pointercancel", endDrag);
@@ -199,6 +237,7 @@ canvas.addEventListener("wheel", (e) => {
   const b = h && state.eq.eq.bands.find((x2) => x2.label === h.key);
   if (!b || h.kind !== "bell") return;
   e.preventDefault();
+  if (eqLocks(h.key).q) return;
   edit(h.key, { q: Math.round(clamp(b.q * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 0.1, 10) * 100) / 100 });
   if (pop) showPop(h.key);
 }, { passive: false });
@@ -213,14 +252,50 @@ function closePop() {
   if (state.eqSelected) { state.eqSelected = null; state.dirty = true; }
 }
 
-function field(label, value, step, unit, onSet) {
-  const lbl = el("label", "eqp-row");
+const LOCK_SVG = (locked) => `<svg viewBox="0 0 12 14" width="11" height="13" aria-hidden="true">
+  <path d="${locked ? "M3 6V4a3 3 0 0 1 6 0v2" : "M3 6V4a3 3 0 0 1 6 0"}" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <rect x="1.5" y="6" width="9" height="7" rx="1.2" fill="${locked ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3"/></svg>`;
+
+// How − / + move each setting: frequency and Q by a ratio (a semitone, about 12 %), gain in
+// half dB.
+const NUDGE = {
+  freq: (v, dir) => Math.round(v * 2 ** (dir / 12)),
+  gain: (v, dir) => Math.round((v + dir * 0.5) * 10) / 10,
+  q: (v, dir) => Math.round(v * 1.12 ** dir * 100) / 100,
+};
+
+// A number to type in, between − / + buttons (no keyboard needed on a touch screen); with
+// ``lock`` (band key, setting) a lock beside it that keeps drags, the wheel and the field off it.
+function field(label, value, step, unit, onSet, lock) {
+  const row = el("div", "eqp-row");
   const inp = el("input");
   inp.type = "number"; inp.step = String(step); inp.value = String(value);
+  inp.inputMode = "decimal";
   inp.setAttribute("aria-label", label);
   inp.onchange = () => { const v = Number(inp.value); if (Number.isFinite(v)) onSet(v); };
-  lbl.append(el("span", "", label), inp, el("span", "eqp-unit", unit));
-  return lbl;
+  const locked = lock && !!eqLocks(lock[0])[lock[1]];
+  const box = el("div", "eqp-num");
+  for (const dir of [-1, 1]) {
+    const b = el("button", "eqp-step", dir < 0 ? "−" : "+");
+    b.type = "button"; b.tabIndex = -1; b.disabled = locked;
+    b.setAttribute("aria-label", `${label} ${dir < 0 ? "down" : "up"}`);
+    b.onclick = () => onSet(NUDGE[lock ? lock[1] : "freq"](Number(inp.value), dir));
+    if (dir < 0) box.append(b, inp); else box.append(b);
+  }
+  row.append(el("span", "", label), box, el("span", "eqp-unit", unit));
+  if (lock) {
+    const [key, name] = lock, locks = eqLocks(key);
+    inp.disabled = !!locks[name];
+    const btn = el("button", "eqp-lock");
+    btn.type = "button";
+    btn.innerHTML = LOCK_SVG(!!locks[name]);
+    btn.title = locks[name] ? `Unlock ${label.toLowerCase()}` : `Lock ${label.toLowerCase()}`;
+    btn.setAttribute("aria-label", `Lock ${label}`);
+    btn.setAttribute("aria-pressed", String(!!locks[name]));
+    btn.onclick = () => { locks[name] = !locks[name]; showPop(key); state.dirty = true; };
+    row.append(btn);
+  }
+  return row;
 }
 
 export function showPop(key) {
@@ -230,6 +305,7 @@ export function showPop(key) {
   if (!h) return;
   if (pop) pop.remove();
   pop = el("div", "eq-pop");
+  pop.dataset.key = key;
   pop.setAttribute("role", "dialog");
   pop.setAttribute("aria-label", `EQ ${key}`);
   const head = el("div", "eqp-head");
@@ -240,7 +316,7 @@ export function showPop(key) {
     const on = el("label", "eqp-row"), cb = el("input");
     cb.type = "checkbox"; cb.checked = eq.hpf.on; cb.onchange = () => edit("HPF", { on: cb.checked });
     on.append(cb, el("span", "", "On"));
-    pop.append(on, field("Frequency", eq.hpf.freq, 1, "Hz", (v) => edit("HPF", { freq: v })));
+    pop.append(on, field("Frequency", eq.hpf.freq, 1, "Hz", (v) => { edit("HPF", { freq: v }); showPop("HPF"); }, ["HPF", "freq"]));
   } else {
     const b = eq.bands.find((x) => x.label === key);
     if (key === "L" || key === "H") {
@@ -256,15 +332,17 @@ export function showPop(key) {
         pop.append(row);
       }
     }
-    pop.append(field("Frequency", b.freq, 1, "Hz", (v) => edit(key, { freq: v })));
+    pop.append(field("Frequency", b.freq, 1, "Hz", (v) => { edit(key, { freq: v }); showPop(key); }, [key, "freq"]));
     if (b.type !== "hpf" && b.type !== "lpf") {
-      pop.append(field("Gain", b.gain, 0.1, "dB", (v) => edit(key, { gain: v })));
-      if (b.type === "bell") pop.append(field("Q", b.q, 0.01, "", (v) => edit(key, { q: v })));
+      pop.append(field("Gain", b.gain, 0.1, "dB", (v) => { edit(key, { gain: v }); showPop(key); }, [key, "gain"]));
+      if (b.type === "bell") pop.append(field("Q", b.q, 0.01, "", (v) => { edit(key, { q: v }); showPop(key); }, [key, "q"]));
     }
   }
   $("spec-pane").append(pop);
   const pane = $("spec-pane").getBoundingClientRect();
-  pop.style.left = `${clamp(h.x + 14, 4, pane.width - pop.offsetWidth - 4)}px`;
+  // Beside the handle, never over it (it's clicked again to close this): right, else left.
+  const right = h.x + 14, left = h.x - 14 - pop.offsetWidth;
+  pop.style.left = `${right + pop.offsetWidth + 4 <= pane.width || left < 4 ? right : left}px`;
   pop.style.top = `${clamp(h.y - pop.offsetHeight / 2, 4, pane.height - pop.offsetHeight - 4)}px`;
   state.eqSelected = key;
   state.dirty = true;
@@ -282,7 +360,7 @@ export function eqEditReset() {
 }
 
 // For the browser tests: where the handles are (canvas CSS px).
-window.tfEqHandles = () => eqHandles().map(({ key, x, y }) => ({ key, x, y }));
+window.tfEqHandles = () => eqHandles().map((h) => ({ key: h.key, x: h.x, y: h.y, lock: lockSpot(h), locked: eqLocked(h.key) }));
 // ... and how far this page's curve maths is from the desk's own (dB), for the EQ shown.
 window.tfEqPreviewError = () => {
   const d = state.eq;

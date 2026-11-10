@@ -5,7 +5,7 @@
 // the faders back by itself). "Mute & cancel" (or Esc) mutes the ring-out's channels at
 // once and puts their faders and EQ back. API: /api/vocal/ringout*.
 
-import { $, el, loadStr, quietRender, quietReset, save, state } from "./shared.js";
+import { $, el, fmtHz, loadStr, quietRender, quietReset, save, state } from "./shared.js";
 
 let ro = null;            // GET /api/vocal/ringout
 let closedFor = null;     // the session (its start time) whose finished popup was closed
@@ -13,7 +13,6 @@ let watched = null;       // the session this page saw running (only its result 
 let busy = false;         // a request from the popup is in flight
 
 const db = (v) => (v === null || v === undefined ? "–" : `${v > 0 ? "+" : ""}${v.toFixed(1)} dB`);
-const hz = (f) => (f >= 1000 ? `${+(f / 1000).toFixed(2)} kHz` : `${Math.round(f)} Hz`);
 
 export function micKey(ch) { return `tf.vocalMic.${ch}`; }
 export function styleKey(ch) { return `tf.vocalStyle.${ch}`; }
@@ -189,9 +188,9 @@ function popupBox(o, error) {
   table.append(hr);
   for (const m of ro.mics) {
     const tr = el("tr", ro.current === m.index ? "ro-now" : "");
-    const notches = m.notches.map((n) => `${n.band} ${hz(n.freq)} ${n.gain} dB`).join(", ") || "–";
+    const notches = m.notches.map((n) => `${n.band} ${fmtHz(n.freq)} ${n.gain} dB`).join(", ") || "–";
     [m.label, m.state === "ringing out" ? "●" : m.state === "done" ? "✓" : "", `${db(m.level_db)}${m.on ? "" : " (off)"}`,
-      db(m.first_ring_db), db(m.limit_db), m.hpf_hz ? hz(m.hpf_hz) : "off", notches]
+      db(m.first_ring_db), db(m.limit_db), m.hpf_hz ? fmtHz(m.hpf_hz) : "off", notches]
       .forEach((c) => tr.append(el("td", "", c)));
     table.append(tr);
     const sub = (text) => { const nr = el("tr"); const td = el("td", "ro-mnote", text); td.colSpan = 7; nr.append(td); table.append(nr); };
@@ -204,7 +203,7 @@ function popupBox(o, error) {
       + "faders were set to keep the margin."));
   }
   for (const s of ro.shared || []) {
-    box.append(el("p", "vp-note", `${hz(s.freq)} rang on ${s.mics.join(", ")}: the system rings there `
+    box.append(el("p", "vp-note", `${fmtHz(s.freq)} rang on ${s.mics.join(", ")}: the system rings there `
       + "(PA, room, or the capsules' shared peak). A narrow cut on the stereo bus PEQ would serve them all."));
   }
   const log = (ro.log || []).slice(-4).reverse();
