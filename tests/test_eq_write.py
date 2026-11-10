@@ -163,7 +163,8 @@ def test_a_change_to_the_value_already_there_isnt_sent(console, client_for):
 
 
 def test_sim_console_moves_the_fader_rcp_and_the_stage_hear():
-    from tf_daemon.console.sim import RCP_PREFIX, SimConsole
+    from tf_daemon.console.sim import SimConsole
+    from tf_daemon.console.sim_rcp import RCP_PREFIX
 
     sim = SimConsole(drift_s=0)
     c = TFEditorClient("127.0.0.1", sim.eq_port, writes=True, fader_writes=True)

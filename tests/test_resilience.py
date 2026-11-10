@@ -8,8 +8,8 @@ import pytest
 from helpers import make_config, wait_until
 
 from tf_daemon.app import build_modules, create_app
+from tf_daemon.audio.device import DeviceSource
 from tf_daemon.audio.engine import AudioEngine
-from tf_daemon.audio.sources import DeviceSource
 from tf_daemon.config import load_config
 
 BLOCK = 1200
@@ -38,7 +38,7 @@ class FakeStream:
                 block = np.tile((0.1 * np.sin(2 * np.pi * 1000 * n / 48000))[:, None], (1, self.channels))
                 self.callback(block.astype(np.float32), self.blocksize, None, _Status())
                 t += self.blocksize
-            time.sleep(self.blocksize / 48000)
+            time.sleep(self.blocksize / 48000)  # paces the fake device at 48 kHz
 
     def stop(self):
         self.active = False
@@ -91,6 +91,7 @@ def frames_flowing(engine, timeout=4.0):
     return False
 
 
+@pytest.mark.slow
 def test_audio_device_unplug_and_replug(fast):
     sd = FakeSD(plugged=False)
     cfg = load_config(None)

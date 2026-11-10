@@ -1,4 +1,9 @@
-"""Flask application factory, and the one place modules are built and wired together."""
+"""Flask application factory, and the one place modules are built and wired together.
+
+Routes (each module lists its own):
+  GET  /             the audio page
+  GET  /api/status   version and every module's status counters
+"""
 
 from __future__ import annotations
 
@@ -12,9 +17,10 @@ from flask import Flask, jsonify
 from flask_sock import Sock
 
 from . import __version__
+from .audio.device import DeviceSource
 from .audio.engine import AudioEngine
 from .audio.module import AudioModule
-from .audio.sources import DeviceSource, Source, SourceError, SynthSource, WavSource
+from .audio.sources import Source, SourceError, SynthSource, WavSource
 from .audio.stage import DeskMix, StageSettings, StageSource
 from .config import Config
 from .console.module import TF5Module

@@ -45,7 +45,7 @@ class Engine(Protocol):
 class EngineModule:
     """A module that wraps one engine publishing JSON state on a hub.
 
-    Registers ``GET /<name>`` (the page ``<name>.html``), ``GET /api/<name>/status``,
+    Routes: ``GET /<name>`` (the page ``<name>.html``), ``GET /api/<name>/status``,
     ``GET /api/<name>/state`` and ``WS /ws/<name>``; subclasses add their own routes
     to the blueprint in ``routes``."""
 

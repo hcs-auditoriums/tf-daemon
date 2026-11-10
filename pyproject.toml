@@ -33,6 +33,7 @@ tf_daemon = ["static/*", "static/audio/*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--tb=short"   # short failure output
+markers = ["slow: a second or more (simulated audio, reconnects, the browser); -m 'not slow' for a quick loop"]
 # Shared test modules (helpers, editor_fakes, tf_editor_reference) are imported from tests/ subdirectories too.
 pythonpath = ["tests"]
 

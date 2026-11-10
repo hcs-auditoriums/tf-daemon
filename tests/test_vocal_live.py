@@ -4,13 +4,10 @@ the voice reaches the mains."""
 
 import numpy as np
 import pytest
+from offline import BLOCK, FS, OfflineEngine
 
 from tf_daemon.audio.stage import FlatDesk, StageSettings, StageSource
-from tf_daemon.config import Channel
-from tf_daemon.dsp.ring import RingLog
 from tf_daemon.vocal.session import MAINS_MISMATCH_DB, MicChecks
-
-FS, BLOCK, HOP, FRAME = 48000, 1200, 2400, 32768
 
 
 class Desk(FlatDesk):
@@ -19,41 +16,6 @@ class Desk(FlatDesk):
 
     def fader_db(self, x):
         return self.fader
-
-
-class OfflineEngine:
-    """Just enough of the audio engine for MicChecks: frames from the stage, hop by hop."""
-
-    def __init__(self, source, analyzed):
-        self.source, self.analyzed = source, analyzed
-        self.inputs = [Channel(i, f"In {i + 1}") for i in range(source.channels)]
-        self.rings = RingLog()
-        self.frame_taps = []
-        self.buf = np.zeros((FRAME, source.channels), np.float32)
-        self.t = 0.0
-
-    def add_tap(self, tap):
-        pass
-
-    def add_frame_tap(self, tap):
-        self.frame_taps.append(tap)
-
-    def acquire(self, index):
-        pass
-
-    def release(self, index):
-        pass
-
-    def run(self, seconds):
-        hop = np.zeros((HOP, self.source.channels), np.float32)
-        for _ in range(int(seconds * FS / HOP)):
-            for j in range(0, HOP, BLOCK):
-                self.source._fill(hop[j : j + BLOCK])
-            self.buf = np.concatenate((self.buf[HOP:], hop))  # one copy per hop, not per block
-            self.t += HOP / FS
-            frames = {i: self.buf[:, i] for i in self.analyzed}
-            for tap in self.frame_taps:
-                tap(frames, self.t)
 
 
 def stage(fader=0.0, colours=None):
@@ -71,6 +33,7 @@ def listen(fader=0.0, seconds=30.0, colours=None):
     return checks
 
 
+@pytest.mark.slow
 def test_live_suggestion_finds_a_boomy_voice_and_keeps_listening():
     checks = listen(colours=[[(240.0, 8.0, 1.2)]])
     s = dict(checks.sessions())[0]
@@ -82,6 +45,7 @@ def test_live_suggestion_finds_a_boomy_voice_and_keeps_listening():
     assert dict(checks.sessions())[0].state == "done" and checks.result(0)["ok"]
 
 
+@pytest.mark.slow
 def test_mains_check_measures_the_channel_gain():
     checks = listen(fader=-6.0)
     mains = checks.result(0)["mains"]
@@ -90,6 +54,7 @@ def test_mains_check_measures_the_channel_gain():
     assert mains["delay_ms"] == pytest.approx(256 / FS * 1000, abs=0.5)  # the desk EQ's latency
 
 
+@pytest.mark.slow
 def test_mains_check_notices_a_channel_that_is_off():
     checks = listen(fader=None)
     assert checks.result(0)["mains"]["verdict"] in ("weak", "unknown")
@@ -134,6 +99,7 @@ def _room_run(house, leak=-30.0, gain=None):
     return checks.result(0)
 
 
+@pytest.mark.slow
 def test_a_house_mic_aims_the_suggestion_at_the_room():
     """The simulated room is boomy around 300 Hz; the voice itself is neutral."""
     low_cut = lambda r: any(b["gain"] < 0 and 150 <= b["freq"] <= 450 for b in r["bands"])  # noqa: E731
@@ -144,6 +110,7 @@ def test_a_house_mic_aims_the_suggestion_at_the_room():
     assert low_cut(room), room["bands"]
 
 
+@pytest.mark.slow
 def test_a_house_mic_that_barely_hears_the_voice_is_not_used():
     r = _room_run(True, gain=0.001)
     assert r["ok"] and not r["room"]["used"]
@@ -205,6 +172,7 @@ def _closed_loop(desk):
     return eng, checks
 
 
+@pytest.mark.slow
 def test_the_live_model_settles_then_converges_once_applied():
     desk = EqDesk()
     eng, checks = _closed_loop(desk)
@@ -221,6 +189,7 @@ def test_the_live_model_settles_then_converges_once_applied():
     assert after["settled"]  # and it doesn't keep chasing its own change
 
 
+@pytest.mark.slow
 def test_the_mains_check_notices_eq_the_desk_does_not_report():
     desk = EqDesk()
     desk.hidden = eq_from({"bands": [{"band": "LM", "freq": 1000.0, "gain": 8.0, "q": 1.0}], "hpf": None})
@@ -231,6 +200,7 @@ def test_the_mains_check_notices_eq_the_desk_does_not_report():
     assert mains["verdict"] == "differs" and mains["eq_mismatch_db"] > MAINS_MISMATCH_DB
 
 
+@pytest.mark.slow
 def test_the_measurements_restart_only_when_the_desk_eq_changes():
     desk = EqDesk()
     eng, checks = _closed_loop(desk)
@@ -252,6 +222,7 @@ class FaderDesk(FlatDesk):
         return self.faders.get(x, 0.0)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("mic_fader", [0.0, 6.0])
 def test_feedback_headroom_matches_the_stages_known_loop(mic_fader):
     """Mic 0 at ``mic_fader``, a second talker at -6 dB keeps the mains busy while mic 0 is

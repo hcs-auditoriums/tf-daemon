@@ -8,7 +8,8 @@ from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError
 from tf_daemon.console.patch import default_usb_patch, parse_patch_entry
 from tf_daemon.console.rcp import TF5Client
-from tf_daemon.console.sim import DEMO_INPUTS, RCP_PREFIX, SimConsole, SimRCP
+from tf_daemon.console.sim import SimConsole
+from tf_daemon.console.sim_rcp import DEMO_INPUTS, RCP_PREFIX, SimRCP
 
 PATCH = [parse_patch_entry(e) for e in default_usb_patch()]
 

@@ -89,6 +89,7 @@ def test_the_house_mic_hears_the_mains_after_the_room_delay():
     assert abs(lag - round(12.0 / 343.0 * FS + 256)) <= 2  # 12 m at 343 m/s, + the room colour's latency
 
 
+@pytest.mark.slow
 def test_talkers_take_turns():
     st = StageSettings(talkers=[0, 1], mains=(32, 33), house_mic=None, turn_s=(1.0, 2.0))
     src = StageSource(34, N, st, Desk(0.0))

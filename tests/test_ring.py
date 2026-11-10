@@ -10,7 +10,8 @@ from helpers import make_config, wait_until
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.audio.sources import SynthSource, _PacedSource, make_pink_noise
 from tf_daemon.config import ConfigError, load_config
-from tf_daemon.dsp.ring import RingDetector, RingLog, RingSettings, geq_band
+from tf_daemon.dsp.ring import RingDetector, RingSettings, geq_band
+from tf_daemon.dsp.ringlog import RingLog
 
 FS, HOP, BLOCK = 48000, 2400, 1200
 
@@ -216,6 +217,7 @@ def test_config(tmp_path):
 # ---------------------------------------------------------------- in the app
 
 
+@pytest.mark.slow
 def test_engine_detects_the_synth_ring_and_routes_work():
     cfg = make_config()  # the synth carries a steady 2.5 kHz tone 15 dB under its voice
     modules = build_modules(cfg)
@@ -237,6 +239,7 @@ def test_engine_detects_the_synth_ring_and_routes_work():
         app.extensions["tf_stop"]()
 
 
+@pytest.mark.slow
 def test_ring_detection_can_be_turned_off():
     cfg = make_config(ring={"enabled": False})
     modules = build_modules(cfg)
@@ -296,6 +299,7 @@ def _wait_sources(engine, pred, timeout=8.0):
     return found()
 
 
+@pytest.mark.slow
 def test_ring_on_the_mains_is_traced_to_its_inputs():
     from tf_daemon.audio.engine import AudioEngine
 

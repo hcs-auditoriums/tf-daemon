@@ -37,7 +37,7 @@ def wait_for(path: str, pred, timeout: float = 15.0):
                 return last
         except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
             last = e
-        time.sleep(0.2)
+        time.sleep(0.2)  # poll
     raise AssertionError(f"{path} never satisfied the check; last: {str(last)[:300]}")
 
 

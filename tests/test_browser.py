@@ -16,7 +16,7 @@ import pytest
 URL = os.environ.get("TF_DAEMON_URL", "").rstrip("/")
 sync_api = pytest.importorskip("playwright.sync_api", reason="Playwright not installed (the dev image has it)")
 
-pytestmark = pytest.mark.skipif(not URL, reason="TF_DAEMON_URL not set (no live server)")
+pytestmark = [pytest.mark.skipif(not URL, reason="TF_DAEMON_URL not set (no live server)"), pytest.mark.slow]
 
 # Drawn pixels on a canvas: anything that isn't the page background. Sampled on a
 # grid so it is cheap; a blank or failed canvas gives (close to) zero.

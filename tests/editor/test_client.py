@@ -206,6 +206,7 @@ def test_events_are_answered_like_tf_editor(console, client_for):
     assert_read_only(console)
 
 
+@pytest.mark.slow
 def test_client_sends_keepalives(console, client_for, monkeypatch):
     monkeypatch.setattr(editor_client, "KEEPALIVE_S", 0.2)
     client = client_for(console)
@@ -227,6 +228,7 @@ def test_scene_recall_dump_replaces_the_data(console, client_for):
     assert_read_only(console)
 
 
+@pytest.mark.slow
 def test_falls_back_without_on_set_client_type(client_for, monkeypatch):
     monkeypatch.setattr(editor_client, "CLIENT_TYPE_WAIT_S", 0.3)
     fake = SimEditor(send_on_set_client_type=False)
@@ -239,6 +241,7 @@ def test_falls_back_without_on_set_client_type(client_for, monkeypatch):
         fake.close()
 
 
+@pytest.mark.slow
 def test_no_mixing_dump_times_out_and_retries(client_for, monkeypatch):
     monkeypatch.setattr(editor_client, "SYNC_TIMEOUT_S", 0.5)
     fake = SimEditor(send_mixing_dump=False)
@@ -264,6 +267,7 @@ def test_unknown_firmware_descriptor_is_reported(client_for):
         fake.close()
 
 
+@pytest.mark.slow
 def test_reconnects_after_the_console_drops(console, client_for):
     client = client_for(console)
     wait_until(lambda: client.synced)
@@ -273,6 +277,7 @@ def test_reconnects_after_the_console_drops(console, client_for):
     assert_read_only(console)
 
 
+@pytest.mark.slow
 def test_garbage_from_the_console_reconnects(console, client_for):
     client = client_for(console)
     wait_until(lambda: client.synced)

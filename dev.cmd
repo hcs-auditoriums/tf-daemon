@@ -5,6 +5,8 @@ rem   dev test [ARGS]      all tests in parallel; ARGS go to pytest (dev test -k
 rem   dev logs             follow the server log
 rem   dev lint             ruff + mypy (what CI runs besides the tests)
 rem   dev fix              fix what ruff can, and format the code
+rem   dev check [ARGS]     fix + format + mypy + tests, quiet: only problems print
+rem   dev quick [ARGS]     the same without the slow tests (~5 s)
 rem   dev up ^| down        start (rebuilding if needed) / stop
 rem   dev open [PAGE]      open the running app in the browser (dev open rf)
 rem   dev help             list these commands
@@ -29,6 +31,8 @@ if /i "%CMD%"=="test"  (docker compose up -d && docker compose exec app pytest%A
 if /i "%CMD%"=="logs"  (docker compose up -d && docker compose logs -f app & goto :eof)
 if /i "%CMD%"=="lint"  (docker compose up -d && docker compose exec app ruff check . && docker compose exec app ruff format --check . && docker compose exec app mypy & goto :eof)
 if /i "%CMD%"=="fix"   (docker compose up -d && docker compose exec app ruff check --fix . && docker compose exec app ruff format . & goto :eof)
+if /i "%CMD%"=="check" (docker compose up -d && docker compose exec -T app sh -c "ruff check --fix -q . && ruff format -q . && mypy --no-error-summary && pytest -q --no-header%ARGS%" & goto :eof)
+if /i "%CMD%"=="quick" (docker compose up -d && docker compose exec -T app sh -c "ruff check --fix -q . && ruff format -q . && mypy --no-error-summary && pytest -q --no-header -m 'not slow'%ARGS%" & goto :eof)
 if /i "%CMD%"=="open"  goto open
 if /i "%CMD%"=="help"  goto help
 if /i "%CMD%"=="-h"    goto help
@@ -72,6 +76,8 @@ echo                             dev test -n 0 --pdb     (serial, debugger)
 echo   dev logs             follow the server log (Ctrl+C to stop following)
 echo   dev lint             ruff (style, bugs, formatting) and mypy (types), as CI runs them
 echo   dev fix              fix what ruff can (imports, unused names ...) and format the code
+echo   dev check [ARGS]     fix, format, type-check and run the tests; quiet, only problems print
+echo   dev quick [ARGS]     the same, without the slow tests (~5 s): the inner loop
 echo   dev open [PAGE]      open the running app in the browser
 echo                        PAGE: rf ^| qlxd ^| config (default: the audio page)
 echo   dev up               start, rebuilding the image if pyproject.toml changed

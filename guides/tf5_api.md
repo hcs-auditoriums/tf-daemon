@@ -44,7 +44,7 @@ Address note: Ghidra VA = file offset + `0x401a00` for `.rdata` strings (`tf_edi
 The reverse-engineering workspace (capture, Ghidra project, decode scripts) is not in
 this repo. The protocol as tf-daemon uses it is in `tf_daemon/console/editor/`:
 `codec.py` (frames, payloads), `dump.py` (MMSXLIT parser, wire paths, scaling),
-`client.py` (session, sync, writes). The simulator side is `tf_daemon/console/sim.py`.
+`client.py` (session, sync, writes). The simulator side is `tf_daemon/console/sim_editor.py`.
 
 Re-export from a new capture:
 ```bash

@@ -14,26 +14,40 @@ tf_daemon/
   vocal/           ── vocal EQ assist (everything it does lives here) ──
     voice.py       the voice on a mic: speech activity, pitch, long-term spectrum
     tone.py        EQ suggestions from that spectrum, against reference speech
+    targets.py     mic types and EQ styles: what the suggestion aims at
+    bands.py       which TF5 PEQ band each EQ section goes on
+    transfer.py    dual-channel transfer function (mic -> mains / house mic)
+    room.py        what the PA and the room do to the voice, from a house mic
+    feedback.py    loop gain and feedback headroom per frequency
     plan.py        the desk changes that make a channel's EQ the suggestion
     session.py     mic checks: listen while the person talks, then analyze
     desk.py        apply / undo on the desk, only on a confirmed request
+    auto.py        auto EQ: walks the EQ to the live suggestion, once a person turns it on
+    profiles.py    named EQ profiles (per actor): save, recall, copy
     ports.py       what it needs from audio and the console (Protocols)
+    ringout.py     ring-out: find each mic's feedback point, notch it, set safe faders
+    ringwatch.py   ring-out's fast watch on the mains
     module.py      VocalModule: wiring, /api/vocal routes
   audio/           ── the audio analysis module ──
-    sources.py     DeviceSource (PortAudio), SynthSource, WavSource
+    sources.py     Source; SynthSource, WavSource
+    device.py      DeviceSource (PortAudio), reopened when the device returns
+    stage.py       simulated stage: talkers, desk, PA and room in a closed loop
     ringbuffer.py  lock-protected per-channel ring buffers
     engine.py      analysis thread, binary frame encoding, FrameHub
     module.py      HTTP + WebSocket routes for audio
   dsp/             ── signal processing, no I/O ──
     spectrum.py    windowed FFT, averaging, peak hold, log display bins
-    ring.py        ring / feedback detection and attribution
+    ring.py        ring / feedback detection
+    ringlog.py     rings as events for the pages; which inputs feed a ring on the mains
     eq.py          the console EQ's response curve (TF Editor's maths)
     db.py          dB conversions
   console/         ── the Yamaha TF5 over the network ──
     patch.py       which console source each USB capture channel carries
     rcp.py         TF5Client: names, faders, sends over RCP (TCP 49280)
     module.py      TF5Module: /api/tf5/* routes, console data for the audio page
-    sim.py         simulated TF5, both protocols (demo mode, tests)
+    sim.py         simulated TF5 (demo mode, tests): sim_rcp.py + sim_editor.py as one desk
+    sim_rcp.py     its RCP side
+    sim_editor.py  its TF Editor side, with synthetic parameter dumps
     editor/        the EQ over the TF Editor protocol (TCP 50368)
       codec.py     wire format: elements, messages, frames
       guard.py     what may be sent: read-only unless a person asked for a write
@@ -61,7 +75,9 @@ tf_daemon/
     audio/         its ES modules (no build step): shared.js (canvas, state),
                    plot.js (geometry, grid, traces, hover), socket.js (/ws/audio),
                    controls.js, console.js (sidebar), eq.js (EQ overlay),
-                   range.js, rings.js, vocal.js, waterfall.js
+                   range.js, rings.js, vocal.js, waterfall.js, eqedit.js (EQ
+                   editing on the spectrum), profiles.js (EQ profiles),
+                   ringout.js (ring-out dialog)
 ```
 
 Data flow:

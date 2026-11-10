@@ -75,6 +75,7 @@ def _wait_final(client, timeout=5.0):
     return state()
 
 
+@pytest.mark.slow
 def test_update_runs_one_at_a_time_and_reports_state(client_for, update_files, monkeypatch):
     script = update_files / "update.sh"
     # Stands in for deploy/update.sh: same env contract, same state file.
@@ -136,7 +137,5 @@ def test_restart_answers_before_restarting(client_for, monkeypatch):
     monkeypatch.setattr(system, "RESTART_CHECK_CMD", ["true"])
     t0 = time.time()
     assert client.post("/api/system/restart").get_json() == {"ok": True}
-    deadline = time.time() + 2
-    while not calls and time.time() < deadline:
-        time.sleep(0.01)
+    wait_until(lambda: calls, timeout=2)
     assert len(calls) == 1 and calls[0] >= t0  # restarted after answering, exactly once
