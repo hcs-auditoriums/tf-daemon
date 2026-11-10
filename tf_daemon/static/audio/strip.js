@@ -235,8 +235,8 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.h
 
 // ------------------------------------------------------------------ the sidebar's tool row
 
-// IN · EQ · GATE · COMP · SEND, as StageMix's tool buttons: a dot lights when that part is on
-// (+48V for IN); the one whose tab is open (or EQ, when it's on the spectrum) is outlined.
+// IN · EQ · GATE · COMP · SEND, as StageMix's tool buttons: the label lights green when that part is on
+// (red: +48V on IN), selected or not; the one whose tab is open (or EQ, when it's on the spectrum) is filled.
 const tools = el("div", "cp-tools");
 tools.setAttribute("role", "toolbar");
 tools.setAttribute("aria-label", "Channel settings");
