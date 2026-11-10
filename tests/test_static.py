@@ -104,6 +104,7 @@ SCRIPTS = [
     "rf.js",
     "qlxd.js",
     "config.js",
+    "settings.js",
     "keys.js",
     *sorted(f"audio/{p.name}" for p in (STATIC / "audio").glob("*.js")),
 ]
@@ -152,7 +153,7 @@ def test_page_imports_resolve():
             dest = (path.parent / target).resolve()
             assert dest.exists(), f"{name} imports missing {target}"
             reached.add(dest.name)
-    assert reached == {"common.js", "keys.js", *(p.name for p in (STATIC / "audio").glob("*.js"))}
+    assert reached == {"common.js", "keys.js", "settings.js", *(p.name for p in (STATIC / "audio").glob("*.js"))}
 
 
 @pytest.mark.parametrize(("page", "script"), [("index", "app"), ("rf", "rf"), ("qlxd", "qlxd"), ("config", "config")])

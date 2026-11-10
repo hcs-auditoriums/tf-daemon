@@ -37,9 +37,16 @@ revision back and restarts that, and the page says so. Progress is kept in
 restart. (Before `install-service.sh` has installed that unit, the button falls
 back to running the script inside the service; updates still work but can't be
 rolled back automatically.) The first run turns a `deploy.sh` copy into a git
-checkout, and the server's `config.toml` is always kept. The same page edits
-`config.toml` (validated before it is saved) and restarts the service to apply
-it. The restart and update rely on the sudoers rules that `install-service.sh`
+checkout, and the server's `config.toml` is always kept.
+
+To try something out without merging it, **Run another branch or commit** on the same
+page switches to any branch of `update.remote` (picked from a list) or a commit id (full
+or the short 7-character form), the same way: install, restart, roll back if it doesn't
+come up. The page then says which one is running, and **Update now** goes back to
+`update.branch`. From a shell: `bash deploy/update.sh <remote> <branch> <branch-or-commit>`.
+
+The same page edits `config.toml`, one setting at a time or as text (validated before it is
+saved), and restarts the service to apply it. The restart and update rely on the sudoers rules that `install-service.sh`
 adds. There is no login on these pages, so keep the server on a trusted network.
 
 Useful on the server: `journalctl -u tf-daemon -f`,

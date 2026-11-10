@@ -40,6 +40,7 @@ Commands with a shortcut show it on the right.
 | | Reload page | |
 | | Check for updates | opens the Config page, which checks |
 | | Update now… | opens the Config page and asks before pulling the update and restarting |
+| | Run another branch or commit… | opens the Config page at the branch / commit field |
 | | Restart server… | asks first; every page's live view drops for a few seconds |
 
 ## Audio page

@@ -59,6 +59,7 @@ const toConfig = (hash) => () => { window.location.href = `/config${hash}`; };
 addCommands(() => [
   { title: "Check for updates", group: "Server", run: toConfig("") },
   { title: "Update now…", group: "Server", run: toConfig("#update") },
+  { title: "Run another branch or commit…", group: "Server", run: toConfig("#switch") },
   { title: "Restart server…", group: "Server", run: restartServer },
   { title: document.fullscreenElement ? "Leave full screen" : "Full screen", keys: ["f"], group: "Window",
     when: () => !!document.documentElement.requestFullscreen,

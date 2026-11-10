@@ -1,3 +1,4 @@
+import json
 import time
 
 import pytest
@@ -48,28 +49,46 @@ def test_config_edit_validates_before_writing(client_for, tmp_path):
     assert list(tmp_path.iterdir()) == [path]  # no temp files left behind
 
 
-def test_switches_edit_the_file_in_place(client_for, tmp_path):
+def test_settings_edit_the_file_one_line_at_a_time(client_for, tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("# mine\n[tf5]\neq = true\neq_write = false   # ask first\n\n[server]\nport = 8080\n")
     client = client_for(path)
     got = client.get("/api/system/config").get_json()
-    assert got["switches"]["tf5.eq_write"] is False and "tf5.eq_write" in got["labels"]
+    tables = {t["name"]: {s["key"]: s for s in t["settings"]} for t in got["settings"]}
+    eq_write = tables["tf5"]["tf5.eq_write"]
+    assert eq_write["value"] is False and eq_write["set"] and eq_write["kind"] == "bool" and eq_write["help"]
+    assert tables["tf5"]["tf5.host"]["set"] is False and tables["rf"]["rf.source"]["choices"] == [
+        "device",
+        "demo",
+        "off",
+    ]
+    assert "tf5.eq_write" in got["common"]
 
-    r = client.put("/api/system/switch", json={"key": "tf5.eq_write", "on": True}).get_json()
-    assert r["ok"] and r["switches"]["tf5.eq_write"] is True
-    assert "eq_write = true   # ask first\n" in path.read_text()  # changed in place, comment kept
-    client.put("/api/system/switch", json={"key": "tf5.fader_write", "on": True})  # missing: added under [tf5]
-    client.put("/api/system/switch", json={"key": "rf.auto_connect", "on": False})  # no [rf]: added at the end
+    def put(key, value):
+        return client.put("/api/system/setting", json={"key": key, "value": value})
+
+    r = put("tf5.eq_write", True).get_json()
+    assert r["ok"] and "eq_write = true   # ask first\n" in path.read_text()  # in place, comment kept
+    put("tf5.fader_write", True)  # missing: added under [tf5]
+    put("rf.auto_connect", False)  # no [rf]: the table added at the end
+    put("tf5.host", "10.0.0.5")  # text, quoted
+    put("qlxd.hosts", "10.0.0.7, 10.0.0.8:2202")  # a list typed with commas
+    put("server.port", "9090")  # a number typed in a box
     assert path.read_text() == (
-        "# mine\n[tf5]\nfader_write = true\neq = true\neq_write = true   # ask first\n\n[server]\nport = 8080\n"
-        "\n[rf]\nauto_connect = false\n"
+        '# mine\n[tf5]\nhost = "10.0.0.5"\nfader_write = true\neq = true\neq_write = true   # ask first\n\n'
+        "[server]\nport = 9090\n\n[rf]\nauto_connect = false\n\n"
+        '[qlxd]\nhosts = ["10.0.0.7", "10.0.0.8:2202"]\n'
     )
+    assert put("server.port", None).get_json()["ok"]  # back to the default: the line goes
+    assert "port" not in path.read_text()
 
-    # A switch the config can't take is refused, the file left as it was.
+    # What the config can't take is refused, the file left as it was.
     before = path.read_text()
-    r = client.put("/api/system/switch", json={"key": "tf5.eq_write", "on": False})  # fader_write needs it
+    r = put("tf5.eq_write", False)  # fader_write needs it
     assert r.status_code == 400 and "fader_write" in r.get_json()["error"]
-    assert client.put("/api/system/switch", json={"key": "server.port", "on": True}).status_code == 400
+    assert put("server.port", "eighty").status_code == 400
+    assert put("server.nope", 1).status_code == 400
+    assert put("dsp.fft_size", 1.5).status_code == 400
     assert path.read_text() == before
 
 
@@ -121,6 +140,40 @@ def test_update_runs_one_at_a_time_and_reports_state(client_for, update_files, m
     assert (s["state"], s["message"], s["running"]) == ("up_to_date", "already at abc", False)
     assert "remote=https://github.com/hcs-auditoriums/tf-daemon.git branch=main" in s["log"]
     assert "UPDATE_BRANCH=main" in system.UPDATE_ENV.read_text()
+
+
+def test_update_to_a_branch_or_commit(client_for, update_files, monkeypatch):
+    script = update_files / "update.sh"
+    script.write_text(
+        'echo "ref=$UPDATE_REF"\n'
+        'printf \'{"state": "up_to_date", "message": "x", "pid": %d, "time": %d}\' $$ $(date +%s)'
+        f" > {system.UPDATE_STATE}\n"
+    )
+    monkeypatch.setattr(system, "UPDATE_SCRIPT", script)
+    client = client_for(None)
+    for bad in ("-x", "a..b", "with space", "x\nUPDATE_REMOTE=evil", 5):
+        assert client.post("/api/system/update", json={"ref": bad}).status_code == 400, bad
+    assert client.post("/api/system/update", json={"ref": "feature/try-this"}).status_code == 202
+    assert "ref=feature/try-this" in _wait_final(client)["log"]
+    assert "UPDATE_REF=feature/try-this" in system.UPDATE_ENV.read_text()
+    assert client.post("/api/system/update", json={"ref": "1d84fec"}).status_code == 202
+    _wait_final(client)
+    assert client.post("/api/system/update").status_code == 202  # none: the configured branch
+    assert "ref=main" in _wait_final(client)["log"]
+
+
+def test_info_says_which_branch_or_commit_runs(client_for, update_files, monkeypatch):
+    monkeypatch.setattr(system, "current_revision", lambda: "c" * 40)
+    system.UPDATE_STATE.write_text(json.dumps({"state": "done", "to": "c" * 40, "ref": "feature/x", "time": 0}))
+    assert client_for(None).get("/api/system/info").get_json()["ref"] == "feature/x"
+    system.UPDATE_STATE.write_text(json.dumps({"state": "done", "to": "d" * 40, "ref": "feature/x", "time": 0}))
+    assert client_for(None).get("/api/system/info").get_json()["ref"] is None  # not what runs now
+
+
+def test_refs_lists_the_remote_branches(client_for, monkeypatch):
+    out = "a" * 40 + "\trefs/heads/feature/x\n" + "b" * 40 + "\trefs/heads/main"
+    monkeypatch.setattr(system, "_git", lambda *a, **k: out)
+    assert client_for(None).get("/api/system/refs").get_json()["branches"] == ["main", "feature/x"]  # its own first
 
 
 def test_update_that_dies_is_reported_failed(client_for, update_files, monkeypatch):
