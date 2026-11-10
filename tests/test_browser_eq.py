@@ -54,6 +54,23 @@ def restore(usb, eq):
     put_eq(usb, changes)
 
 
+def curve_states(page, ms=1500):
+    """The EQ handles' heights each frame for ``ms``, as the distinct states they went through."""
+    frames = page.evaluate(
+        """ms => new Promise(done => { const out = [], t0 = performance.now();
+            const f = () => { out.push(window.tfEqHandles().map(h => Math.round(h.y)).join(','));
+                              if (performance.now() - t0 < ms) requestAnimationFrame(f); else done(out); };
+            f(); })""",
+        ms,
+    )
+    return [x for i, x in enumerate(frames) if not i or x != frames[i - 1]]
+
+
+def assert_no_flash(states):
+    """The curve moved straight to where it ended: it never went back to a state it had left."""
+    assert len(states) == len(set(states)), f"the curve flashed back: {states}"
+
+
 def wait_desk(page, usb, pred, what):
     for _ in range(60):
         if pred(desk_eq(usb)):
@@ -306,3 +323,32 @@ def test_eq_toolbar_double_tap_pinch_and_types(page):
         wait_desk(page, 1, lambda e: band(e, "H")["type"] == "lpf" and band(e, "H")["on"], "H as an LPF")
     finally:
         restore(1, before)
+
+
+def test_whole_eq_changes_go_straight_to_the_new_curve(page):
+    """Compare (and Undo, Paste, ...) write many values; the desk echoes them one at a time.
+    The curve must not show the half-changed EQs in between (it flashed back and forth)."""
+    show_eq(page, "BGV 1")  # input 3 (USB 3): no other test edits it
+    bar = page.locator("#eq-bar")
+    bar.wait_for(state="visible", timeout=4000)
+    before = desk_eq(2)
+    gains = {"L": 6, "LM": -5, "HM": 8, "H": -4}
+    try:
+        put_eq(2, [["PEQ/On", 1]] + [[f"PEQ/Bank/{BAND_PATH[k]}/Gain", g * 100] for k, g in gains.items()])
+        wait_desk(page, 2, lambda e: all(band(e, k)["gain"] == g for k, g in gains.items()), "four bands set")
+        page.wait_for_function("window.tfEqHandles().filter(h => h.key !== 'HPF').some(h => h.y < 300)", timeout=4000)
+        menu = bar.locator("summary")
+        menu.click()
+        bar.get_by_role("button", name="Gain flat").click()  # the first change here: "before" is the four gains
+        wait_desk(page, 2, lambda e: all(band(e, k)["gain"] == 0 for k in gains), "every band flat")
+        page.wait_for_timeout(500)  # the desk's echoes of that are done
+        menu.click()
+        bar.get_by_role("button", name="Compare with before").click()
+        assert_no_flash(curve_states(page))
+        wait_desk(page, 2, lambda e: all(band(e, k)["gain"] == g for k, g in gains.items()), "the EQ from before")
+        menu.click()
+        bar.get_by_role("button", name="Back to your EQ").click()
+        assert_no_flash(curve_states(page))
+        wait_desk(page, 2, lambda e: all(band(e, k)["gain"] == 0 for k in gains), "back to flat")
+    finally:
+        restore(2, before)

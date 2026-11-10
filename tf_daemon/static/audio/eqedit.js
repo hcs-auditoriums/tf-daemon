@@ -82,6 +82,7 @@ let inflight = false;
 let pending = null;   // {usb, changes: {path: raw}} waiting to go out
 
 function send(usb, changes) {
+  state.eqSettling = true;   // the preview stays until the desk's echoes are done (below)
   if (pending && pending.usb === usb) Object.assign(pending.changes, changes);
   else pending = { usb, changes: { ...changes } };
   if (!inflight) flush();
@@ -98,10 +99,11 @@ function flush() {
     .then((d) => { inflight = false; if (!d.ok) alert(d.error || "The desk didn't take that."); flush(); settled(); });
 }
 
-// After a drag the desk echoes each value the drag sent, in order, for a while after the release:
-// applied as they came, the handle would jump back and creep forward again. So the preview stays
-// until the last write is answered (and its echo has had a moment to arrive), then the desk's
-// newest state is taken once.
+// The desk echoes each value written, one by one, for a while after: applied as they came, the
+// curve would flash back to a half-changed EQ (a drag's handle jump back and creep forward; a
+// whole-EQ change such as Compare or Undo show old and new bands mixed). So after any write the
+// preview stays until the last write is answered (and its echo has had a moment to arrive), then
+// the desk's newest state is taken once. A drag holds it until the release (settle()).
 const SETTLE_MS = 250;
 let settleTimer = null;
 function settle() {
