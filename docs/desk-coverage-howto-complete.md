@@ -228,10 +228,8 @@ when two mono mixes are paired), `StMix:N/Output/Balance`. RCP: `Mix/Fader/{Leve
 `Mono [0,10,0]`, `DCA [0,11,0]`, `FX [0,12,0]`, `InsFX [0,13,0]`, recorder
 `Cue/Recorder/{Record,Playback}/On`. `Volatile/Cue/ActiveCategory` u8 0–9 (which kind of cue is
 active; it read 6 in the capture). The console pushes cue changes to clients: CH15 / CH16 cue
-off arrived as `MVOL [0,1,0] idx [14,0,0]` / `[15,0,0]`, origin 0xA1 [VERIFIED-CAP]. Note: by the
-per-level index rule (1.3) that address would be idx `[0,14,0]` (Cue is level 0); tf-daemon's
-`Dump` and the simulator use `[0,14,0]` and would count a `[14,0,0]` push as rejected. Re-check
-the capture on the desk [PENDING]. Cue setup:
+off arrived as `MVOL [0,1,0] idx [0,14,0]` / `[0,15,0]`, origin 0xA1 [VERIFIED-CAP], as the
+per-level index rule (1.3) predicts. Cue setup:
 `Setup/Cue/Mode` (0 = mix cue, 1 = last cue [INFERRED from the TF manual's two modes]),
 `Setup/Cue/{Input,Output}/{Point,Trim}`. Not on RCP.
 
