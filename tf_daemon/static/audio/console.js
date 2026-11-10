@@ -269,8 +269,10 @@ function updatePanel(ch) {
 }
 
 export function renderPanel() {
-  const panel = $("console-panel"), toggle = $("console-toggle");
-  toggle.hidden = tf5 === null;
+  const panel = $("console-panel"), toggle = $("console-toggle"), btn = $("console-btn");
+  toggle.hidden = btn.hidden = tf5 === null;
+  btn.setAttribute("aria-pressed", String(state.showConsole));
+  btn.title = state.showConsole ? "Hide the console channel" : "Show the console channel";
   panel.hidden = tf5 === null || !state.showConsole;
   if (panel.hidden) return;
 
@@ -501,9 +503,13 @@ export function drawPanelEq() {
 
 new ResizeObserver(() => drawPanelEq()).observe($("console-panel"));
 
-$("show-console").checked = state.showConsole;
-$("show-console").onchange = (e) => {
-  state.showConsole = e.target.checked;
-  save("tf.console", state.showConsole ? 1 : 0);
+// Two controls, one setting: the Show > Console checkbox and the icon on the plot.
+function setShowConsole(on) {
+  state.showConsole = on;
+  $("show-console").checked = on;
+  save("tf.console", on ? 1 : 0);
   renderPanel();
-};
+}
+$("show-console").checked = state.showConsole;
+$("show-console").onchange = (e) => setShowConsole(e.target.checked);
+$("console-btn").onclick = () => setShowConsole(!state.showConsole);

@@ -129,6 +129,24 @@ def test_console_panel_and_eq_from_the_simulated_desk(page):
     page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=4000)
 
 
+def test_console_icon_on_the_plot_toggles_the_sidebar(page):
+    _open(page, "/")
+    btn, panel = page.locator("#console-btn"), page.locator("#console-panel")
+    btn.wait_for(state="visible", timeout=8000)
+    panel.wait_for(state="visible", timeout=8000)
+    box, plot = btn.bounding_box(), page.locator("main").bounding_box()
+    assert box["x"] + box["width"] > plot["x"] + plot["width"] - 40 and box["y"] < plot["y"] + 40  # top right
+    btn.click()
+    panel.wait_for(state="hidden")
+    assert btn.get_attribute("aria-pressed") == "false" and not page.is_checked("#show-console")
+    page.reload()  # remembered
+    btn.wait_for(state="visible", timeout=8000)
+    assert btn.get_attribute("aria-pressed") == "false" and panel.is_hidden()
+    btn.click()
+    panel.wait_for(state="visible")
+    assert btn.get_attribute("aria-pressed") == "true" and page.is_checked("#show-console")
+
+
 def test_rings_from_the_synth_tone_are_listed(page):
     _open(page, "/")  # the synth carries a steady 2.5 kHz tone: the ring detector reports it
     page.wait_for_function("!document.getElementById('ring-alert').hidden", timeout=15000)
