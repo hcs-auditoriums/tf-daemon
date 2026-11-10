@@ -13,7 +13,7 @@ from ..config import TF5Config
 from ..dsp.eq import CURVE_FREQS, eq_curve
 from .editor.client import TFEditorClient
 from .editor.guard import WRITABLE
-from .patch import patch_from, source_label, stereo_inputs
+from .patch import patch_from, source_label
 from .rcp import TF5Client
 
 if TYPE_CHECKING:
@@ -69,10 +69,6 @@ class TF5Module:
             self.eq_client = TFEditorClient(
                 cfg.host, cfg.eq_port, on_change=self._eq_changed, writes=cfg.eq_write, fader_writes=cfg.fader_write
             )
-
-    def bus_inputs(self) -> list[int]:
-        """USB inputs carrying the stereo bus: mixes, not sources (for ring attribution)."""
-        return list(stereo_inputs(self.patch))
 
     def _eq_changed(self) -> None:
         self.eq_version += 1

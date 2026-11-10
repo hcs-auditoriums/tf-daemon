@@ -15,45 +15,19 @@ Routes:
 
 from __future__ import annotations
 
-import contextlib
-from typing import Any
+from flask import Blueprint, jsonify, request
 
-from flask import Blueprint, Flask, jsonify, request
-from flask_sock import ConnectionClosed, Sock
-
+from ..modules import EngineModule
 from .engine import QLXDEngine
 
 
-class QLXDModule:
+class QLXDModule(EngineModule):
     name = "qlxd"
 
-    def __init__(self, engine: QLXDEngine) -> None:
-        self.engine = engine
+    engine: QLXDEngine
 
-    def start(self) -> None:
-        self.engine.start()
-
-    def stop(self) -> None:
-        self.engine.stop()
-
-    def status(self) -> dict[str, Any]:
-        return self.engine.status()
-
-    def register(self, app: Flask, sock: Sock) -> None:
+    def routes(self, bp: Blueprint) -> None:
         engine = self.engine
-        bp = Blueprint("qlxd", __name__, url_prefix="/api/qlxd")
-
-        @app.get("/qlxd")
-        def qlxd_page():
-            return app.send_static_file("qlxd.html")
-
-        @bp.get("/status")
-        def status():
-            return jsonify(engine.status())
-
-        @bp.get("/state")
-        def state():
-            return jsonify(engine.snapshot())
 
         @bp.get("/interfaces")
         def interfaces():
@@ -86,11 +60,3 @@ class QLXDModule:
             if key is not None and not isinstance(key, str):
                 return jsonify({"ok": False, "error": "key must be a string"}), 400
             return jsonify({"ok": True, "removed": engine.forget_known(key)})
-
-        app.register_blueprint(bp)
-
-        @sock.route("/ws/qlxd")
-        def ws_qlxd(ws):
-            # The hub always holds a full state snapshot, so a new client gets it at once.
-            with contextlib.suppress(ConnectionClosed):
-                engine.hub.stream(ws.send)

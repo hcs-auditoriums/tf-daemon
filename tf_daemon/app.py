@@ -91,19 +91,20 @@ def build_modules(cfg: Config) -> list[Module]:
     # In demo mode one simulated TF5 is both the console the TF5 module talks to and
     # the desk the simulated stage hears (its EQ and faders shape the mains).
     sim = SimConsole() if cfg.tf5.active_source == "demo" else None
+    mains = tuple(stereo_inputs(patch_from(cfg.tf5.usb_patch)))  # USB inputs carrying the stereo bus
     audio = AudioEngine(cfg, build_source(cfg, desk=sim))
     qlxd = QLXDEngine(cfg.qlxd) if cfg.qlxd.source != "off" else None
     # The console names the inputs, its faders weight ring attribution, and its
     # stereo bus inputs are mixes rather than sources.
     tf5 = _tf5_module(cfg, sim, on_names=audio.set_console_names, on_gains=audio.set_console_gains)
     if tf5 is not None:
-        audio.set_bus_inputs(tf5.bus_inputs())
+        audio.set_bus_inputs(list(mains))
     modules: list[Module | None] = [
         AudioModule(audio, console=tf5),
         _rf_module(cfg, qlxd),
         QLXDModule(qlxd) if qlxd is not None else None,
         tf5,
-        VocalModule(cfg.vocal, audio, cfg.audio.samplerate, desk=tf5, mains=_mains(cfg)) if cfg.vocal.enabled else None,
+        VocalModule(cfg.vocal, audio, cfg.audio.samplerate, desk=tf5, mains=mains) if cfg.vocal.enabled else None,
     ]
     return [m for m in modules if m is not None]
 
@@ -132,11 +133,6 @@ def _tf5_module(
         cfg.tf5, host=sim.host, port=sim.rcp_port, eq_port=sim.eq_port, eq=True, eq_write=True, fader_write=True
     )
     return TF5Module(demo, on_names, on_gains, simulator=sim)
-
-
-def _mains(cfg: Config) -> tuple[int, ...]:
-    """The inputs carrying the stereo bus (St L / R on the USB patch)."""
-    return tuple(stereo_inputs(patch_from(cfg.tf5.usb_patch)))
 
 
 def receiver_range(qlxd: QLXDEngine | None) -> RangeHint | None:

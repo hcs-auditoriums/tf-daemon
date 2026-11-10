@@ -14,47 +14,22 @@ Routes:
 
 from __future__ import annotations
 
-import contextlib
 from dataclasses import asdict
-from typing import Any
 
-from flask import Blueprint, Flask, jsonify, request
-from flask_sock import ConnectionClosed, Sock
+from flask import Blueprint, jsonify, request
 
+from ..modules import EngineModule
 from .devices import RFDeviceError
 from .engine import RFEngine
 
 
-class RFModule:
+class RFModule(EngineModule):
     name = "rf"
 
-    def __init__(self, engine: RFEngine) -> None:
-        self.engine = engine
+    engine: RFEngine
 
-    def start(self) -> None:
-        self.engine.start()  # auto mode connects and sweeps; otherwise opened via /api/rf/connect
-
-    def stop(self) -> None:
-        self.engine.stop()
-
-    def status(self) -> dict[str, Any]:
-        return self.engine.status()
-
-    def register(self, app: Flask, sock: Sock) -> None:
+    def routes(self, bp: Blueprint) -> None:
         engine = self.engine
-        bp = Blueprint("rf", __name__, url_prefix="/api/rf")
-
-        @app.get("/rf")
-        def rf_page():
-            return app.send_static_file("rf.html")
-
-        @bp.get("/status")
-        def status():
-            return jsonify(engine.status())
-
-        @bp.get("/state")
-        def state():
-            return jsonify(engine.snapshot())
 
         @bp.post("/connect")
         def connect():
@@ -89,11 +64,3 @@ class RFModule:
         def reset_peak():
             engine.reset_peak()
             return jsonify({"ok": True})
-
-        app.register_blueprint(bp)
-
-        @sock.route("/ws/rf")
-        def ws_rf(ws):
-            # The hub always holds a full state snapshot, so a new client gets it at once.
-            with contextlib.suppress(ConnectionClosed):
-                engine.hub.stream(ws.send)
