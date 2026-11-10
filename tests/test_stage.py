@@ -162,3 +162,27 @@ def test_demo_desk_eq_changes_reach_the_simulated_mains():
         assert stage.desk.channel_eq(0)["bands"][1]["gain"] == -9.0
     finally:
         app.extensions["tf_stop"]()
+
+
+class OneOff(Desk):
+    """Channel ``off`` muted, the rest at 0 dB."""
+
+    def __init__(self, off):
+        super().__init__()
+        self.off = off
+
+    def fader_db(self, x):
+        return None if x == self.off else 0.0
+
+
+@pytest.mark.slow  # four short stage runs
+def test_the_ring_lasts_while_an_open_channel_feeds_it():
+    tone_hz = StageSettings(talkers=[], mains=(32, 33), house_mic=None).tone_hz
+    _, on = run(Desk(0.0), 1.3, talkers=(0, 1))
+    _, one_muted = run(OneOff(0), 1.3, talkers=(0, 1))
+    _, all_muted = run(Desk(None), 1.3, talkers=(0, 1))
+    _, cut = run(Desk(0.0, bell(tone_hz, -15.0, 2.0)), 1.3, talkers=(0, 1))
+    ring = lambda x: level_at(x[FS // 2 :, 0], tone_hz)  # noqa: E731  (at mic 0, once it has settled)
+    assert ring(one_muted) == pytest.approx(ring(on), abs=1.0)  # the muted mic still hears it (from mic 1)
+    assert ring(all_muted) < ring(on) - 20  # nothing feeds it: it fades out
+    assert ring(cut) < ring(on) - 6  # cut in the EQ of the channels feeding it

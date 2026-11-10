@@ -12,8 +12,9 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
 - `audio.device`: case-insensitive substring of the capture device name (default `"TF"`).
   `audio.channels` (34) channels are opened (a device with fewer is zero-padded),
   and every one can be picked in the browser: the channel bar under the header shows
-  the inputs in banks of 8 (tap a bank, 1–8, 9–16, …, then a tile with the input's
-  number, name and console colour), with ‹ › to step through them one by one. An input is
+  every input as a tile (number, name and console colour) in a row that scrolls
+  sideways, with a minimap of the whole desk to jump anywhere and ‹ › to step through them
+  one by one. An input is
   analyzed only while someone views it, except the `[[channels]]` ones, which
   are always analyzed.
 - **Unplugged devices don't stop anything.** The server starts without the TF5

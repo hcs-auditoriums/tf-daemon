@@ -4,6 +4,7 @@
 
 import { addCommands } from "../keys.js";
 import { selectInput } from "./controls.js";
+import { tilesInView } from "./minimap.js";
 import { eqCommands } from "./eqbar.js";
 import { $, state } from "./shared.js";
 
@@ -15,13 +16,13 @@ addCommands(() => [
   { title: "Previous channel", keys: ["["], group: "Channel", run: () => $("ch-prev").click() },
   { title: "Next channel", keys: ["]"], group: "Channel", run: () => $("ch-next").click() },
   ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({
-    title: `Tile ${n} of this bank`, keys: [String(n)], group: "Channel", help: false,
+    title: `Tile ${n} of those in view`, keys: [String(n)], group: "Channel", help: false,
     when: () => !!visibleTile(n), run: () => visibleTile(n).click(),
   })),
   ...(state.meta?.channels || []).map((c) => ({
     title: `${c.index + 1} · ${c.label}`, group: "Channel", help: false, run: () => selectInput(c.index),
   })),
-  { title: "A tile of the bank shown", keys: ["1–8"], group: "Channel" },   // the ? list's lines for the above
+  { title: "A tile of those in view", keys: ["1–8"], group: "Channel" },   // the ? list's lines for the above
   { title: "Any input: press / and type its number or name", group: "Channel" },
   ...eqCommands(),
   ...["spectrum", "both", "waterfall"].map((v) => ({
@@ -41,4 +42,4 @@ addCommands(() => [
   { title: "Mic check", group: "Vocal", when: () => shown("mic-check"), run: () => $("mic-check").click() },
 ]);
 
-const visibleTile = (n) => [...$("channels").querySelectorAll(".ch-chip:not([hidden])")][n - 1];
+const visibleTile = (n) => tilesInView()[n - 1];

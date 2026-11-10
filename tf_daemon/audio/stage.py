@@ -12,6 +12,11 @@ and tested without one:
 
 * Talkers: the named vocal inputs take turns (one talks at a time). Each voice
   has its own colour (boomy, nasal, ...) so the analysis has something to find.
+* A steady ring at ``tone_hz`` (``synth.tone_*``), heard by every mic as long as an open
+  channel keeps it going (``tone_fed``; off, it's a steady tone on stage, an instrument): its level follows the open channels' faders and EQ at that
+  frequency (capped at ``tone_db``), so muting or pulling down the channels feeding it, or
+  cutting it in their EQ, makes it fade out, as a real ring would. A muted mic still hears it
+  while another channel sustains it.
 * Each mic hears its talker, stage noise, and the PA after the PA-to-mic delay,
   through a leak path with a couple of resonances. Every 5 ms step the channels
   go through their *current* desk EQ (read from the desk, e.g. the simulated
@@ -90,6 +95,7 @@ class StageSettings:
     noise_db: float = -50.0
     tone_hz: float = 2500.0
     tone_db: float = -15.0
+    tone_fed: bool = True  # the tone is a ring the open channels sustain (False: always there)
     pa_leak_db: float = -18.0  # PA level reaching an open mic, relative to the mains
     pa_distance_m: float = 6.0
     house_distance_m: float = 12.0
@@ -163,6 +169,7 @@ class _Talker:
         self.eq = _Conv(fir_from_db(np.zeros(len(freqs)), EQ_TAPS))
         self.eq_key: Any = object()
         self.gain = 1.0
+        self.tone_eq = 1.0  # the desk EQ's gain at the ring frequency (linear)
         self.noise_pos = 0
 
 
@@ -188,6 +195,7 @@ class StageSource(_PacedSource):
         self._speech_amp, self._noise_amp, self._tone_peak = sim_levels(s.speech_db, s.noise_db, s.tone_db)
         self._tone_w = 2 * np.pi * s.tone_hz / fs
         self._tone_phase = 0.0
+        self._ring: float | None = None  # the ring's level (_ring_level), None until the first block
         self._t = np.arange(1, blocksize + 1, dtype=np.float64)
         self._noise = make_pink_noise(1 << 19, self._rng)
         ranges = [(85.0, 160.0), (160.0, 280.0), (110.0, 200.0)]
@@ -247,6 +255,17 @@ class StageSource(_PacedSource):
                 freqs = np.fft.rfftfreq(EQ_TAPS, 1 / self.samplerate)
                 freqs[0] = freqs[1] / 2
                 t.eq.h = fir_from_db(eq_curve(eq, freqs), EQ_TAPS)
+                t.tone_eq = 10 ** (float(eq_curve(eq, np.array([self.settings.tone_hz]))[0]) / 20)
+
+    def _ring_level(self, n: int) -> np.ndarray:
+        """The steady ring's level over this block (0..1): what the open channels feed it at
+        ``tone_hz``, eased over ~0.3 s so it swells and fades rather than switching."""
+        if not self.settings.tone_fed:
+            return np.ones(n)
+        target = min(1.0, sum(t.gain * t.tone_eq for t in self.talkers))
+        start = target if self._ring is None else self._ring
+        self._ring = start + (target - start) * (1 - math.exp(-n / (0.3 * self.samplerate)))
+        return start + (self._ring - start) * self._t[:n] / n
 
     # ------------------------------------------------------------------ signal
 
@@ -279,7 +298,7 @@ class StageSource(_PacedSource):
         self._update_desk()
         gates = self._turns(n)
         ph = self._tone_phase + self._tone_w * self._t[:n]
-        tone = self._tone_peak * np.sin(ph)
+        tone = self._tone_peak * np.sin(ph) * self._ring_level(n)
         self._tone_phase = float(ph[-1] % (2 * np.pi))
 
         dry = []

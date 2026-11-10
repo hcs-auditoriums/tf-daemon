@@ -59,12 +59,22 @@ def test_channel_tiles_show_the_desk(page):
         "[...document.querySelectorAll('#channels .ch-chip')].some(b => b.style.getPropertyValue('--fader'))",
         timeout=8000,
     )
-    # The selected bank's right edge isn't covered by the next button (they overlap by a pixel).
-    on_top = page.evaluate(
-        """(() => { const b = document.querySelector('#banks [aria-pressed=true]'), r = b.getBoundingClientRect();
-                   return document.elementFromPoint(r.right - 0.5, r.top + r.height / 2) === b; })()"""
+    # Each tile: its fader in dB (or OFF) under the name, and RING / FEEDBACK while a ring comes
+    # from it (the synth's 2.5 kHz rings on Pastor) without hiding the level.
+    page.wait_for_function(
+        "[...document.querySelectorAll('#channels .ch-chip')].some(b => /dB$/.test(b.querySelector('.ch-db').textContent))",
+        timeout=8000,
     )
-    assert on_top
+    pastor = page.locator("#channels .ch-chip", has_text="Pastor")
+    page.wait_for_function(
+        "document.querySelector('#channels .ch-chip[data-input=\"0\"] .ch-ring').textContent === 'RING'", timeout=15000
+    )
+    assert pastor.locator(".ch-db").text_content().endswith("dB")  # the unit is hidden on a narrow tile
+    # The minimap mirrors them: a bar per input, Pastor's in the ring's colour.
+    page.wait_for_function("document.querySelectorAll('#minimap .mm-bar').length >= 34", timeout=3000)
+    page.wait_for_function("document.querySelectorAll('#minimap .mm-bar')[0].dataset.ring === 'ring'", timeout=3000)
+    blink = "e => getComputedStyle(e).animationName"  # it blinks: an orange fader looks the same steady
+    assert page.locator("#minimap .mm-bar").first.evaluate(blink) == "mm-blink"
 
 
 def test_sidebar_tool_row_fits_and_fader_is_centred(page):
@@ -107,12 +117,12 @@ def test_keyboard_shortcuts_and_command_palette(page):
     page.locator(".pal-item", has_text="Snare").wait_for(timeout=2000)
     page.keyboard.press("Enter")
     page.wait_for_function(
-        "document.querySelector('#channels [aria-pressed=true]')?.textContent === 'Snare'", timeout=3000
+        "document.querySelector('#channels [aria-pressed=true] .ch-name')?.textContent === 'Snare'", timeout=3000
     )
     assert page.locator(".pal-back").count() == 0
     page.keyboard.press("]")  # the next channel
     page.wait_for_function(
-        "document.querySelector('#channels [aria-pressed=true]')?.textContent !== 'Snare'", timeout=3000
+        "document.querySelector('#channels [aria-pressed=true] .ch-name')?.textContent !== 'Snare'", timeout=3000
     )
     page.keyboard.press("1")  # the bank's first tile
     page.wait_for_function(

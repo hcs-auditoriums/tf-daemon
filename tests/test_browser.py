@@ -45,7 +45,7 @@ def test_audio_page_connects_names_inputs_and_draws(page):
     open_page(page, "/")
     page.wait_for_function("document.getElementById('conn').textContent.startsWith('live')", timeout=8000)
     page.wait_for_function("document.querySelectorAll('#channels button').length >= 4", timeout=8000)
-    labels = page.locator("#channels button").all_inner_texts()
+    labels = page.locator("#channels .ch-name").all_text_contents()
     assert "Pastor" in labels and "Main L" in labels
     page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=8000)
 
@@ -56,34 +56,54 @@ def test_switching_input_follows_the_buttons(page):
     page.locator("#channels button", has_text="Lead Vox").click()
     page.wait_for_function(
         """[...document.querySelectorAll('#channels button')]
-        .some(b => b.textContent === 'Lead Vox' && b.getAttribute('aria-pressed') === 'true')""",
+        .some(b => b.querySelector('.ch-name')?.textContent === 'Lead Vox' && b.getAttribute('aria-pressed') === 'true')""",
         timeout=4000,
     )
 
 
-def test_channel_bar_banks_of_big_tiles(page):
+IN_VIEW = """(i) => { const row = document.getElementById('channels'), t = row.querySelector(`[data-input="${i}"]`);
+    return t.offsetLeft >= row.scrollLeft - 1 && t.offsetLeft + t.offsetWidth <= row.scrollLeft + row.clientWidth + 1; }"""
+SCROLL = "document.getElementById('channels').scrollLeft"
+
+
+def test_channel_bar_scrolls_with_a_minimap(page):
     page.set_viewport_size({"width": 1024, "height": 768})
     open_page(page, "/")
     page.wait_for_function("document.querySelectorAll('#channels .ch-chip').length >= 34", timeout=8000)
     page.locator("#channels .ch-chip", has_text="Pastor").click()
-    visible = page.locator("#channels .ch-chip:visible")
-    assert visible.count() == 8  # one bank, filling the bar: nothing to scroll
-    assert page.locator("#channels").evaluate("e => e.scrollWidth <= e.clientWidth")
-    for box in [
-        visible.first.bounding_box(),
-        page.locator("#ch-next").bounding_box(),
-        page.locator("#banks button").first.bounding_box(),
-    ]:
+    row = page.locator("#channels")
+    assert row.evaluate("e => e.scrollWidth > e.clientWidth")  # one row of every input, scrolling
+    assert row.evaluate("e => e.offsetHeight - e.clientHeight") == 0  # no scroll bar
+    for box in [page.locator("#channels .ch-chip").first.bounding_box(), page.locator("#ch-next").bounding_box()]:
         assert box["height"] >= 44 and box["width"] >= 44  # finger-sized
-    # Two taps to any input: its bank, then its tile (Main L is input 33, in the last bank).
-    page.locator("#banks button").last.click()
-    page.locator("#channels .ch-chip:visible", has_text="Main L").click()
-    page.wait_for_function("document.querySelector('#channels [aria-pressed=true]').textContent === 'Main L'")
-    # ‹ › step one input, across banks too: back from 33 to 32 shows the 25-32 bank.
+    # No double-tap zoom on a tablet (two quick taps on a tile or a button).
+    assert page.locator("#ch-next").evaluate("e => getComputedStyle(e).touchAction") == "manipulation"
+    # The minimap: its bank numbers stay inside it (the last bank, 33-34, is only two bars wide).
+    mm = page.locator("#minimap").bounding_box()
+    for lab in page.locator("#minimap .mm-label").all():
+        b = lab.bounding_box()
+        assert mm["x"] <= b["x"] and b["x"] + b["width"] <= mm["x"] + mm["width"], lab.text_content()
+    # A press at its right end brings the last inputs into view; its window follows.
+    view0 = page.locator("#minimap .mm-view").bounding_box()["x"]
+    page.mouse.click(mm["x"] + mm["width"] - 4, mm["y"] + mm["height"] / 2)
+    page.wait_for_function(f"({IN_VIEW})(33)", timeout=3000)
+    page.wait_for_function(f"document.querySelector('#minimap .mm-view').getBoundingClientRect().x > {view0 + 20}")
+    page.locator("#channels .ch-chip", has_text="Main L").click()
+    page.wait_for_function("document.querySelector('#channels [aria-pressed=true] .ch-name').textContent === 'Main L'")
+    # A mouse drag on the tiles scrolls them, and selects nothing.
+    box = page.locator("#channels .ch-chip[data-input='30']").bounding_box()
+    before = page.evaluate(SCROLL)
+    page.mouse.move(box["x"] + 20, box["y"] + 20)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 120, box["y"] + 20, steps=5)
+    page.mouse.move(box["x"] + 320, box["y"] + 20, steps=5)
+    page.mouse.up()
+    assert page.evaluate(SCROLL) < before - 200
+    assert page.locator("#channels [aria-pressed=true]").get_attribute("data-input") == "32"
+    # ‹ › step one input and scroll it into view: back from Main L (input 33) to input 32.
     page.click("#ch-prev")
     page.wait_for_function("document.querySelector('#channels [aria-pressed=true]').dataset.input === '31'")
-    assert page.locator("#channels [aria-pressed=true]").is_visible()
-    assert page.locator("#banks [aria-pressed=true]").inner_text() == "25–32"
+    page.wait_for_function(f"({IN_VIEW})(31)", timeout=3000)
     page.click("#ch-next")
     page.wait_for_function("document.querySelector('#channels [aria-pressed=true]').dataset.input === '32'")
     # The console's colours reach the tiles (the demo desk colours its channels).
@@ -242,6 +262,38 @@ def test_ring_list_opens(page):
     page.wait_for_function("!document.querySelector('#ring-list .rl-row')", timeout=2000)
     alert.click()  # the alert unfolds it
     rl.locator(".rl-row").first.wait_for(timeout=2000)
+
+
+def test_a_ring_on_the_mains_goes_to_the_input_feeding_it(page):
+    open_page(page, "/")  # the synth's 2.5 kHz is on Main L / R, fed by Pastor (input 0)
+    page.locator("#ring-alert").wait_for(state="visible", timeout=15000)
+    pressed = "document.querySelector('#channels [aria-pressed=true]')?.dataset.input"
+    main_l = page.locator("#channels [data-input='32']")
+
+    def show_main_l():
+        main_l.click()  # scrolled into view first
+        page.wait_for_function(f"{pressed} === '32'", timeout=3000)
+
+    show_main_l()
+    page.locator("#ring-alert").click()  # where the fader and EQ to fix it are (a mic), not the bus
+    page.wait_for_function(f"['0', '1'].includes({pressed})", timeout=3000)
+    show_main_l()
+    page.locator("#ring-list .rl-freq", has_text="2.5").first.click()  # the row: its strongest source
+    page.wait_for_function(f"{pressed} === '0'", timeout=3000)
+    assert page.evaluate("window.tfRingLabels().some(l => l.text.includes('2.5'))")  # its marker on Pastor
+
+
+def test_a_muted_channel_is_not_blamed_for_a_ring(page):
+    open_page(page, "/")  # the synth's 2.5 kHz: Pastor and Lead Vox both feed it
+    tag = "document.querySelector('#channels [data-input=\"{}\"] .ch-ring').textContent"
+    page.wait_for_function(f"{tag.format(0)} === 'RING' && {tag.format(1)} === 'RING'", timeout=15000)
+    on = "(on) => fetch('/api/tf5/fader/0', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({on, confirm: true})})"  # noqa: E501
+    page.evaluate(on, 0)
+    try:  # its mic still hears the ring (Lead Vox keeps it going), but it can't be feeding it
+        page.wait_for_function(f"{tag.format(0)} === '' && {tag.format(1)} === 'RING'", timeout=5000)
+        assert page.locator("#channels [data-input='0'] .ch-db").text_content() == "OFF"
+    finally:  # leave the shared demo desk as it was
+        page.evaluate(on, 1)
 
 
 def test_top_bar_stays_one_row_on_a_tablet_with_a_ring_alert(page):
