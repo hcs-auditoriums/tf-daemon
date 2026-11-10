@@ -150,16 +150,55 @@ function runSelected(i) {
   if (c) c.run();
 }
 
-// Every word typed must start a word of the command (or its group): "eq un" finds "EQ: Undo",
-// "12" finds "12 · Snare", "sn" finds it too.
-function matches(c, words) {
-  const hay = `${c.group || ""} ${c.title}`.toLowerCase().split(/[^a-z0-9.]+/).filter(Boolean);
-  return words.every((w) => hay.some((h) => h.startsWith(w)));
+// Lazy typing finds things too. Each typed word is matched against the command's words (and
+// its group), best first: the start of a word ("res" -> Reset), inside one, a typo or two
+// (missing, extra, swapped or wrong letters: "snaer", "wterfall"), or the letters in order
+// ("rstrt" -> restart). Every word must match something; better matches list first.
+const words = (text) => text.toLowerCase().split(/[^a-z0-9.]+/).filter(Boolean);
+
+function typos(a, b) {   // edit distance, a swap of neighbours counting as one
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}
+const inOrder = (w, h) => { let i = 0; for (const ch of h) if (ch === w[i]) i++; return i === w.length; };
+
+function wordScore(w, hay) {
+  const allowed = w.length < 3 ? 0 : w.length < 6 ? 1 : 2;
+  let best = 0;
+  for (const h of hay) {
+    if (h.startsWith(w)) return 4;
+    if (h.includes(w)) best = Math.max(best, 3);
+    else if (allowed && Math.min(typos(w, h.slice(0, w.length)), typos(w, h.slice(0, w.length + 1)), typos(w, h)) <= allowed) best = Math.max(best, 2);
+    else if (w.length >= 2 && w[0] === h[0] && inOrder(w, h)) best = Math.max(best, 1);
+  }
+  return best;
 }
 
+// 0: no match; otherwise higher is better.
+function score(c, typed) {
+  const hay = words(`${c.group || ""} ${c.title}`);
+  let total = 0;
+  for (const w of typed) {
+    const s = wordScore(w, hay);
+    if (!s) return 0;
+    total += s;
+  }
+  return total || 1;
+}
+window.tfPaletteFind = (text) => all().filter(runnable)   // for the browser tests: what the palette lists
+  .map((c) => [c, score(c, words(text))]).filter(([, s]) => s).sort((a, b) => b[1] - a[1]).map(([c]) => c.title);
+
 function renderPalette() {
-  const words = pal.input.value.toLowerCase().split(/[^a-z0-9.]+/).filter(Boolean);
-  pal.items = pal.commands.filter((c) => matches(c, words)).slice(0, 200);
+  const typed = words(pal.input.value);
+  pal.items = pal.commands.map((c) => [c, score(c, typed)]).filter(([, sc]) => sc)
+    .sort((a, b) => b[1] - a[1]).map(([c]) => c).slice(0, 200);   // stable: equal scores keep their order
   pal.sel = Math.min(pal.sel, Math.max(0, pal.items.length - 1));
   pal.list.replaceChildren(...pal.items.map((c, i) => {
     const li = el("li", "pal-item");

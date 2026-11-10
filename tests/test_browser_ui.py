@@ -119,6 +119,16 @@ def test_keyboard_shortcuts_and_command_palette(page):
     page.keyboard.press("e")
     assert page.is_checked("#show-eq") != was
     page.keyboard.press("e")
+    # Lazy typing: swapped / missing letters, abbreviations; the best match first.
+    for typed, top in [
+        ("snaer", "7 · Snare"),
+        ("wterfall", "Layout: Waterfall"),
+        ("rstrt srv", "Restart server…"),
+        ("peak rset", "Reset peak hold"),
+    ]:
+        found = page.evaluate("(t) => window.tfPaletteFind(t)", typed)
+        assert found and found[0] == top, (typed, found[:3])
+    assert page.evaluate("window.tfPaletteFind('zzzq')") == []
     titles = [c["title"] for c in page.evaluate("window.tfCommands()")]
     assert {"Restart server…", "Update now…", "Go to RF", "Layout: Waterfall"} <= set(titles)
     page.keyboard.press("?")  # every command by group, with its keys

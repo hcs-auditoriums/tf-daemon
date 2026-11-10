@@ -20,7 +20,7 @@ Press **/** (or **Ctrl+K**) on any page.
 
 | Key | In the palette |
 |---|---|
-| type | filter: every word must start a word of the command, so `eq un` finds *EQ · Undo*, `12` or `sn` finds *12 · Snare* |
+| type | filter, best match first: the start of a word (`eq un` finds *EQ · Undo*, `12` or `sn` finds *12 · Snare*), and lazy typing too: typos (`snaer`, `wterfall`) and letters left out (`rstrt srv` finds *Restart server…*) |
 | **Tab** / **Shift+Tab** | next / previous command (also **↓** / **↑**, **Ctrl+N** / **Ctrl+P**) |
 | **Enter** | run the highlighted command (or click one) |
 | **Esc** | close (or click outside it) |
