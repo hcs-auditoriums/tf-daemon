@@ -24,8 +24,8 @@ buffer_seconds = 2.0
 fft_size = 32768            # ~1.46 Hz bins at 48 kHz
 hop = 2400                  # ~20 updates/sec
 average_tau = 3.0           # exponential averaging time constant, seconds
-display_fmin = 50.0
-display_fmax = 16000.0
+display_fmin = 20.0
+display_fmax = 20000.0
 display_bands_per_octave = 48
 db_floor = -140.0
 

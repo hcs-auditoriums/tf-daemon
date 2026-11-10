@@ -156,8 +156,8 @@ class DspConfig(Section):
     fft_size: int = 32768  # ~1.46 Hz bins at 48 kHz
     hop: int = 2400  # ~20 updates/s
     average_tau: float = 3.0
-    display_fmin: float = 50.0
-    display_fmax: float = 16000.0
+    display_fmin: float = 20.0  # the TF5's EQ graph spans 20 Hz - 20 kHz; so does the plot
+    display_fmax: float = 20000.0
     display_bands_per_octave: int = 48
     db_floor: float = -140.0
 

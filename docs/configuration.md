@@ -52,18 +52,17 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   labels (an explicit `[[channels]]` label still wins). The audio page also shows
   a **Console** sidebar (toggle with the icon at the top right of the plot or in the
   **View** menu; stacks under the spectrum on narrow screens) for the shown input: a
-  skinny channel strip laid out like TF StageMix's, top to bottom EQ, pan, sends, ON,
+  skinny channel strip laid out like TF StageMix's, top to bottom its tool row (IN, EQ, GATE,
+  COMP, SEND), EQ, pan, ON,
   the fader with its level, and the name in the channel's colour at the foot. It fits
-  a tablet screen without scrolling and its controls are finger-sized. The sends are
-  the channel's sends to the mixes (by mix name; stereo pairs
-  shown once), FX 1/2 and mono. Only active sends are listed unless **all** is
-  ticked. With `tf5.fader_write` on, an input channel's **ON** button and **fader** work
+  a tablet screen without scrolling and its controls are finger-sized. The sends are on the
+  SEND tab of the tool row's panel. With `tf5.fader_write` on, an input channel's **ON** button and **fader** work
   from the page: click ON to switch the channel, drag the fader (it moves with the
   pointer from where it is, never jumps to it; Shift for fine) or use the arrow keys
   (1 dB, Shift 0.1 dB). Each change is sent to the desk at once (`PUT /api/tf5/fader/<usb>`
   with `"confirm": true`); moving a fader of a mic that is being rung out hands the
-  ring-out back to you. Stereo bus, mixes and sends stay read-only.
-  ticked. On connect the console's parameter list (`prminfo`) is read, and any
+  ring-out back to you. On a real desk the stereo bus, mixes and sends stay read-only
+  (in demo mode a send can be set on the simulated desk). On connect the console's parameter list (`prminfo`) is read, and any
   input-channel gain / EQ / HPF / dynamics parameters it offers are shown too. A
   TF5 lists none of those (checked on the desk at tf5-daemon); its EQ comes from
   `eq` below instead. Desk changes and scene recalls update live: the desk pushes

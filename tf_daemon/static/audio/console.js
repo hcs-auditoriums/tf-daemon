@@ -3,17 +3,16 @@
 import { eqAt, eqAvailable, eqHalf } from "./eq.js";
 import { paintChannelColors } from "./controls.js";
 import { profileBar } from "./profiles.js";
-import { openStrip } from "./strip.js";
+import { paintTools, stripTools } from "./strip.js";
 import { $, C, el, loadInt, save, state } from "./shared.js";
 
 // Sidebar with the TF5 channel feeding the shown input: name, on, fader,
-// pan and its sends. With tf5.fader_write, an input channel's ON button and
+// pan (the sends are in strip.js). With tf5.fader_write, an input channel's ON button and
 // fader work: a click / drag here sets them on the desk (PUT /api/tf5/fader). The desk's state arrives over /ws/audio: a snapshot on
 // connect ("tf5"), then each change as it happens on the desk ("tf5-changes");
 // nothing arrives when tf5.host isn't set, and the sidebar stays hidden.
 let tf5 = null;   // null = no TF5 module; {connected, channels, mixes} otherwise
 state.showConsole = loadInt("tf.console", 1) === 1;
-state.allSends = loadInt("tf.allSends", 0) === 1;
 
 export function onConsoleSnapshot(msg) {
   tf5 = msg;
@@ -87,22 +86,6 @@ const fmtPan = (v) => (v === 0 ? "C" : v < 0 ? `L${-v}` : `R${v}`);
 
 
 
-// Sends to the mixes (consecutive mixes with the same name are a stereo pair
-// and shown once), the two FX and mono.
-function sendRows(p, mixes) {
-  const rows = [];
-  const lv = p["ToMix/Level"]?.value || [], on = p["ToMix/On"]?.value || [];
-  for (let m = 0; m < lv.length; m++) {
-    const name = mixes[m] || `Mix ${m + 1}`;
-    const pair = m + 1 < lv.length && mixes[m] && mixes[m + 1] === mixes[m];
-    rows.push({ name, db: lv[m], on: on[m] !== 0 });
-    if (pair) m++;
-  }
-  const fl = p["ToFx/Level"]?.value || [], fo = p["ToFx/On"]?.value || [];
-  fl.forEach((db, i) => rows.push({ name: `FX ${i + 1}`, db, on: fo[i] !== 0 }));
-  if (p["ToMono/Level"]) rows.push({ name: "Mono", db: p["ToMono/Level"].value, on: p["ToMono/On"]?.value !== 0 });
-  return rows;
-}
 
 // A short fader (a tablet) has no room for every label: keep those at least a line apart,
 // the most useful first, and hide the rest (their ticks stay).
@@ -251,10 +234,9 @@ export function rebuildPanel() {
 
 function panelStructure(ch) {
   if (!tf5.connected || !ch || !ch.source) return JSON.stringify([state.input, tf5.connected, ch && ch.source]);
-  const p = ch.params, rows = p["ToMix/Level"] ? sendRows(p, tf5.mixes || []) : [];
-  const shown = (state.allSends ? rows : rows.filter((r) => r.on && r.db !== null)).map((r) => r.name);
+  const p = ch.params;
   return JSON.stringify([state.input, ch.source, !!eqAvailable, faderWritable(), p["Label/Name"]?.value, p["Label/Color"]?.value,
-                         !!p["ToStereo/Pan"], !!p["Out/Balance"], !!p["ToMix/Level"], state.allSends, shown,
+                         !!p["ToStereo/Pan"], !!p["Out/Balance"],
                          Object.keys(p).sort()]);
 }
 
@@ -278,15 +260,6 @@ function updatePanel(ch) {
     refs.panVal.textContent = fmtPan(pan);
     refs.panDot.style.left = `${(pan + 63) / 126 * 100}%`;
   }
-  if (refs.sends.size) {
-    for (const r of sendRows(p, tf5.mixes || [])) {
-      const s = refs.sends.get(r.name);
-      if (!s) continue;
-      s.row.className = `cp-send${r.on && r.db !== null ? "" : " off"}`;
-      s.fill.style.width = `${faderPos(r.db) * 100}%`;
-      s.val.textContent = r.on ? fmtDb(r.db) : "off";
-    }
-  }
   for (const [k, dd] of refs.extra) {
     const x = p[k];
     if (x) dd.textContent = `${x.value ?? "−∞"}${x.unit ? " " + x.unit : ""}`;
@@ -308,7 +281,7 @@ export function renderPanel() {
     return;
   }
   panelSig = sig;
-  refs = { sends: new Map(), extra: new Map() };
+  refs = { extra: new Map() };
   const items = [];
   if (!tf5.connected) {
     items.push(el("p", "cp-note", "TF5 not connected"));
@@ -316,13 +289,11 @@ export function renderPanel() {
     items.push(el("p", "cp-note", `USB ${state.input + 1} is not on the console patch (tf5.usb_patch)`));
   } else {
     const p = ch.params, v = (k) => p[k]?.value;
-    // A channel strip like TF StageMix's, top to bottom: EQ, pan, sends, ON, fader, and the
-    // name in the channel's colour at the foot (the desk's scribble strip).
-    // The name at the foot opens the channel's gain / gate / comp / sends (strip.js).
-    const head = el("button", "cp-head");
-    head.type = "button";
-    head.title = "Gain, gate, comp and sends";
-    head.onclick = () => openStrip("input");
+    // A channel strip like TF StageMix's, top to bottom: its tool row (IN, EQ, GATE, COMP,
+    // SEND: strip.js; the sends are on its Sends tab), EQ, pan, ON, fader, and the name in the channel's colour at
+    // the foot (the desk's scribble strip).
+    items.push(stripTools());
+    const head = el("div", "cp-head");
     head.style.setProperty("--ch", TF_COLORS[String(v("Label/Color") || "").toLowerCase()] || "var(--border)");
     head.append(el("span", "cp-name", v("Label/Name") || ch.source), el("span", "cp-src", `${ch.source} · USB ${ch.index + 1}`));
 
@@ -347,8 +318,7 @@ export function renderPanel() {
     // EQ (only with tf5.eq): the console's curve for this channel as a thumbnail, redrawn
     // whenever the desk pushes a change. A tap shows / hides it on the spectrum, full size.
     if (eqAvailable) {
-      const [eqSec, eqVal] = section("EQ");
-      refs.eqVal = eqVal;
+      const eqSec = el("div", "cp-section");
       refs.eqCanvas = el("canvas", "cp-eq");
       refs.eqCanvas.setAttribute("role", "button");
       refs.eqCanvas.setAttribute("aria-label", "Show the EQ on the spectrum");
@@ -359,12 +329,13 @@ export function renderPanel() {
       refs.eqInfo = el("div", "cp-eqinfo");
       const prof = el("details", "cp-profmenu");
       prof.append(el("summary", "", "Profiles"), profileBar());
-      eqSec.firstChild.append(prof);  // in the EQ heading, opening over the strip
-      eqSec.append(refs.eqCanvas, refs.eqInfo);
+      const info = el("div", "cp-eqrow");
+      info.append(refs.eqInfo, prof);  // its summary, and Profiles opening over the strip
+      eqSec.append(refs.eqCanvas, info);
       items.push(eqSec);
     }
 
-    const sendsAndPan = [];
+    const panRow = [];
 
     // Fader: heading with the level, then a tall fader (scale, track, cap).
     const [faderSec, levelEl] = section("Fader");
@@ -411,39 +382,10 @@ export function renderPanel() {
       const panVal = el("span", "cp-value");
       Object.assign(refs, { panKey, panVal, panDot: dot });
       panSec.append(el("span", "cp-label", panKey === "Out/Balance" ? "Bal" : "Pan"), bar, panVal);
-      sendsAndPan.push(panSec);
+      panRow.push(panSec);
     }
 
-    // Sends: by default only those that are on and above -inf.
-    if (p["ToMix/Level"]) {
-      const rows = sendRows(p, tf5.mixes || []);
-      const shown = state.allSends ? rows : rows.filter((r) => r.on && r.db !== null);
-      const sends = el("div", "cp-sends");
-      const hdr = el("div", "cp-sendhdr");
-      const lbl = el("label");
-      const cb = el("input"); cb.type = "checkbox"; cb.checked = state.allSends;
-      cb.onchange = () => { state.allSends = cb.checked; save("tf.allSends", cb.checked ? 1 : 0); panelSig = null; renderPanel(); };
-      lbl.append(cb, " all");
-      const title = el("button", "cp-sendtitle", "Sends");
-      title.type = "button";
-      title.title = "Edit the sends";
-      title.onclick = () => openStrip("sends");
-      hdr.append(title, lbl);
-      sends.append(hdr);
-      if (!shown.length) sends.append(el("p", "cp-note", "No active sends"));
-      for (const r of shown) {
-        const row = el("div", "cp-send");
-        const bar = el("div", "cp-sendbar");
-        const f = el("span");
-        bar.append(f);
-        const val = el("span", "cp-sendval");
-        row.append(el("span", "cp-sendname", r.name), bar, val);
-        refs.sends.set(r.name, { row, fill: f, val });
-        sends.append(row);
-      }
-      sendsAndPan.push(sends);
-    }
-    items.push(...sendsAndPan, refs.on, faderSec);
+    items.push(...panRow, refs.on, faderSec);
     // Anything else the console offers (gain, EQ, ... if its firmware lists them).
     const known = new Set(["Label/Name", "Label/Color", "Fader/Level", "Fader/On", "ToStereo/Pan", "Out/Balance",
                            "ToMix/Level", "ToMix/On", "ToFx/Level", "ToFx/On", "ToMono/Level", "ToMono/On"]);
@@ -477,8 +419,7 @@ export function drawPanelEq() {
   if (!cv || !cv.isConnected) return;
   const d = state.eq && state.eq.index === state.input ? state.eq : null;
   const eq = d && d.eq;
-  refs.eqVal.textContent = !d ? "…" : !eq ? "—" : !eq.on ? "OFF" : eq.one_knob ? "1-knob" : "ON";
-  refs.eqVal.className = `cp-value${eq && !eq.on ? " cp-off" : ""}`;
+  paintTools();   // the EQ tool's light
   refs.eqInfo.textContent = !d ? "Reading console…" : !eq ? (d.source ? `No EQ for ${d.source}` : "Not on the console patch") :
     [eq.hpf && eq.hpf.on ? `HPF ${fmtF0(eq.hpf.freq)}` : "HPF off",
      ...eq.bands.filter((b) => b.label === "L" || b.label === "H")

@@ -92,7 +92,7 @@ Data flow:
    viewing), and runs one analyzer per input: Blackman-Harris window →
    `rfft` → power → exponential average + peak hold + this hop's power as the
    real-time trace (full FFT resolution) →
-   max-reduce into 1/48-octave display bins (50 Hz–16 kHz, 400 bins) → dBFS.
+   max-reduce into 1/48-octave display bins (20 Hz–20 kHz as on the TF5, 479 bins) → dBFS.
    All buffers are preallocated.
 3. The frame is encoded as int16 centi-dB and published to a `FrameHub` that
    keeps only the latest frame.

@@ -1,6 +1,7 @@
 // A channel's gain, gate, compressor and sends, as on TF StageMix's INPUT / GATE / COMP / SEND
 // TO screens: one panel over the plot with a tab per screen (openStrip), opened from the
-// console sidebar (its channel name, its Sends heading) without adding to the sidebar. Data and writes: /api/tf5/strip/<usb> (console/strip.py).
+// tool row at the top of the console sidebar (stripTools: IN, EQ, GATE, COMP, SEND, each lit
+// when that part is on, as StageMix's tool buttons; EQ shows the EQ on the spectrum). Data and writes: /api/tf5/strip/<usb> (console/strip.py).
 // What the desk doesn't give yet is simulated in demo mode, marked so, and on a real desk
 // shown as not available (docs/desk-coverage.md).
 
@@ -28,10 +29,10 @@ async function load() {
       else if (r.status === 404) data = null;
     } catch { /* server restarting: try again */ } finally { loading = false; }
   }
-  if (!panel.hidden) timer = setTimeout(load, 1000);   // while it's open: changes made at the desk show
+  timer = setTimeout(load, panel.hidden ? 4000 : 1000);   // changes made at the desk show (the tools' lights)
 }
 // Another input shown: its strip at once.
-export function stripInputChanged() { data = null; render(); if (!panel.hidden) load(); }
+export function stripInputChanged() { data = null; render(); load(); }
 
 // Writes: one in flight per section, the latest values merged into the next.
 const queue = new Map();   // "section|mix" -> changes
@@ -181,9 +182,10 @@ export function openStrip(which) {
   render();
   load();
 }
-function close() { panel.hidden = true; clearTimeout(timer); }
+function close() { panel.hidden = true; paintTools(); }
 
 function render() {
+  paintTools();
   if (panel.hidden) return;
   const sec = data && data[tab];
   const sig = JSON.stringify([state.input, tab, !!data, sec && sec.available, sec && sec.writable,
@@ -217,6 +219,7 @@ function render() {
 
 // Values into the controls already built (none rebuilt under a finger).
 function update() {
+  paintTools();
   if (!data || panel.hidden) return;
   for (const [k, c] of refs) {
     const [section, a, b] = k.split(".");
@@ -227,3 +230,38 @@ function update() {
 }
 
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) close(); });
+
+// ------------------------------------------------------------------ the sidebar's tool row
+
+// IN · EQ · GATE · COMP · SEND, as StageMix's tool buttons: a dot lights when that part is on
+// (+48V for IN); the one whose tab is open (or EQ, when it's on the spectrum) is outlined.
+const tools = el("div", "cp-tools");
+tools.setAttribute("role", "toolbar");
+tools.setAttribute("aria-label", "Channel settings");
+const TOOLS = [["input", "IN", "Gain, +48V, phase"], ["eq", "EQ", "Show the EQ on the spectrum"],
+               ["gate", "GATE", "Gate"], ["comp", "COMP", "Compressor"], ["sends", "SEND", "Sends to the mixes"]];
+const toolBtn = new Map(TOOLS.map(([k, label, title]) => {
+  const b = el("button", "cp-tool", label);
+  b.type = "button";
+  b.title = title;
+  b.onclick = () => {
+    if (k === "eq") { const cb = $("show-eq"); cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); paintTools(); }
+    else if (!panel.hidden && tab === k) close();
+    else openStrip(k);
+  };
+  tools.append(b);
+  return [k, b];
+}));
+export function stripTools() { paintTools(); return tools; }
+export function paintTools() {
+  const eq = state.eq && state.eq.index === state.input && state.eq.eq;
+  for (const [k, b] of toolBtn) {
+    const sec = data && k !== "eq" ? data[k] : null;
+    const lit = k === "eq" ? !!(eq && eq.on)
+      : sec && sec.available && (k === "input" ? sec.values.phantom : k === "sends" ? sec.mixes.some((m) => m.on && m.level !== null) : sec.values.on);
+    b.classList.toggle("lit", !!lit);
+    b.classList.toggle("p48", k === "input" && !!lit);
+    b.setAttribute("aria-pressed", String(k === "eq" ? !!state.showEq : !panel.hidden && tab === k));
+    b.hidden = k === "eq" && !eq && !(state.eq && state.eq.index === state.input);
+  }
+}

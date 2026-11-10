@@ -1,6 +1,6 @@
 """A channel's gain / gate / comp / sends panel (audio/strip.js) in a real (headless) browser,
-against the demo server: opened from the sidebar's name and Sends heading (the sidebar gains
-nothing), each tab changes what it shows. Uses its own input and puts it back.
+against the demo server: opened from the sidebar's tool row (IN, EQ, GATE, COMP, SEND, lit when
+that part is on), each tab changes what it shows. Uses its own input and puts it back.
 Fixtures in conftest.py, like tests/test_browser.py.
 """
 
@@ -51,8 +51,10 @@ def test_strip_panel_tabs_change_the_channel(page):
         page.wait_for_function("document.querySelectorAll('#channels button').length >= 1", timeout=8000)
         page.locator("#channels button", has_text="BGV 2").click()
         side = page.locator("#console-panel")
-        side.locator(".cp-head").wait_for(timeout=8000)
-        side.locator(".cp-head").click()  # the name at the foot opens it
+        tools = side.get_by_role("toolbar", name="Channel settings")
+        tools.wait_for(timeout=8000)
+        assert tools.locator("button").all_inner_texts() == ["IN", "EQ", "GATE", "COMP", "SEND"]
+        tools.get_by_role("button", name="IN").click()
         panel = page.locator("#strip-panel")
         panel.get_by_role("tab", name="Input").wait_for(timeout=4000)
         assert panel.get_by_role("tab", name="Input").get_attribute("aria-selected") == "true"
@@ -62,6 +64,10 @@ def test_strip_panel_tabs_change_the_channel(page):
         gate_on = before["gate"]["values"]["on"]
         panel.get_by_role("button", name="GATE").click()
         wait_strip(page, lambda d: d["gate"]["values"]["on"] != gate_on, "the gate switched")
+        page.wait_for_function(  # the GATE tool's light follows
+            f"document.querySelector('#console-panel .cp-tools button:nth-child(3)').classList.contains('lit') === {str(not gate_on).lower()}",
+            timeout=6000,
+        )
 
         panel.get_by_role("tab", name="Comp").click()
         panel.locator(".dyn-graph").wait_for(timeout=2000)
@@ -70,7 +76,7 @@ def test_strip_panel_tabs_change_the_channel(page):
 
         page.keyboard.press("Escape")
         panel.wait_for(state="hidden", timeout=2000)
-        side.get_by_role("button", name="Sends").click()  # the Sends heading opens that tab
+        tools.get_by_role("button", name="SEND").click()
         assert panel.get_by_role("tab", name="Sends").get_attribute("aria-selected") == "true"
         level = panel.get_by_label(f"{send['name']} level")
         level.evaluate("(e) => { e.value = '500'; e.dispatchEvent(new Event('input', {bubbles: true})); }")

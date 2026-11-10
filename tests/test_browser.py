@@ -213,10 +213,6 @@ def test_every_view_control_works_without_errors(page):
     page.check("#show-console")
     page.locator("#console-panel").wait_for(state="visible", timeout=2000)
     page.click("#view-menu summary")  # close the menu: it opens over the sidebar
-    all_sends = page.locator("#console-panel .cp-sendhdr input[type=checkbox]")
-    all_sends.wait_for(timeout=4000)
-    all_sends.check()
-    page.locator("#console-panel .cp-sendhdr input[type=checkbox]").uncheck()
     page.locator("#channels [data-input='5']").click()  # an unlisted input: analyzed while viewed
     page.wait_for_function(
         "document.querySelector('#channels [data-input=\"5\"]').getAttribute('aria-pressed') === 'true'", timeout=3000

@@ -140,7 +140,16 @@ FEATURES: list[Feature] = [
         "edit",
         "Simulated by the app; stereo pairs",
     ),
-    Feature("fx_sends", "Sends to FX 1/2 and mono", "Send to", "RCP", "no", "yes", "view"),
+    Feature(
+        "fx_sends",
+        "Sends to FX 1/2 and mono",
+        "Send to",
+        "RCP",
+        "no",
+        "yes",
+        "no",
+        "Read but not shown since the sidebar's sends moved to the SEND tab (AUX mixes only)",
+    ),
     # ---------------------------------------------------------------- input
     Feature(
         "input_gain",

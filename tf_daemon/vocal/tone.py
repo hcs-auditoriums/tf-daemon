@@ -82,7 +82,7 @@ ANSI_NORMAL = np.array(
 )
 
 POINTS = 160.0 * 2.0 ** (np.arange(34) / 6)  # 1/6-octave analysis points, 160 Hz .. 7.2 kHz
-CURVE = np.geomspace(40.0, 16000.0, 121)  # for plotting the suggested EQ
+CURVE = np.geomspace(20.0, 20000.0, 121)  # for plotting the suggested EQ
 NORM_LO, NORM_HI = 200.0, 6300.0
 
 # (low, high, name) where a cut / boost sits; first match wins.

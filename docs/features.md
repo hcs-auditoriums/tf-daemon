@@ -17,8 +17,9 @@ double-tap a handle to put its gain back to 0 dB, or click it for its settings (
 bell / shelf, and LPF on the high band; values to type; locks). The toolbar at the top
 left switches the EQ and HPF on and off, undoes and redoes, and compares (A/B) with a
 copied EQ; its menu has Gain flat, Copy, Paste and Compare with before. Every value is
-held to the TF5's ranges. Tap the channel's name at the foot of the console sidebar
-(or its **Sends** heading) for its **Input**, **Gate**, **Comp** and **Sends**: gain,
+held to the TF5's ranges. The console sidebar's tool row (**IN · EQ · GATE · COMP · SEND**, as
+StageMix's; each lit when that part is on, IN red with +48V) opens the channel's
+**Input**, **Gate**, **Comp** and **Sends** in one panel (**EQ** shows the EQ on the spectrum): gain,
 +48V (asks first), phase; the gate's and compressor's curves with a draggable threshold
 (and ratio); each AUX send's level, ON, pre and pan. Which of these the real desk
 can be read and written for yet, and which are only simulated in demo mode, is in

@@ -312,7 +312,7 @@ main.page {
 .workspace { flex: 1; display: flex; min-height: 0; min-width: 0; }
 .workspace > main { flex: 1; min-width: 0; }
 .console-panel {
-  width: 184px; flex: none; overflow-y: auto; position: relative;
+  width: 188px; flex: none; overflow-y: auto; position: relative;
   padding: 10px; display: flex; flex-direction: column; gap: 10px;
   background: var(--panel); border-left: 1px solid var(--border);
   font-size: 12px; font-variant-numeric: tabular-nums;
@@ -320,11 +320,24 @@ main.page {
 .console-panel[hidden] { display: none; }
 .cp-note { color: var(--muted); margin: 0; }
 /* The name at the foot of the strip, in the channel's colour (StageMix / the desk's scribble strip). */
-.cp-head { padding: 6px 8px; border-radius: 6px; border: 0; border-top: 5px solid var(--ch); background: var(--bg); text-align: center;
-           font: inherit; color: inherit; width: 100%; cursor: pointer; }
+.cp-head { padding: 6px 8px; border-radius: 6px; border-top: 5px solid var(--ch); background: var(--bg); text-align: center; }
 .cp-head > span { display: block; }
-.cp-head:hover, .cp-head:focus-visible { background: #1e242c; outline: none; }
-.cp-head .cp-name::after, .cp-sendtitle::after { content: " ›"; color: var(--muted); font-weight: 400; }
+/* The tool row at the top of the strip (audio/strip.js): IN, EQ, GATE, COMP, SEND, as StageMix. */
+.cp-tools { display: flex; gap: 2px; }
+.cp-tool {
+  flex: 1 1 0; min-width: 0; min-height: 32px; padding: 0; font: inherit; font-size: 10px; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--muted); background: #1e242c; border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+  position: relative;
+}
+.cp-tool[hidden] { display: none; }
+.cp-tool:hover { color: var(--text); }
+.cp-tool.lit { color: var(--ok); }
+.cp-tool.lit.p48 { color: var(--bad); }
+.cp-tool[aria-pressed="true"] { border-color: var(--avg); color: var(--text); background: #24435c; }
+.cp-tool.lit[aria-pressed="true"]::after { content: ""; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--ok); }
+.cp-tool.p48[aria-pressed="true"]::after { background: var(--bad); }
+.cp-eqrow { display: flex; align-items: center; gap: 6px; }
+.cp-eqrow .cp-eqinfo { flex: 1; min-width: 0; }
 .cp-name { font-size: 15px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-src { color: var(--muted); font-size: 11px; }
 .cp-on {
@@ -380,26 +393,11 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
   transform: translate(-50%, -50%); background: var(--avg); box-shadow: 0 0 0 2px var(--panel);
 }
 
-.cp-sends { display: flex; flex-direction: column; gap: 5px; flex: 0 1 auto; min-height: 64px; overflow-y: auto; }
-.cp-sendhdr { position: sticky; top: 0; background: var(--panel); }
-.cp-sendhdr { display: flex; justify-content: space-between; align-items: center; }
-.cp-sendtitle { margin: 0; padding: 0; border: 0; background: none; cursor: pointer; min-height: 32px;
-                font: inherit; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
-.cp-sendtitle:hover { color: var(--text); }
-.cp-sendhdr label { display: flex; align-items: center; gap: 4px; color: var(--muted); min-height: 32px; padding-left: 8px; }
-.cp-send { display: grid; grid-template-columns: 1fr 38px; grid-template-rows: auto 4px; column-gap: 6px; align-items: center; }
-.cp-send .cp-sendbar { grid-column: 1 / -1; grid-row: 2; height: 4px; }
-.cp-send.off { opacity: 0.45; }
-.cp-sendname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cp-sendbar { height: 6px; border-radius: 3px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
-.cp-sendbar span { display: block; height: 100%; background: var(--peak); }
-.cp-sendval { text-align: right; color: var(--text); }
 /* Smooth the steps between desk updates (a moving fader sends many small changes). */
 .cp-cap { transition: bottom 90ms linear; }
 .cp-fill { transition: height 90ms linear; }
 .cp-pan span { transition: left 90ms linear; }
-.cp-sendbar span { transition: width 90ms linear; }
-@media (prefers-reduced-motion: reduce) { .cp-cap, .cp-fill, .cp-pan span, .cp-sendbar span { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .cp-cap, .cp-fill, .cp-pan span { transition: none; } }
 .cp-extra { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
 .cp-extra dt { color: var(--muted); }
 .cp-extra dd { margin: 0; text-align: right; }

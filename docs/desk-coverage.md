@@ -37,7 +37,7 @@ The table is generated from `tf_daemon/console/coverage.py` (also served at
 | Sends to AUX mixes: level, ON | Send to, Sends on fader | RCP | no | yes | edit | ToMix/Level, ToMix/On for 20 mixes; edited on the simulated desk only (no RCP / Editor write yet) |
 | Send pre / post fader | Send to, Sends on fader | no | no | app | edit | Simulated by the app |
 | Send pan (stereo AUX) | Send to, Sends on fader | no | no | app | edit | Simulated by the app; stereo pairs |
-| Sends to FX 1/2 and mono | Send to | RCP | no | yes | view |  |
+| Sends to FX 1/2 and mono | Send to | RCP | no | yes | no | Read but not shown since the sidebar's sends moved to the SEND tab (AUX mixes only) |
 | Head-amp gain, +48V, phase, digital gain | Input | no | no | app | edit | Simulated by the app until the Editor dump's Input names are recorded; ranges in console/strip.py SPECS: Yamaha's shared ones, to confirm on the TF5 |
 | Input source (INPUT / USB / SLOT), stereo link | Input | Editor | no | yes | view | Patch/Port, used for the USB patch |
 | Input PEQ: on, 4 bands type / freq / gain / Q, LPF on | EQ | Editor | Editor (tf5.eq_write) | yes | edit | Ranges: guard.WRITE_LIMITS |
