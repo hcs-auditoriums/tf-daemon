@@ -49,12 +49,15 @@ tf_daemon/
     module.py      TF5Module: /api/tf5/* routes, console data for the audio page
     sim.py         simulated TF5 (demo mode, tests): sim_rcp.py + sim_editor.py as one desk
     sim_rcp.py     its RCP side
-    sim_editor.py  its TF Editor side, with synthetic parameter dumps
-    editor/        the EQ over the TF Editor protocol (TCP 50368)
+    sim_editor.py  its TF Editor side: all 10 functions, set-param echo, scene recall
+    sim_tree.py    its parameter data: dumps from the real V4.55 tree, demo values
+    editor/        the TF Editor protocol (TCP 50368): EQ and the rest of the desk
       codec.py     wire format: elements, messages, frames
-      guard.py     what may be sent: read-only unless a person asked for a write
-      dump.py      the console's parameter tree and data image; a channel's EQ
-      client.py    TFEditorClient: session, sync, keepalive, confirmed writes
+      guard.py     what may be sent: read-only unless a person asked for a write;
+                   the write families and their config switches
+      tree.py      the TF5's V4.55 parameter tree (tf5_v455.json): tags, MD5s, schema
+      dump.py      a function's parameter tree and data image (MMSXLIT); a channel's EQ
+      client.py    TFEditorClient: session, sync of every function, keepalive, confirmed writes
       __main__.py  read-only probe CLI
   rf/              ── the RF (tinySA) module ──
     devices.py     TinySADevice (tsapython, USB serial), SimTinySA

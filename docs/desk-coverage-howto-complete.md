@@ -56,8 +56,9 @@ is [PENDING] (try `mtrnum` / `mtrinfo 0` with `nc <desk> 49280`).
 ### 1.2 The Editor protocol's functions on a TF5 V4.55 [VERIFIED-CAP]
 
 Each function is its own channel (4-character frame tag) with its own subscribe, dump and
-set-params. tf-daemon subscribes to `Property` and `Mixing` only (`codec.TAGS`); controlling
-anything in another function means subscribing to it the same way first.
+set-params. tf-daemon subscribes `Property` (handshake; dropped unparsed) and `Mixing`, then the
+others in `tf5.functions` one at a time (default: all ten). Tags, MD5s and the tree come from
+`console/editor/tree.py` (`tf5_v455.json`).
 
 | Function | Tag | Descriptor MD5 (V4.55) | Holds |
 |---|---|---|---|
@@ -147,8 +148,9 @@ value).
 | `NotifySyncStatus` | `SCN0INI:n SCN0REQ:n ... LIB0INI:n ...`: scene / library transfer progress |
 | `onSetWarningMessage` | warning text for the screen |
 
-`tests/editor/test_guard.py` currently refuses every event except the handshake and keepalive.
-Sending any of these is a guard change that needs a deliberate review.
+`tests/editor/test_guard.py` refuses every event except the handshake, keepalive and (behind
+`tf5.scene_recall`, only while a person's recall runs) `RecallScene "NUMBER:[AB]nn"`. Sending
+any other is a guard change that needs a deliberate review.
 
 ---
 
@@ -198,9 +200,9 @@ dump (re-derive it with `Dump.address`).
 / 8 / 12 bytes. Input: wire `[0,0,0..3]`. Colours seen: `Blue Orange Purple Pink Red SkyBlue
 Green` (`Yellow` and others in the schema). Icons: `DynamicMic WirelessMic Keyboard Mixer Star2
 Blank`, ... (the schema's `kind=26` list). RCP: `MIXER:Current/<Ch>/Label/{Name,Color,Icon,Category}`
-rw [EXTERNAL]. *Write:* string set-param `0x31` [VERIFIED-DUMP]. Note that the sim
-(`sim_editor.py`) has `Label` = `Name, Color` only, so real Label wire indices (`Name` = 1) don't
-resolve there yet.
+rw [EXTERNAL]. *Write:* string set-param `0x31` [VERIFIED-DUMP]. The simulator builds every
+function from the V4.55 tree (`console/sim_tree.py`), so real Label wire indices (`Name` = 1)
+resolve there too.
 
 **Input fader level / ON.** Already written by tf-daemon: `InputChannel:N/Fader/{Level,On}`,
 wire `[0,19,0..1]` [VERIFIED-CAP, guide 6.3]. The same `Fader/{Level,On}` exists on every
@@ -226,7 +228,10 @@ when two mono mixes are paired), `StMix:N/Output/Balance`. RCP: `Mix/Fader/{Leve
 `Mono [0,10,0]`, `DCA [0,11,0]`, `FX [0,12,0]`, `InsFX [0,13,0]`, recorder
 `Cue/Recorder/{Record,Playback}/On`. `Volatile/Cue/ActiveCategory` u8 0–9 (which kind of cue is
 active; it read 6 in the capture). The console pushes cue changes to clients: CH15 / CH16 cue
-off arrived as `MVOL [0,1,0] idx [14,0,0]` / `[15,0,0]`, origin 0xA1 [VERIFIED-CAP]. Cue setup:
+off arrived as `MVOL [0,1,0] idx [14,0,0]` / `[15,0,0]`, origin 0xA1 [VERIFIED-CAP]. Note: by the
+per-level index rule (1.3) that address would be idx `[0,14,0]` (Cue is level 0); tf-daemon's
+`Dump` and the simulator use `[0,14,0]` and would count a `[14,0,0]` push as rejected. Re-check
+the capture on the desk [PENDING]. Cue setup:
 `Setup/Cue/Mode` (0 = mix cue, 1 = last cue [INFERRED from the TF manual's two modes]),
 `Setup/Cue/{Input,Output}/{Point,Trim}`. Not on RCP.
 
@@ -328,9 +333,8 @@ Gain s16 −2400…1000 = −24…+10 dB (CH 28 read −500 in the dump). `GainO
 (StIn `[1,1,0]`). Stereo link is probably `InputChannel:C/Signal/Relation` u8 (wire `[0,2,0]`;
 all 0 on this desk) [INFERRED]. `Mix`/`Matrix` have the same `Signal/Relation` for paired buses.
 
-Mismatch to fix: desk-coverage.md says this row is read as `Patch/Port`, and `sim_editor.py`
-models `Patch` as a 16-byte string `Port`. On the real V4.55 tree, `Patch` has a single u8
-`Select`. The USB output patch (which input feeds USB out n, `tf5.usb_patch`) is not in any of
+On the real V4.55 tree `Patch` has a single u8 `Select` (the simulator and the coverage table
+now use it; an earlier fake modelled a string `Port`). The USB output patch (which input feeds USB out n, `tf5.usb_patch`) is not in any of
 the 10 dumped functions; only `Setup/Usb_1_2_Output/Select` (u8 0–7) is. Where the rest lives
 is [PENDING] (probably one of the functions TF Editor didn't subscribe to).
 
@@ -439,7 +443,9 @@ The scene NUMBER parser (`FUN_004ff130`) takes the bank from the first character
 everything" (RCP `sscurrent`); a recall over the Editor protocol pushes the changed parameters as
 `01 11` and sends `onRecalledScene`. The RCP scene index base (`ssrecall_ex scene_a 12` vs scene
 A13) is [PENDING]: read `ssnum_ex` / `sscurrent_ex` once and compare with `Setup/Scene/LastScene`.
-`guard.py` refuses `RecallScene` today, and enabling it is a deliberate guard change.
+`guard.py` allows `RecallScene` only with `tf5.scene_recall` on, only during a person's request
+(`POST /api/tf5/event/recall_scene`); the simulator answers `STATUS:OK`, the real desk's STATUS
+token is [PENDING].
 
 ### 3.7 FX, insert FX, delay
 
@@ -551,17 +557,16 @@ of constructing them.
 
 ### What each new write needs in tf-daemon
 
-1. Read it: add the path to `console/editor/dump.py` (and subscribe the function if it isn't
-   Mixing; `codec.TAGS` and `DESC_MD5` get the new function, from the table in 1.2).
-2. Model it: `console/sim_editor.py` must use the real tree shape so real wire paths resolve.
-   Today it covers only part of `InputChannel` and differs from the TF5 in `Label` (no
-   `Category` / `Icon`, so `Name` is at a different index) and `Patch` (`Port` instead of
-   `Select`); its `StInChannel`, `Mix` and `Stereo` children are not in the TF5's order. The V4.55
-   descriptor (sections 2–3 of this page, or the dumps themselves) is the reference.
-3. Allow it: add it to `console/editor/guard.py` with limits from the schema ranges above, behind
-   a config switch, with tests in `tests/editor/test_guard.py` (a deliberate review, never a
-   loosened assertion).
-4. Confirm it on the desk: one write, watch the echo, and note it here as [VERIFIED-CAP].
+The foundation exists (2026-11-10): every function is subscribed and readable
+(`TFEditorClient.get(path, func)`, `GET /api/tf5/param`), the simulator serves the real V4.55 tree
+(`console/sim_tree.py`), and `guard.FAMILIES` lists what may be written, each family behind its own
+`tf5.*_write` switch, limits from the schema (`console/editor/tree.py` `spec()`), written with
+`TFEditorClient.write(changes, func=...)` / `POST /api/tf5/param`. So a feature only needs:
+
+1. A page or route that reads with `get` and writes with `write` on a person's confirmed edit.
+2. If its parameter isn't in a family yet: add it to `guard.FAMILIES` with tests in
+   `tests/editor/test_guard.py` (a deliberate review, never a loosened assertion).
+3. Confirm it on the desk: one write, watch the echo, and note it here as [VERIFIED-CAP].
 
 ---
 

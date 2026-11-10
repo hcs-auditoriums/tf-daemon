@@ -102,5 +102,22 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   cancel mute them); never the stereo bus, mixes, sends or DCAs. One-off read-only
   probe from a shell:
   `python -m tf_daemon.console.editor <console-ip> --channels 1-8 [--watch]`.
+- `[tf5]`, the rest of the desk over the same connection (all need `tf5.eq = true`):
+  `functions` (default: all ten functions of the TF5's V4.55 tree, `Property`, `Mixing`,
+  `Processing`, `FX`, `Setup`, `Volatile`, `Status`, `SceneList`, `SceneStatus`, `ConsoleSetup`;
+  `Mixing` is required) says which the client subscribes. `Property` is always subscribed for the
+  handshake and its data (the console password) dropped unparsed; no password is ever returned.
+  `GET /api/tf5/param?func=<function>&path=<name path>` reads any parameter with its schema
+  (range, default, scaling, unit). Writing more than the EQ and input faders needs one switch per
+  **write family** (`console/editor/guard.py` `FAMILIES`), each `false` by default, each only for a
+  person's edit (`POST /api/tf5/param` `{"func", "changes": [[path, raw], ...], "confirm": true}`),
+  each value within the desk's own schema range (strings only from a verified list):
+  `mix_write` (faders / ON of every strip but inputs, balance, pan, sends, DCA and mute group
+  assignment, mute masters, cue), `processing_write` (phase, digital gain, gate, compressor,
+  de-esser, bus PEQ, 1-knob EQ, EQ type, GEQ, leveler / ducker, delay, output gain / phase),
+  `headamp_write` (head-amp gain), `phantom_write` (+48V and the phantom master: phantom power can
+  damage gear, so it has its own switch), `label_write` (names, colours, icons), `fx_write` (FX /
+  insert FX bypass, mix balance, parameters), `scene_recall` (`POST /api/tf5/event/recall_scene`
+  `{"number": "A05", "confirm": true}`). `--demo` turns them all on against the simulated desk.
 
 Levels are dBFS with AES17 convention: a full-scale sine reads 0 dBFS.
