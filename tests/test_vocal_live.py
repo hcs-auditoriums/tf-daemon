@@ -45,11 +45,11 @@ class OfflineEngine:
         pass
 
     def run(self, seconds):
-        block = np.zeros((BLOCK, self.source.channels), np.float32)
+        hop = np.zeros((HOP, self.source.channels), np.float32)
         for _ in range(int(seconds * FS / HOP)):
-            for _ in range(HOP // BLOCK):
-                self.source._fill(block)
-                self.buf = np.concatenate((self.buf[BLOCK:], block))
+            for j in range(0, HOP, BLOCK):
+                self.source._fill(hop[j : j + BLOCK])
+            self.buf = np.concatenate((self.buf[HOP:], hop))  # one copy per hop, not per block
             self.t += HOP / FS
             frames = {i: self.buf[:, i] for i in self.analyzed}
             for tap in self.frame_taps:

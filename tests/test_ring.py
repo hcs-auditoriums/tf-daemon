@@ -3,8 +3,6 @@
 Signals are synthesized at 48 kHz and fed hop by hop, as the engine does.
 """
 
-import time
-
 import numpy as np
 import pytest
 from helpers import make_config, wait_until
@@ -244,7 +242,8 @@ def test_ring_detection_can_be_turned_off():
     modules = build_modules(cfg)
     app = create_app(cfg, modules)
     try:
-        time.sleep(2.5)  # long enough for the synth tone to have rung if detection were on
+        # 1.5 s of analyzed audio: with detection on, the synth tone rings well before that.
+        wait_until(lambda: modules[0].engine.status()["frames"] >= 30)
         assert app.test_client().get("/api/audio/rings").get_json()["events"] == []
     finally:
         app.extensions["tf_stop"]()

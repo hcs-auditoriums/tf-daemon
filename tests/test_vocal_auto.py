@@ -112,8 +112,9 @@ def run(eng, auto, seconds):
         auto.tick(eng.t)
 
 
-def test_auto_walks_the_eq_to_the_suggestion_gently():
+def test_auto_walks_the_eq_to_the_suggestion_gently_and_undo_puts_it_back():
     desk, eng, checks, auto = rig()
+    before = dict(desk.raw)
     auto.arm(0)  # starts live listening too
     assert dict(checks.sessions())[0].live
     run(eng, auto, 150)
@@ -128,6 +129,8 @@ def test_auto_walks_the_eq_to_the_suggestion_gently():
                 assert abs(v - gains[p]) <= STEP_DB * 100 and v <= 0, (p, gains[p], v)
                 gains[p] = v
     assert auto.state(0)["on"] and auto.state(0)["log"][-1]["action"] == "eq"
+    auto.undo(0)  # one long run serves both checks
+    assert desk.raw == before and not auto.state(0)["on"]
 
 
 def test_auto_stops_when_someone_touches_the_eq():
@@ -141,16 +144,6 @@ def test_auto_stops_when_someone_touches_the_eq():
     n = len(desk.writes)
     run(eng, auto, 10)
     assert len(desk.writes) == n  # and it keeps its hands off
-
-
-def test_undo_puts_back_the_eq_from_before():
-    desk, eng, checks, auto = rig()
-    before = dict(desk.raw)
-    auto.arm(0)
-    run(eng, auto, 120)
-    assert desk.raw != before
-    auto.undo(0)
-    assert desk.raw == before and not auto.state(0)["on"]
 
 
 def test_a_ring_gets_a_notch_at_once_and_deeper_while_it_lasts():

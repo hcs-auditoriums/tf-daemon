@@ -363,11 +363,14 @@ class VoiceGen:
         phase = self._phase + np.cumsum(2 * np.pi * f0 / fs)
         self._phase = float(phase[-1] % (2 * np.pi))
 
-        # Harmonics below the voice bandwidth, normalized to unit RMS.
-        mask = (self._k * f0[None, :]) < self.VOICE_FMAX
-        amps = self._k_amp * mask
+        # Harmonics below the voice bandwidth, normalized to unit RMS. Those above it at the
+        # lowest pitch in the block would all be masked off: skip computing them.
+        m = min(len(self._k), int(self.VOICE_FMAX / float(np.min(f0))) + 1)
+        k = self._k[:m]
+        mask = (k * f0[None, :]) < self.VOICE_FMAX
+        amps = self._k_amp[:m] * mask
         norm = np.sqrt(0.5 * np.sum(amps * amps, axis=0))
-        v = np.sum(amps * np.sin(self._k * phase[None, :]), axis=0) / norm
+        v = np.sum(amps * np.sin(k * phase[None, :]), axis=0) / norm
 
         # Syllable envelope: ~10 ms attack/release.
         target = 1.0 if self._voiced else 0.0

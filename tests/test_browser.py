@@ -60,10 +60,12 @@ def _open(page, path):
     page.wait_for_load_state("domcontentloaded")
 
 
-@pytest.mark.parametrize("path", ["/", "/rf", "/qlxd", "/config"])
-def test_page_runs_without_script_errors(page, path):
-    _open(page, path)
-    page.wait_for_timeout(2500)  # websockets connect, the first frames arrive and are drawn
+# Every test here fails on any script or console error (the ``page`` fixture), so each page
+# is covered by the tests that use it; /config by this one.
+def test_config_page_loads_the_config(page):
+    _open(page, "/config")
+    page.wait_for_function("document.getElementById('conn').textContent === 'connected'", timeout=8000)
+    page.wait_for_function("document.getElementById('config').value.includes('[server]')", timeout=8000)
 
 
 def test_rf_and_wireless_pages_connect_and_post(page):
