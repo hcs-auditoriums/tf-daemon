@@ -6,7 +6,7 @@
 // shown as not available (docs/desk-coverage.md).
 
 import { dynGraph } from "./dyngraph.js";
-import { $, el, state } from "./shared.js";
+import { $, el, loadStr, save, state } from "./shared.js";
 
 const TABS = [["input", "Input"], ["gate", "Gate"], ["comp", "Comp"], ["sends", "Sends"]];
 let data = null;        // GET /api/tf5/strip/<usb> for state.input
@@ -14,6 +14,8 @@ let tab = "input";
 let built = null;       // signature of what the panel shows; rebuilt when it changes
 const refs = new Map(); // "section.key" (sends: "sends.<mix>.key") -> {set(value)}
 const panel = $("strip-panel");
+const PHONE = matchMedia("(max-width: 720px), (max-height: 500px)");   // style.css's phone rules
+let picked = loadStr("tf.stripTab", "eq", ["input", "eq", "gate", "comp", "sends"]);   // a phone's tab (below)
 
 // ------------------------------------------------------------------ data
 
@@ -181,7 +183,6 @@ export function openStrip(which) {
   built = null;
   render();
   load();
-  if (getComputedStyle(panel).position === "static") panel.scrollIntoView({ block: "nearest" });   // a phone
 }
 function close() { panel.hidden = true; paintTools(); }
 
@@ -230,7 +231,7 @@ function update() {
   }
 }
 
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) close(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden && !PHONE.matches) close(); });
 
 // ------------------------------------------------------------------ the sidebar's tool row
 
@@ -246,14 +247,36 @@ const toolBtn = new Map(TOOLS.map(([k, label, title]) => {
   b.type = "button";
   b.title = title;
   b.onclick = () => {
-    if (k === "eq") { const cb = $("show-eq"); cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); paintTools(); }
+    if (PHONE.matches) pickTab(k);
+    else if (k === "eq") { const cb = $("show-eq"); cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); paintTools(); }
     else if (!panel.hidden && tab === k) close();
     else openStrip(k);
   };
   tools.append(b);
   return [k, b];
 }));
-export function stripTools() { paintTools(); return tools; }
+export function stripTools() { if (PHONE.matches) queueMicrotask(() => pickTab(shownTab())); paintTools(); return tools; }
+
+// A phone: the tool row is a tab bar, one tab always shown under it (remembered), none closed.
+// EQ shows the EQ on the plot (edited there) and, under the tabs, its summary and Profiles
+// (console.js's EQ section; style.css shows it while the strip carries .eq-tab).
+const eqHere = () => !!(state.eq && state.eq.index === state.input);
+const shownTab = () => (picked === "eq" && !eqHere() ? "input" : picked);   // no EQ on this input
+function pickTab(k) {
+  if (k !== shownTab()) { picked = k; save("tf.stripTab", k); }
+  const eq = k === "eq";
+  $("console-panel").classList.toggle("eq-tab", eq);
+  if (eq) {
+    panel.hidden = true;
+    const cb = $("show-eq");
+    if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new Event("change")); }
+    paintTools();
+  } else if (panel.hidden || tab !== k) openStrip(k);
+}
+PHONE.addEventListener("change", () => {
+  if (PHONE.matches) pickTab(shownTab());
+  else { $("console-panel").classList.remove("eq-tab"); close(); }
+});
 export function paintTools() {
   const eq = state.eq && state.eq.index === state.input && state.eq.eq;
   for (const [k, b] of toolBtn) {
@@ -262,7 +285,8 @@ export function paintTools() {
       : sec && sec.available && (k === "input" ? sec.values.phantom : k === "sends" ? sec.mixes.some((m) => m.on && m.level !== null) : sec.values.on);
     b.classList.toggle("lit", !!lit);
     b.classList.toggle("p48", k === "input" && !!lit);
-    b.setAttribute("aria-pressed", String(k === "eq" ? !!state.showEq : !panel.hidden && tab === k));
+    const on = PHONE.matches ? k === shownTab() : k === "eq" ? !!state.showEq : !panel.hidden && tab === k;
+    b.setAttribute("aria-pressed", String(on));
     b.hidden = k === "eq" && !eq && !(state.eq && state.eq.index === state.input);
   }
 }

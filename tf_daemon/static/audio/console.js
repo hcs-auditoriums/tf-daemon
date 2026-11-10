@@ -328,7 +328,7 @@ export function renderPanel() {
     // EQ (only with tf5.eq): the console's curve for this channel as a thumbnail, redrawn
     // whenever the desk pushes a change. A tap shows / hides it on the spectrum, full size.
     if (eqAvailable) {
-      const eqSec = el("div", "cp-section");
+      const eqSec = el("div", "cp-section cp-eqsec");
       refs.eqCanvas = el("canvas", "cp-eq");
       refs.eqCanvas.setAttribute("role", "button");
       refs.eqCanvas.setAttribute("aria-label", "Show the EQ on the spectrum");

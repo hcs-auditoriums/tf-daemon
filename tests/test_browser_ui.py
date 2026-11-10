@@ -141,6 +141,11 @@ def test_phone_page_scrolls_with_nothing_over_the_plot(page):
     tools, fader = page.locator(".cp-tools").evaluate(PAGE_BOX), page.locator(".cp-fadersec").evaluate(PAGE_BOX)
     assert tools["y"] >= fader["b"] - 1  # the tool row last, over its settings
     assert not page.locator("#strip-panel .sp-tabs").is_visible()  # the tool row is its tabs
+    page.locator(".cp-tool", has_text="EQ").click()  # a tab bar: EQ shows its summary and Profiles instead
+    page.locator("#console-panel .cp-eqsec").wait_for(timeout=3000)
+    assert not page.locator("#strip-panel").is_visible()
+    page.locator(".cp-tool", has_text="GATE").click()
+    page.locator("#strip-panel").wait_for(timeout=3000)
     assert not page.locator("#console-panel .cp-eq").is_visible()
     track = page.locator("#console-panel .cp-track")
     t, cap = track.evaluate(PAGE_BOX), page.locator(".cp-cap").evaluate(PAGE_BOX)
