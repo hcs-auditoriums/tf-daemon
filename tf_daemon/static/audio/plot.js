@@ -87,6 +87,23 @@ export function trace(values, stroke, fill, width = 1.5) {
   ctx.strokeStyle = stroke;
   ctx.lineWidth = width;
   ctx.stroke();
+  clipMarks(values, stroke);
+}
+
+// Where a trace goes above the top of the range (a fixed range, or Auto still catching up):
+// a thick bar in its colour along the top edge, so a flat line there doesn't read as a level.
+function clipMarks(values, stroke) {
+  const freqs = state.freqs;
+  ctx.fillStyle = stroke;
+  let start = null;
+  for (let i = 0; i <= freqs.length; i++) {
+    const over = i < freqs.length && values[i] > state.dbMax;
+    if (over && start === null) start = xOf(freqs[i]);
+    if (!over && start !== null) {
+      ctx.fillRect(start, PAD.t, Math.max(2, xOf(freqs[i - 1]) - start), 3);
+      start = null;
+    }
+  }
 }
 
 export function drawHover() {

@@ -10,7 +10,8 @@ import { wfRecolor } from "./waterfall.js";
 // sit wherever their head-amp gain puts them, so the default, Auto, keeps a
 // 70 dB window on whatever the shown input is doing: the top 5 dB above the
 // loudest point of the last 5 s, rounded up to 10 dB. It moves up at once and
-// back down only after 8 s quieter, so it doesn't pump between phrases.
+// back down only after 8 s quieter, so it doesn't pump between phrases. The loudest
+// point counts the peak-hold trace when it is shown, so that isn't cut off at the top.
 const RANGES = ["auto", "-90,-10", "-80,0", "-70,-20", "-130,0"];
 const AUTO_SPAN = 70, AUTO_TOP_MIN = -40, AUTO_TOP_MAX = 0, AUTO_HOLD_S = 8, AUTO_WINDOW_S = 5;
 state.range = loadStr("tf.range", "auto", RANGES);
@@ -36,6 +37,7 @@ export function autoRange() {
   if (state.range !== "auto" || !state.meta) return;
   let m = -Infinity;
   for (let i = 0; i < state.live.length; i++) if (state.live[i] > m) m = state.live[i];
+  if (state.showPeak) for (let i = 0; i < state.peak.length; i++) if (state.peak[i] > m) m = state.peak[i];
   const keep = Math.round(AUTO_WINDOW_S * state.meta.update_rate);
   auto.maxima.push(m);
   if (auto.maxima.length > keep) auto.maxima.shift();

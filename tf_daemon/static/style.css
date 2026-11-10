@@ -130,7 +130,9 @@ footer {
 .tabs a:hover { color: var(--text); background: #1e242c; }
 .tabs a[aria-current="page"] { color: var(--text); background: #24435c; font-weight: 600; }
 
-.status { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+/* Grows into what's left of the top bar; a zero basis keeps it on the first row (the ring
+   alert inside shrinks instead). */
+.status { margin-left: auto; flex: 1 1 0; min-width: 120px; display: flex; justify-content: flex-end; align-items: center; gap: 12px; }
 
 /* Page-specific controls under the top bar (RF sweep form). */
 .toolbar { padding: 8px 16px; background: var(--bg); border-bottom: 1px solid var(--border); }
@@ -348,7 +350,8 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
 
 /* Tall fader, centred in the panel: scale on the left, track with tick lines. */
 .cp-fadersec { flex: 1 0 auto; }
-.cp-fader { display: flex; justify-content: center; gap: 12px; flex: 1; min-height: 150px; padding: 16px 0; }
+/* The gap clears the cap, which reaches 19px past the track on each side. */
+.cp-fader { display: flex; justify-content: center; gap: 22px; flex: 1; min-height: 150px; padding: 16px 0; }
 .cp-scale { position: relative; width: 30px; color: var(--muted); font-size: 11px; }
 .cp-scale span { position: absolute; right: 0; transform: translateY(50%); line-height: 1; }
 .cp-scale span.zero { color: var(--text); font-weight: 700; }
@@ -399,6 +402,10 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
   .workspace { flex-direction: column; }
   .console-panel { width: 100%; min-width: 0; max-height: 45vh; border-left: 0; border-top: 1px solid var(--border); }
   .workspace > main { min-height: 260px; }
+  /* A phone: the top bar in two rows at most (no title, the connection as its dot alone). */
+  header { gap: 8px; padding: 6px 8px; }
+  header h1 { display: none; }
+  .conn { font-size: 0; }
 }
 
 /* ---------------------------------------------------------------- rings (audio page) */
@@ -413,30 +420,46 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
 .ring-alert.feedback { background: var(--bad); animation: ring-pulse 0.8s ease-in-out infinite alternate; }
 @keyframes ring-pulse { to { filter: brightness(1.35); } }
 @media (prefers-reduced-motion: reduce) { .ring-alert.feedback { animation: none; } }
+/* The header alert gives way (ellipsis) rather than pushing onto a row of its own. */
+.ring-alert { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conn { white-space: nowrap; }
 
+/* Top right, where a spectrum is emptiest (the highs, well above the signal); on the left
+   while the mic-check panel has that corner. Never taller than the plot: it scrolls. */
 .ring-list {
-  position: absolute; bottom: 34px; left: 52px; width: 260px; max-width: calc(100% - 64px);
+  position: absolute; top: 44px; right: 12px; width: 290px; max-width: calc(100% - 64px);
+  max-height: calc(100% - 80px); overflow-y: auto;
   display: flex; flex-direction: column; gap: 2px; padding: 6px;
   background: rgba(13, 16, 20, 0.88); border: 1px solid var(--border); border-radius: 6px;
   font-size: 12px; font-variant-numeric: tabular-nums;
 }
+main:has(.vocal-panel:not([hidden])) .ring-list { right: auto; left: 52px; }
 .ring-list[hidden] { display: none; }
-.rl-head { display: flex; justify-content: space-between; align-items: center; padding: 0 2px 4px; font-weight: 600; }
+.ring-list.collapsed { width: auto; }
+@media (max-width: 720px) {
+  .ring-list, main:has(.vocal-panel:not([hidden])) .ring-list { left: 8px; right: 8px; width: auto; max-width: none; }
+  .ring-list.collapsed { right: auto; }
+}
+.rl-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 0 2px 4px; font-weight: 600; }
+.ring-list.collapsed .rl-head { padding-bottom: 0; }
+.rl-toggle { font: inherit; font-weight: 600; color: var(--text); background: none; border: 0; padding: 4px 2px; min-height: 28px; cursor: pointer; }
+.rl-toggle::before { content: "▾ "; color: var(--muted); }
+.rl-toggle[aria-expanded="false"]::before { content: "▸ "; }
 .rl-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; border-top: 1px solid var(--border); opacity: 0.6; }
 .rl-row.live { opacity: 1; }
 .rl-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .rl-main { flex: 1; min-width: 0; }
-.rl-top { display: flex; align-items: baseline; gap: 6px; }
-.rl-freq { font: inherit; font-size: 14px; font-weight: 700; color: var(--text); background: none; border: 0; padding: 0; cursor: pointer; }
+.rl-top { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.rl-freq { font: inherit; font-size: 14px; font-weight: 700; color: var(--text); background: none; border: 0; padding: 0; cursor: pointer; white-space: nowrap; }
 .rl-sev { color: var(--muted); font-size: 11px; }
 .rl-count { color: var(--text); font-weight: 600; }
-.rl-sub { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-sub { color: var(--muted); }
 .rl-btn {
   font: inherit; font-size: 11px; color: var(--text); background: #1e242c;
   border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; cursor: pointer;
 }
 .rl-btn:hover { border-color: var(--muted); }
-.rl-src { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-src { color: var(--muted); }
 .rl-srcname { font: inherit; color: var(--text); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; }
 .rl-srcname.top { font-weight: 700; }
 
