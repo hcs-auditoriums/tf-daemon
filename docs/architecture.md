@@ -42,6 +42,7 @@ tf_daemon/
     eq.py          the console EQ's response curve (TF Editor's maths)
     db.py          dB conversions
   console/         ── the Yamaha TF5 over the network ──
+    coverage.py    what can be read / written on the desk vs TF StageMix (docs/desk-coverage.md)
     patch.py       which console source each USB capture channel carries
     rcp.py         TF5Client: names, faders, sends over RCP (TCP 49280)
     module.py      TF5Module: /api/tf5/* routes, console data for the audio page

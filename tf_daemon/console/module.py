@@ -11,6 +11,7 @@ from flask_sock import Sock
 
 from ..config import TF5Config
 from ..dsp.eq import CURVE_FREQS, eq_curve
+from . import coverage
 from .editor.client import TFEditorClient
 from .editor.guard import WRITABLE, WRITE_LIMITS
 from .patch import patch_from, source_label
@@ -189,6 +190,10 @@ class TF5Module:
         @bp.get("/status")
         def status():
             return jsonify(self.status())
+
+        @bp.get("/coverage")
+        def desk_coverage():  # what can be read / written on the desk (docs/desk-coverage.md)
+            return jsonify({"features": coverage.as_dicts()})
 
         @bp.get("/channels")
         def channels():
