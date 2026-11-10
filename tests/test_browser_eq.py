@@ -158,12 +158,17 @@ def test_eq_bands_can_be_dragged_and_typed_on_the_spectrum(page):
             page.mouse.move(x + 10 * i, y - 6 * i)
         assert "[locked]" in page.evaluate("window.tfEqReadout()")
         page.mouse.up()
+        # The drag's writes keep landing for a moment after the release: wait until the desk's
+        # value stops changing before taking it.
+        moved, last = None, desk_band("HM")
         for _ in range(50):
-            if desk_band("HM")["gain"] > locked["gain"]:
+            page.wait_for_timeout(300)
+            now = desk_band("HM")
+            if now == last and now["gain"] > locked["gain"]:
+                moved = now
                 break
-            page.wait_for_timeout(100)
-        moved = desk_band("HM")
-        assert moved["gain"] > locked["gain"] and moved["freq"] == locked["freq"]
+            last = now
+        assert moved and moved["gain"] > locked["gain"] and moved["freq"] == locked["freq"], (moved, last)
 
         # The settings: + steps the gain, and the locked frequency can't be typed in.
         page.wait_for_function(
@@ -266,6 +271,14 @@ def test_eq_toolbar_double_tap_pinch_and_types(page):
         wait_desk(page, 1, lambda e: band(e, "HM")["gain"] == 4, "the copied EQ (A/B)")
         ab.click()
         wait_desk(page, 1, lambda e: band(e, "HM")["gain"] == 0, "back from A/B")
+
+        # A narrow bell (Q 10) is drawn to its real peak, not as a spike between the desk's points.
+        # 1521.5 Hz is between two of the desk's 241 curve points: they peak at 11.67 dB.
+        put_eq(1, [[f"{hm}/Gain", 1200], [f"{hm}/Q", 10000], [f"{hm}/Frequency", 15215]])
+        wait_desk(page, 1, lambda e: band(e, "HM")["q"] == 10, "HM at Q 10")
+        page.wait_for_function("window.tfEqPeaks().desk > 5", timeout=4000)
+        peaks = page.evaluate("window.tfEqPeaks()")
+        assert abs(peaks["drawn"] - 12) < 0.05 and peaks["desk"] < 11.8, peaks
 
         # The high band's types, as on StageMix: bell, shelf, LPF.
         hh = page.evaluate("window.tfEqHandles().find(h => h.key === 'H')")

@@ -1,6 +1,6 @@
 // The console sidebar: the TF5 channel on the shown input, and its EQ graph.
 
-import { eqAt, eqAvailable, eqHalf } from "./eq.js";
+import { eqAt, eqAvailable, eqHalf, smoothCurve } from "./eq.js";
 import { paintChannelColors } from "./controls.js";
 import { profileBar } from "./profiles.js";
 import { paintTools, stripTools } from "./strip.js";
@@ -459,10 +459,11 @@ export function drawPanelEq() {
   if (!eq || !d.freqs.length) return;
 
   // Curve (clipped by the canvas), shaded to 0 dB when the EQ is on, dashed when off.
-  const path = () => { g.beginPath(); d.freqs.forEach((f, i) => (i ? g.lineTo : g.moveTo).call(g, x(f), y(d.curve[i]))); };
+  const sc = smoothCurve(d, Math.max(100, Math.round(w)));   // exact at every pixel (eq.js)
+  const path = () => { g.beginPath(); sc.freqs.forEach((f, i) => (i ? g.lineTo : g.moveTo).call(g, x(f), y(sc.curve[i]))); };
   if (eq.on) {
     path();
-    g.lineTo(x(d.freqs[d.freqs.length - 1]), y(0)); g.lineTo(x(d.freqs[0]), y(0)); g.closePath();
+    g.lineTo(x(sc.freqs[sc.freqs.length - 1]), y(0)); g.lineTo(x(sc.freqs[0]), y(0)); g.closePath();
     g.fillStyle = C.eqFill; g.fill();
   }
   g.globalAlpha = eq.on ? 1 : 0.45;
