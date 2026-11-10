@@ -3,6 +3,7 @@
 import json
 import logging
 import socket
+import time
 
 import pytest
 from editor_fakes import (
@@ -205,6 +206,7 @@ def test_events_are_answered_like_tf_editor(console, client_for):
     assert_read_only(console)
 
 
+@pytest.mark.slow
 def test_client_sends_keepalives(console, client_for, monkeypatch):
     monkeypatch.setattr(editor_client, "KEEPALIVE_S", 0.2)
     client = client_for(console)
@@ -226,18 +228,22 @@ def test_scene_recall_dump_replaces_the_data(console, client_for):
     assert_read_only(console)
 
 
+@pytest.mark.slow
 def test_falls_back_without_on_set_client_type(client_for, monkeypatch):
     monkeypatch.setattr(editor_client, "CLIENT_TYPE_WAIT_S", 0.3)
     fake = SimEditor(send_on_set_client_type=False)
     try:
         client = client_for(fake)
         wait_until(lambda: client.synced)
+        # The handshake's last frames may still be on their way to the console when synced is set.
+        wait_until(lambda: len(fake.sent_by_client()) >= len(EXPECTED_HANDSHAKE))
         assert fake.sent_by_client()[: len(EXPECTED_HANDSHAKE)] == EXPECTED_HANDSHAKE
         assert_read_only(fake)
     finally:
         fake.close()
 
 
+@pytest.mark.slow
 def test_no_mixing_dump_times_out_and_retries(client_for, monkeypatch):
     monkeypatch.setattr(editor_client, "SYNC_TIMEOUT_S", 0.5)
     fake = SimEditor(send_mixing_dump=False)
@@ -263,6 +269,7 @@ def test_unknown_firmware_descriptor_is_reported(client_for):
         fake.close()
 
 
+@pytest.mark.slow
 def test_reconnects_after_the_console_drops(console, client_for):
     client = client_for(console)
     wait_until(lambda: client.synced)
@@ -272,6 +279,7 @@ def test_reconnects_after_the_console_drops(console, client_for):
     assert_read_only(console)
 
 
+@pytest.mark.slow
 def test_garbage_from_the_console_reconnects(console, client_for):
     client = client_for(console)
     wait_until(lambda: client.synced)
@@ -311,9 +319,7 @@ def test_a_bug_that_tries_to_write_stops_the_client(console, client_for, monkeyp
     assert not any(t == "MMIX" for t, _ in console.sent_by_client())
     assert "refused" in caplog.text
     n = client.connects
-    import time
-
-    time.sleep(0.5)
+    time.sleep(0.5)  # a retry would have come by now
     assert client.connects == n  # no retry
 
 

@@ -58,22 +58,17 @@ class TF5Module:
         on_gains: Callable[[dict[int, float | None]], None] | None = None,
         simulator: SimConsole | None = None,
     ) -> None:
-        t = cfg
         self.simulator = simulator
-        if t.username or t.password:
+        if cfg.username or cfg.password:
             log.info("tf5.username/password are set, but the TF5's remote protocol has no login; not sent")
         self.patch = patch = patch_from(cfg.usb_patch)
-        self.client = TF5Client(t.host, t.port, patch, t.poll_s, on_names, on_gains)
+        self.client = TF5Client(cfg.host, cfg.port, patch, cfg.poll_s, on_names, on_gains)
         self.eq_client: TFEditorClient | None = None
         self.eq_version = 0  # bumped whenever the console's mixing data (EQ included) changes
-        if t.eq:
+        if cfg.eq:
             self.eq_client = TFEditorClient(
-                t.host, t.eq_port, on_change=self._eq_changed, writes=t.eq_write, fader_writes=t.fader_write
+                cfg.host, cfg.eq_port, on_change=self._eq_changed, writes=cfg.eq_write, fader_writes=cfg.fader_write
             )
-
-    def bus_inputs(self) -> list[int]:
-        """USB inputs carrying the stereo bus: mixes, not sources (for ring attribution)."""
-        return [i for i, src in enumerate(self.patch) if src is not None and src[0] == "St"]
 
     def _eq_changed(self) -> None:
         self.eq_version += 1

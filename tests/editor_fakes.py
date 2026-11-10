@@ -1,5 +1,5 @@
-"""Shared by the TF Editor protocol tests: the test doubles (they live in tf_daemon.console.sim,
-which is also the demo console), assert_read_only, and where the captures are."""
+"""Shared by the TF Editor protocol tests: the test doubles (they live in tf_daemon.console.sim_editor,
+part of the demo console), assert_read_only, and where the captures are."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from helpers import wait_until
 import tf_daemon
 from tf_daemon.console.editor.codec import DUMP, EVENT, EVENT_REPLY, SET_PARAM, SUBSCRIBE, parse_message
 from tf_daemon.console.editor.guard import ALLOWED_PARAM_CMDS, check_outbound
-from tf_daemon.console.sim import (
+from tf_daemon.console.sim_editor import (
     PASSWORD,
     C,
     SimEditor,

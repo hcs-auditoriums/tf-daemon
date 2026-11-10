@@ -36,7 +36,8 @@ from typing import Any
 import numpy as np
 
 from ..config import Channel, Config
-from ..dsp.ring import RingDetector, RingLog, RingSettings, narrowband_levels
+from ..dsp.ring import RingDetector, RingSettings, narrowband_levels
+from ..dsp.ringlog import RingLog
 from ..dsp.spectrum import SpectrumAnalyzer, blackman_harris
 from ..hub import FrameHub
 from .ringbuffer import RingBuffer

@@ -41,6 +41,11 @@ def patch_from(entries: Sequence[str]) -> list[Source | None]:
     return [parse_patch_entry(e) for e in (entries or default_usb_patch())]
 
 
+def stereo_inputs(patch: Sequence[Source | None]) -> dict[int, int]:
+    """USB capture channels carrying the stereo bus: channel -> side (0 = L, 1 = R)."""
+    return {i: src[1] for i, src in enumerate(patch) if src is not None and src[0] == "St"}
+
+
 def source_label(src: Source) -> str:
     kind, x = src
     return f"InCh {x + 1}" if kind == "InCh" else f"St {'LR'[x]}"

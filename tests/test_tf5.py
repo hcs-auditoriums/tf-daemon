@@ -11,7 +11,7 @@ from tf_daemon.audio.sources import SynthSource
 from tf_daemon.config import ConfigError, load_config
 from tf_daemon.console.patch import default_usb_patch, parse_patch_entry
 from tf_daemon.console.rcp import TF5Client, parse_line
-from tf_daemon.console.sim import SimRCP
+from tf_daemon.console.sim_rcp import SimRCP
 
 INCH = "MIXER:Current/InCh/"
 ST = "MIXER:Current/St/"
@@ -33,7 +33,7 @@ def wait_settled(client, quiet=0.3, timeout=5.0):
     deadline = time.time() + timeout
     seq = client.snapshot()[0]
     while time.time() < deadline:
-        time.sleep(quiet)
+        time.sleep(quiet)  # poll: settled once nothing new arrives in this time
         new = client.snapshot()[0]
         if new == seq:
             return
@@ -162,6 +162,7 @@ def test_names_and_settings_flow_into_the_engine(console):
         client.stop()
 
 
+@pytest.mark.slow
 def test_client_reconnects(console):
     client = TF5Client("127.0.0.1", console.port, [("InCh", 0)], poll_s=30, on_names=lambda names: None)
     client.start()
@@ -237,6 +238,7 @@ def test_change_feed(console):
         client.stop()
 
 
+@pytest.mark.slow
 def test_desk_changes_reach_the_page_over_the_websocket(console):
     import json
 

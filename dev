@@ -5,6 +5,8 @@
 #   ./dev logs             follow the server log
 #   ./dev lint             ruff + mypy (what CI runs besides the tests)
 #   ./dev fix              fix what ruff can, and format the code
+#   ./dev check [ARGS]     fix + format + mypy + tests, quiet: only problems print
+#   ./dev quick [ARGS]     the same without the slow tests (~5 s)
 #   ./dev up | down        start (rebuilding if needed) / stop
 #   ./dev open [PAGE]      open the running app in the browser (./dev open rf)
 #   ./dev help             list these commands
@@ -40,6 +42,9 @@ Dev container shortcuts (each starts the container if it isn't running):
   ./dev logs             follow the server log (Ctrl+C to stop following)
   ./dev lint             ruff (style, bugs, formatting) and mypy (types), as CI runs them
   ./dev fix              fix what ruff can (imports, unused names ...) and format the code
+  ./dev check [ARGS]     fix, format, type-check and run the tests; quiet, only problems print
+                         ARGS go to pytest (./dev check tests/test_tf5.py)
+  ./dev quick [ARGS]     the same, without the slow tests (~5 s): the inner loop
   ./dev open [PAGE]      open the running app in the browser
                          PAGE: rf | qlxd | config (default: the audio page)
   ./dev up               start, rebuilding the image if pyproject.toml changed
@@ -49,6 +54,8 @@ Dev container shortcuts (each starts the container if it isn't running):
 Server: http://localhost:8080. It reloads when you save a file.
 EOF
 }
+
+CHECK='ruff check --fix -q . && ruff format -q . && mypy --no-error-summary && pytest -q --no-header "$@"'
 
 cmd="${1:-}"
 shift || true
@@ -60,6 +67,8 @@ case "$cmd" in
   logs)  docker compose up -d && docker compose logs -f app ;;
   lint)  docker compose up -d && docker compose exec app ruff check . && docker compose exec app ruff format --check . && docker compose exec app mypy ;;
   fix)   docker compose up -d && docker compose exec app ruff check --fix . && docker compose exec app ruff format . ;;
+  check) docker compose up -d && docker compose exec -T app sh -c "$CHECK" sh "$@" ;;
+  quick) docker compose up -d && docker compose exec -T app sh -c "$CHECK" sh -m 'not slow' "$@" ;;
   open)  open_app "${1:-}" ;;
   help|-h|--help|"") usage ;;
   *)     echo "unknown command: $cmd" >&2; echo >&2; usage >&2; exit 2 ;;

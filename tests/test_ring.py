@@ -3,16 +3,15 @@
 Signals are synthesized at 48 kHz and fed hop by hop, as the engine does.
 """
 
-import time
-
 import numpy as np
 import pytest
-from helpers import make_config
+from helpers import make_config, wait_until
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.audio.sources import SynthSource, _PacedSource, make_pink_noise
 from tf_daemon.config import ConfigError, load_config
-from tf_daemon.dsp.ring import RingDetector, RingLog, RingSettings, geq_band
+from tf_daemon.dsp.ring import RingDetector, RingSettings, geq_band
+from tf_daemon.dsp.ringlog import RingLog
 
 FS, HOP, BLOCK = 48000, 2400, 1200
 
@@ -218,20 +217,16 @@ def test_config(tmp_path):
 # ---------------------------------------------------------------- in the app
 
 
+@pytest.mark.slow
 def test_engine_detects_the_synth_ring_and_routes_work():
     cfg = make_config()  # the synth carries a steady 2.5 kHz tone 15 dB under its voice
     modules = build_modules(cfg)
     app = create_app(cfg, modules)
     try:
         client = app.test_client()
-        deadline = time.time() + 8
-        while time.time() < deadline:
-            events = client.get("/api/audio/rings").get_json()["events"]
-            if any(e["active"] and abs(e["freq"] - 2500) < 10 for e in events):
-                break
-            time.sleep(0.2)
-        else:
-            raise AssertionError("synth ring not detected")
+        rings = lambda: client.get("/api/audio/rings").get_json()["events"]  # noqa: E731
+        wait_until(lambda: any(e["active"] and abs(e["freq"] - 2500) < 10 for e in rings()), timeout=8)
+        events = rings()
         assert {e["label"] for e in events} <= {"Main L", "Main R"}
         assert client.get("/api/status").get_json()["modules"]["audio"]["rings_active"] >= 1
 
@@ -244,12 +239,14 @@ def test_engine_detects_the_synth_ring_and_routes_work():
         app.extensions["tf_stop"]()
 
 
+@pytest.mark.slow
 def test_ring_detection_can_be_turned_off():
     cfg = make_config(ring={"enabled": False})
     modules = build_modules(cfg)
     app = create_app(cfg, modules)
     try:
-        time.sleep(2.5)
+        # 1.5 s of analyzed audio: with detection on, the synth tone rings well before that.
+        wait_until(lambda: modules[0].engine.status()["frames"] >= 30)
         assert app.test_client().get("/api/audio/rings").get_json()["events"] == []
     finally:
         app.extensions["tf_stop"]()
@@ -288,15 +285,21 @@ class _StageSource(_PacedSource):
 
 
 def _wait_sources(engine, pred, timeout=8.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        for e in engine.rings.snapshot()["events"]:
-            if e["active"] and e["channel"] == 3 and e["sources"] and pred(e):
-                return e
-        time.sleep(0.1)
-    raise AssertionError(f"not reached: {engine.rings.snapshot()['events']}")
+    def found():
+        return next(
+            (
+                e
+                for e in engine.rings.snapshot()["events"]
+                if e["active"] and e["channel"] == 3 and e["sources"] and pred(e)
+            ),
+            None,
+        )
+
+    wait_until(lambda: found() is not None, timeout=timeout)
+    return found()
 
 
+@pytest.mark.slow
 def test_ring_on_the_mains_is_traced_to_its_inputs():
     from tf_daemon.audio.engine import AudioEngine
 

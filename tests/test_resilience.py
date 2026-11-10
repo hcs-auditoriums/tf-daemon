@@ -8,8 +8,8 @@ import pytest
 from helpers import make_config, wait_until
 
 from tf_daemon.app import build_modules, create_app
+from tf_daemon.audio.device import DeviceSource
 from tf_daemon.audio.engine import AudioEngine
-from tf_daemon.audio.sources import DeviceSource
 from tf_daemon.config import load_config
 
 BLOCK = 1200
@@ -38,7 +38,7 @@ class FakeStream:
                 block = np.tile((0.1 * np.sin(2 * np.pi * 1000 * n / 48000))[:, None], (1, self.channels))
                 self.callback(block.astype(np.float32), self.blocksize, None, _Status())
                 t += self.blocksize
-            time.sleep(self.blocksize / 48000)
+            time.sleep(self.blocksize / 48000)  # paces the fake device at 48 kHz
 
     def stop(self):
         self.active = False
@@ -91,6 +91,7 @@ def frames_flowing(engine, timeout=4.0):
     return False
 
 
+@pytest.mark.slow
 def test_audio_device_unplug_and_replug(fast):
     sd = FakeSD(plugged=False)
     cfg = load_config(None)
@@ -98,10 +99,8 @@ def test_audio_device_unplug_and_replug(fast):
     engine = AudioEngine(cfg, src)  # no device yet: the engine still builds and starts
     engine.start()
     try:
-        time.sleep(0.3)
-        st = src.stats()
-        assert not st["connected"] and "no input device matching 'TF'" in st["error"]
-        assert sd.rescans >= 1  # looks again for newly plugged devices
+        wait_until(lambda: "no input device matching 'TF'" in (src.stats()["error"] or "") and sd.rescans >= 1)
+        assert not src.stats()["connected"]  # and looks again for newly plugged devices
 
         sd.plugged = True
         wait_until(lambda: src.stats()["connected"])
@@ -140,8 +139,8 @@ def test_device_that_rejects_the_format_is_retried(fast):
     src = DeviceSource("TF", BLOCK, sd_module=sd)
     src.start(lambda b: None)
     try:
-        time.sleep(0.3)
-        assert not src.stats()["connected"] and "Invalid sample rate" in src.stats()["error"]
+        wait_until(lambda: "Invalid sample rate" in (src.stats()["error"] or ""))
+        assert not src.stats()["connected"]
         sd.rate_ok = True  # e.g. the console was switched back to 48 kHz
         wait_until(lambda: src.stats()["connected"])
     finally:

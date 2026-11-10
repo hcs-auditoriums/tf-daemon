@@ -61,6 +61,8 @@ Shortcuts. These start the container if it isn't running. Use `./dev` on macOS /
 `dev` in Windows `cmd` and `.\dev` in PowerShell:
 
 ```bash
+./dev quick                          # fix, format, type-check, all but the slow tests (~5 s)
+./dev check                          # the same with every test (~20 s): before committing
 ./dev shell                          # bash in the container
 ./dev test                           # all tests, in parallel
 ./dev test tests/test_tf5.py -k reconnects   # any pytest arguments
@@ -102,7 +104,10 @@ the run includes those tests, so `pytest tests/test_dsp.py` stays instant. Set
 browser tests also need `pip install playwright && playwright install chromium`).
 
 Run the tests for what you changed first (`pytest tests/test_x.py` or `-k name`)
-and the whole suite once at the end; failures print short tracebacks.
+and the whole suite once at the end; failures print short tracebacks. Tests that take a
+second or more are marked `@pytest.mark.slow` (`-m "not slow"` skips them); an unmarked
+test over 2 s fails (`TF_SLOW_LIMIT_S`). `tests/test_standards.py` checks the working
+standards: file size, module docstrings, the architecture map, test imports and sleeps.
 
 CI (`.github/workflows/ci.yml`) runs `ruff`, `mypy` and the tests in this same
 container image on every pull request and push to `main` (changes to Markdown

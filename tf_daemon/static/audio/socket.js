@@ -6,35 +6,30 @@ import { buildChannelPicker, markSelected, selectInput } from "./controls.js";
 import { onConsoleEq } from "./eq.js";
 import { autoRange } from "./range.js";
 import { onRings } from "./rings.js";
+import { connectWs } from "../common.js";
 import { $, state } from "./shared.js";
 import { wfPush } from "./waterfall.js";
 
-let ws = null;
-let retryMs = 500;
+let sock = null;
 
 export function connect() {
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  ws = new WebSocket(`${proto}//${location.host}/ws/audio`);
-  ws.binaryType = "arraybuffer";
-  ws.onopen = () => { retryMs = 500; setConn(true); };
-  ws.onclose = () => {
-    setConn(false);
-    setTimeout(connect, retryMs);
-    retryMs = Math.min(retryMs * 2, 5000);
-  };
-  ws.onerror = () => ws.close();
-  ws.onmessage = (ev) => {
-    if (typeof ev.data !== "string") { onFrame(ev.data); return; }
-    const msg = JSON.parse(ev.data);
-    if (msg.type === "rings") onRings(msg);
-    else if (msg.type === "tf5") onConsoleSnapshot(msg);
-    else if (msg.type === "tf5-changes") onConsoleChanges(msg);
-    else if (msg.type === "tf5-eq") onConsoleEq(msg);
-    else onMeta(msg);
-  };
+  sock = connectWs("/ws/audio", {
+    binaryType: "arraybuffer",
+    onOpen: () => setConn(true),
+    onClose: () => setConn(false),
+    onMessage: (data, ws) => {
+      if (typeof data !== "string") { onFrame(data); return; }
+      const msg = JSON.parse(data);
+      if (msg.type === "rings") onRings(msg);
+      else if (msg.type === "tf5") onConsoleSnapshot(msg);
+      else if (msg.type === "tf5-changes") onConsoleChanges(msg);
+      else if (msg.type === "tf5-eq") onConsoleEq(msg);
+      else onMeta(msg, ws);
+    },
+  });
 }
 
-export function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+export function send(obj) { sock?.send(obj); }
 
 function setConn(ok) {
   const el = $("conn");
@@ -42,7 +37,7 @@ function setConn(ok) {
   el.textContent = ok ? "live" : "disconnected";
 }
 
-function onMeta(meta) {
+function onMeta(meta, ws) {
   if (meta.type !== "meta") return;
   // A later meta on the same connection only renames inputs (names read from
   // the console): relabel without dropping the trace or re-sending "view".
@@ -101,7 +96,7 @@ function onFrame(buf) {
 
 setInterval(() => {
   state.fps = state.frames; state.frames = 0;
-  if (ws && ws.readyState === WebSocket.OPEN) {
+  if (sock?.isOpen()) {
     // Connected to the server but no frames: the audio device is unplugged or silent.
     $("conn").textContent = state.fps ? `live · ${state.fps} fps` : "no audio (device disconnected?)";
     $("conn").classList.toggle("ok", state.fps > 0);

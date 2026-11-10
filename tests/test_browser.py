@@ -16,7 +16,7 @@ import pytest
 URL = os.environ.get("TF_DAEMON_URL", "").rstrip("/")
 sync_api = pytest.importorskip("playwright.sync_api", reason="Playwright not installed (the dev image has it)")
 
-pytestmark = pytest.mark.skipif(not URL, reason="TF_DAEMON_URL not set (no live server)")
+pytestmark = [pytest.mark.skipif(not URL, reason="TF_DAEMON_URL not set (no live server)"), pytest.mark.slow]
 
 # Drawn pixels on a canvas: anything that isn't the page background. Sampled on a
 # grid so it is cheap; a blank or failed canvas gives (close to) zero.
@@ -60,10 +60,25 @@ def _open(page, path):
     page.wait_for_load_state("domcontentloaded")
 
 
-@pytest.mark.parametrize("path", ["/", "/rf", "/qlxd", "/config"])
-def test_page_runs_without_script_errors(page, path):
-    _open(page, path)
-    page.wait_for_timeout(2500)  # websockets connect, the first frames arrive and are drawn
+# Every test here fails on any script or console error (the ``page`` fixture), so each page
+# is covered by the tests that use it; /config by this one.
+def test_config_page_loads_the_config(page):
+    _open(page, "/config")
+    page.wait_for_function("document.getElementById('conn').textContent === 'connected'", timeout=8000)
+    page.wait_for_function("document.getElementById('config').value.includes('[server]')", timeout=8000)
+
+
+def test_rf_and_wireless_pages_connect_and_post(page):
+    """The shared websocket and POST helpers (static/common.js) on the RF and Wireless pages."""
+    _open(page, "/rf")
+    page.wait_for_function("document.getElementById('conn').textContent.includes('sweeps')", timeout=8000)
+    page.wait_for_function(f"({DRAWN})('spectrum') > 50", timeout=8000)
+    with page.expect_response("**/api/rf/reset-peak") as res:
+        page.click("#reset-peak")  # a harmless POST through postJson
+    assert res.value.ok
+    assert page.locator("#error").inner_text() == ""
+    _open(page, "/qlxd")
+    page.wait_for_function("/receivers online/.test(document.getElementById('conn').textContent)", timeout=8000)
 
 
 def test_audio_page_connects_names_inputs_and_draws(page):

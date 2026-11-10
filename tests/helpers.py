@@ -29,5 +29,5 @@ def wait_until(pred: Callable[[], Any], timeout: float = 6.0) -> bool:
     while time.monotonic() < deadline:
         if pred():
             return True
-        time.sleep(0.02)
+        time.sleep(0.02)  # poll
     raise AssertionError("condition not reached in time")

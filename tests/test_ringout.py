@@ -7,14 +7,14 @@ import math
 import numpy as np
 import pytest
 from helpers import wait_until
-from test_vocal_auto import RawDesk
-from test_vocal_live import BLOCK, FS, OfflineEngine
+from offline import BLOCK, FS, OfflineEngine, RawDesk
 
 from tf_daemon.audio.stage import LEAK_RESONANCES, StageSettings, StageSource
 from tf_daemon.dsp.eq import eq_curve
 from tf_daemon.vocal import ringout as ro
 from tf_daemon.vocal.auto import PATHS, AutoEQ
 from tf_daemon.vocal.ringout import RingOut
+from tf_daemon.vocal.ringwatch import MainsWatch
 from tf_daemon.vocal.session import MicChecks
 
 RING_HZ = LEAK_RESONANCES[1][0]  # the stage's leak path peaks here first (2480 Hz, +8 dB)
@@ -120,6 +120,7 @@ def notch_freqs(desk):
     ]
 
 
+@pytest.mark.slow
 def test_rings_out_a_mic_notches_the_ring_and_gains_headroom():
     desk, eng, r = rig()
     r.start([(0, "wig", "speech")], tone=False)
@@ -223,9 +224,9 @@ def test_shared_rings_are_named():
 
 
 def test_watch_finds_a_growing_tone_but_not_a_steady_one():
-    w = ro._Watch(FS)
-    t = np.arange(ro._Watch.N) / FS
-    noise = np.random.default_rng(1).standard_normal(ro._Watch.N) * 1e-3
+    w = MainsWatch(FS)
+    t = np.arange(MainsWatch.N) / FS
+    noise = np.random.default_rng(1).standard_normal(MainsWatch.N) * 1e-3
     for i in range(60):  # 3 s steady
         w.feed(noise + 0.01 * np.sin(2 * np.pi * 1000 * t), i * 0.05)
     assert w.take() is None
@@ -245,6 +246,7 @@ def in_order(desk):
     return used == sorted(used)
 
 
+@pytest.mark.slow
 def test_sets_the_high_pass_and_a_vocal_curve_then_live_tone_eq_leaves_the_notches_alone():
     desk, eng, r = rig(colour=[(240.0, 8.0, 1.2)])  # a boomy talker: the vocal curve has something to cut
     r.start([(0, "wig", "speech")], tone=True)

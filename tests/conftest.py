@@ -5,6 +5,12 @@ they share it) on a free port, with throwaway state files, and only when the run
 includes those tests. So editing a file doesn't restart it mid-test (the dev
 container's server reloads on save) and tests can't change the dev demo's state.
 Set TF_DAEMON_URL to point the tests at a server you started yourself instead.
+
+A test not marked ``slow`` fails if it runs longer than SLOW_LIMIT_S, so the quick loop
+(``-m "not slow"``) stays quick. Mark a test that takes a second or more.
+
+Also the fixtures several test files share: ``console`` (a simulated TF Editor
+endpoint) and ``client_for`` (TF Editor clients on it, stopped after the test).
 """
 
 from __future__ import annotations
@@ -17,6 +23,11 @@ import tempfile
 import time
 import urllib.request
 from pathlib import Path
+
+import pytest
+from editor_fakes import SimEditor
+
+from tf_daemon.console.editor.client import TFEditorClient
 
 ROOT = Path(__file__).resolve().parent.parent
 LIVE_TESTS = ("test_live", "test_browser")
@@ -72,10 +83,32 @@ def pytest_configure(config):
             os.environ["TF_DAEMON_URL"] = url  # workers start after this and inherit it
             return
         except OSError:
-            time.sleep(0.2)
+            time.sleep(0.2)  # poll: the server is still starting
     print(f"\n[tests] the test server didn't start (see {tmp / 'server.log'}): live / browser tests skip")
     _server.kill()
     _server = None
+
+
+# Generous against the 1 s rule: parallel runs share the CPU with the demo server.
+SLOW_LIMIT_S = float(os.environ.get("TF_SLOW_LIMIT_S", "2.0"))
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    rep = outcome.get_result()
+    if (
+        rep.when == "call"
+        and rep.passed
+        and rep.duration > SLOW_LIMIT_S
+        and item.get_closest_marker("slow") is None
+        and not item.config.getoption("usepdb", False)
+    ):
+        rep.outcome = "failed"
+        rep.longrepr = (
+            f"{item.nodeid} took {rep.duration:.1f} s: speed it up (wait on a condition, shorter "
+            f"simulation) or mark it @pytest.mark.slow (limit {SLOW_LIMIT_S} s, TF_SLOW_LIMIT_S)"
+        )
 
 
 def pytest_unconfigure(config):
@@ -87,3 +120,25 @@ def pytest_unconfigure(config):
         except subprocess.TimeoutExpired:
             _server.kill()
         _server = None
+
+
+@pytest.fixture
+def console():
+    fake = SimEditor()
+    yield fake
+    fake.close()
+
+
+@pytest.fixture
+def client_for():
+    clients = []
+
+    def make(fake, **kw):
+        c = TFEditorClient("127.0.0.1", fake.port, **kw)
+        clients.append(c)
+        c.start()
+        return c
+
+    yield make
+    for c in clients:
+        c.stop()

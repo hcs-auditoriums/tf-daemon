@@ -1,83 +1,11 @@
 """Auto EQ (vocal/auto.py), in a closed loop with the simulated stage, offline."""
 
 import pytest
-from test_vocal_live import BLOCK, FS, OfflineEngine
+from offline import BLOCK, FS, OfflineEngine, RawDesk
 
-from tf_daemon.audio.stage import FlatDesk, StageSettings, StageSource
+from tf_daemon.audio.stage import StageSettings, StageSource
 from tf_daemon.vocal.auto import PATHS, STEP_DB, AutoEQ
 from tf_daemon.vocal.session import MicChecks
-
-TYPES = {0: "bell", 1: "shelf", 2: "filter"}
-
-
-class RawDesk(FlatDesk):
-    """Channel 0's EQ as the TF5 holds it (raw values); readable and writable like
-    TF5Module (DeskEQ), and heard by the stage (DeskMix)."""
-
-    eq_available = True
-    eq_writable = True
-
-    def __init__(self):
-        self.raw = {"PEQ/On": 1, "PEQ/Bank/HPF/On": 0, "PEQ/Bank/HPF/Frequency": 800}
-        for b, t, f in (("BandL", 1, 1250), ("Band:0", 0, 8000), ("Band:1", 0, 25000), ("BandH", 1, 80000)):
-            self.raw.update(
-                {f"PEQ/Bank/{b}/Type": t, f"PEQ/Bank/{b}/Frequency": f, f"PEQ/Bank/{b}/Gain": 0, f"PEQ/Bank/{b}/Q": 700}
-            )
-        self.writes = []
-
-    def _eq(self):
-        r, bands = self.raw, []
-        for b, label, low, high in (
-            ("BandL", "L", True, False),
-            ("Band:0", "LM", False, False),
-            ("Band:1", "HM", False, False),
-            ("BandH", "H", False, True),
-        ):
-            t = r[f"PEQ/Bank/{b}/Type"]
-            kind = (
-                "bell"
-                if t == 0 or not (low or high)
-                else ("low_shelf" if low else "high_shelf")
-                if t == 1
-                else ("hpf" if low else "lpf")
-            )
-            bands.append(
-                {
-                    "label": label,
-                    "type": kind,
-                    "on": True,
-                    "freq": r[f"PEQ/Bank/{b}/Frequency"] / 10,
-                    "gain": r[f"PEQ/Bank/{b}/Gain"] / 100,
-                    "q": r[f"PEQ/Bank/{b}/Q"] / 1000,
-                }
-            )
-        return {
-            "on": bool(r["PEQ/On"]),
-            "bank": "PRECISE",
-            "one_knob": False,
-            "bands": bands,
-            "hpf": {"on": bool(r["PEQ/Bank/HPF/On"]), "freq": r["PEQ/Bank/HPF/Frequency"] / 10, "slope": 12},
-        }
-
-    # DeskMix (the stage)
-    def channel_eq(self, x):
-        return self._eq() if x == 0 else None
-
-    # DeskEQ (the vocal assist)
-    def eq(self, usb):
-        return {"eq": self._eq() if usb == 0 else None}
-
-    def eq_target(self, usb):
-        return "InputChannel:0" if usb == 0 else None
-
-    def eq_raw(self, usb, paths):
-        return {p: self.raw.get(p) for p in paths}
-
-    def write_eq(self, usb, changes):
-        self.writes.append(list(changes))
-        for p, v in changes:
-            self.raw[p] = v
-        return [{"path": p, "value": v, "confirmed": True, "actual": v} for p, v in changes]
 
 
 def rig(colour=None, talkers=(0,)):
@@ -114,8 +42,10 @@ def run(eng, auto, seconds):
         auto.tick(eng.t)
 
 
-def test_auto_walks_the_eq_to_the_suggestion_gently():
+@pytest.mark.slow
+def test_auto_walks_the_eq_to_the_suggestion_gently_and_undo_puts_it_back():
     desk, eng, checks, auto = rig()
+    before = dict(desk.raw)
     auto.arm(0)  # starts live listening too
     assert dict(checks.sessions())[0].live
     run(eng, auto, 150)
@@ -130,8 +60,11 @@ def test_auto_walks_the_eq_to_the_suggestion_gently():
                 assert abs(v - gains[p]) <= STEP_DB * 100 and v <= 0, (p, gains[p], v)
                 gains[p] = v
     assert auto.state(0)["on"] and auto.state(0)["log"][-1]["action"] == "eq"
+    auto.undo(0)  # one long run serves both checks
+    assert desk.raw == before and not auto.state(0)["on"]
 
 
+@pytest.mark.slow
 def test_auto_stops_when_someone_touches_the_eq():
     desk, eng, checks, auto = rig()
     auto.arm(0)
@@ -143,16 +76,6 @@ def test_auto_stops_when_someone_touches_the_eq():
     n = len(desk.writes)
     run(eng, auto, 10)
     assert len(desk.writes) == n  # and it keeps its hands off
-
-
-def test_undo_puts_back_the_eq_from_before():
-    desk, eng, checks, auto = rig()
-    before = dict(desk.raw)
-    auto.arm(0)
-    run(eng, auto, 120)
-    assert desk.raw != before
-    auto.undo(0)
-    assert desk.raw == before and not auto.state(0)["on"]
 
 
 def test_a_ring_gets_a_notch_at_once_and_deeper_while_it_lasts():

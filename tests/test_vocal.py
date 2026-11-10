@@ -1,10 +1,8 @@
 """Vocal EQ assist: suggestions from a mic check (never applied to the desk)."""
 
-import time
-
 import numpy as np
 import pytest
-from helpers import make_config
+from helpers import make_config, wait_until
 
 from tf_daemon.app import build_modules, create_app
 from tf_daemon.config import ConfigError, load_config
@@ -236,9 +234,7 @@ def test_engine_taps_see_analyzed_inputs():
     modules[0].engine.add_tap(lambda i, samples, t: seen.add((i, len(samples))))
     app = create_app(cfg, modules)
     try:
-        deadline = time.time() + 5
-        while not seen and time.time() < deadline:
-            time.sleep(0.05)
+        wait_until(lambda: seen, timeout=5)
         assert {i for i, _ in seen} <= {32, 33} and seen and all(n == 32768 for _, n in seen)
     finally:
         app.extensions["tf_stop"]()

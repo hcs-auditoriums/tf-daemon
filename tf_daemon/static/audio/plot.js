@@ -1,5 +1,6 @@
 // The spectrum plot: geometry (frequency / level to pixels), grid, traces, hover readout.
 
+import { fitCanvas } from "../common.js";
 import { eqAt } from "./eq.js";
 import { $, C, canvas, ctx, state } from "./shared.js";
 import { wf } from "./waterfall.js";
@@ -17,12 +18,7 @@ export const PAD = { l: 44, r: 12, t: 12, b: 26 };
 export let W = 0, H = 0;
 
 export function resize() {
-  const dpr = window.devicePixelRatio || 1;
-  const r = canvas.getBoundingClientRect();
-  W = r.width; H = r.height;
-  canvas.width = Math.round(W * dpr);
-  canvas.height = Math.round(H * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  [W, H] = fitCanvas(canvas, ctx);
   state.dirty = true;
 }
 new ResizeObserver(resize).observe(canvas);

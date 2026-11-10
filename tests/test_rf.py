@@ -196,19 +196,17 @@ def test_auto_mode_connects_and_sweeps_the_receiver_range(auto_cfg):
         wait_until(lambda: engine.status()["settings"]["start_hz"] == 470_000_000)
 
         engine.stop_scan(by_user=True)  # a user's Stop is respected...
-        time.sleep(0.3)
-        assert not engine.status()["scanning"] and engine.status()["paused"]
+        wait_until(lambda: not engine.status()["scanning"] and engine.status()["paused"])
 
         engine.start_scan({"start_hz": 500_000_000, "stop_hz": 520_000_000}, by_user=True)  # ...until Start
         hint[0] = (460_000_000, 610_000_000)
-        time.sleep(0.3)
+        time.sleep(0.3)  # time for auto range to (wrongly) follow the new hint
         st = engine.status()
         assert st["scanning"] and not st["paused"]
         assert st["settings"]["start_hz"] == 500_000_000  # a hand-picked range is kept
 
         engine.disconnect(by_user=True)
-        time.sleep(0.3)
-        assert not engine.status()["connected"]
+        wait_until(lambda: not engine.status()["connected"])
         engine.connect(by_user=True)
         wait_until(lambda: engine.status()["scanning"])
     finally:

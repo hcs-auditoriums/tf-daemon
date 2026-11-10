@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import threading
 import time
@@ -36,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import QLXDConfig
+from ..files import write_atomic
 from ..hub import FrameHub
 from . import protocol
 from .network import Interface, SLPListener, find_interface, list_interfaces, source_ip
@@ -194,13 +194,9 @@ class QLXDEngine:
         return out
 
     def _write_state(self, settings: dict[str, Any], known: dict[str, dict[str, Any]]) -> None:
-        tmp = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
         data = {**settings, "known_receivers": known}
         try:
-            if self.state_path.parent != Path("."):
-                self.state_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-            os.replace(tmp, self.state_path)
+            write_atomic(self.state_path, json.dumps(data, indent=2) + "\n", parents=True)
         except OSError as e:
             raise ValueError(f"could not save settings to {self.state_path}: {e}") from e
 

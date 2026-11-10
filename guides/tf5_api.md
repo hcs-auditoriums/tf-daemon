@@ -3,8 +3,8 @@
 Goal: read, write and **live-monitor** TF-series console parameters (especially EQ) the way TF Editor does.
 
 - Target: TF5 "Hartland HS TF" at **10.99.40.6** (MAC 00:a0:de:5b:c4:8a). Editor PC 10.99.40.20.
-- Editor binary: `C:\Program Files (x86)\Yamaha\TF Editor\tf_editor.exe` (32-bit, Qt5, 2021-02-24, Jenkins `Citrus-git-dev_v4.0`). TF codename = **Citrus**.
-- Capture: `C:\Users\soren.zaiser\OneDrive - Essium LLC\Desktop\tf5-editor.pcapng` (76 s). It contains:
+- Editor binary: `tf_editor.exe` (32-bit, Qt5, 2021-02-24, Jenkins `Citrus-git-dev_v4.0`). TF codename = **Citrus**.
+- Capture: `tf5-editor.pcapng` (76 s, not in this repo). It contains:
   - discovery
   - 2 failed password attempts (TCP streams 59, 63)
   - 1 successful session (stream 65, t=58.3–76.9 s)
@@ -26,7 +26,7 @@ Address note: Ghidra VA = file offset + `0x401a00` for `.rdata` strings (`tf_edi
 |---|---|---|
 | Find console | UDP broadcast **54330**, "YSDP" | VERIFIED-CAP |
 | Control session | TCP **50368**, tagged TLV frames (`MMIX` = Mixing, …) | VERIFIED-CAP + CODE |
-| **Read all EQ** | Subscribe `Mixing` → console sends **MMSXLIT** dump (descriptor tree + raw values) → `tools/mmsxlit.py` | VERIFIED-CAP (ch1 EQ decoded) |
+| **Read all EQ** | Subscribe `Mixing` → console sends **MMSXLIT** dump (descriptor tree + raw values) → `console/editor/dump.py` | VERIFIED-CAP (ch1 EQ decoded) |
 | **Live EQ updates from other controllers** | Console pushes `01 11` set-param messages (desk and TF Editor changes both reach a StageMix client); origin ≠ 0xA0 means "someone else changed it" | VERIFIED-CAP (EQ gain/freq/on, HPF, fader: 2026-11-08) |
 | Write a param | Send `01 11` with origin 0xA0; console echoes it | VERIFIED-CAP + CODE |
 | Value encoding | signed → `0x24` int32 BE, unsigned → `0x14` u32 BE, string → `0x31`; count = 1 | VERIFIED-CODE |
@@ -39,33 +39,19 @@ Address note: Ghidra VA = file offset + `0x401a00` for `.rdata` strings (`tf_edi
 
 ---
 
-## 2. Files in this folder
+## 2. Where the code lives
 
-| Path | What |
-|---|---|
-| `tools/mpro.py` | Decode the TCP 50368 stream from a tshark CSV: `python -I tools/mpro.py capture/tcp50368.csv 65 [--full]` |
-| `tools/mmsxlit.py` | Parse an MMSXLIT dump: every param with its **wire path** + current value; `resolve(root, path, idx)`. `python -I tools/mmsxlit.py capture/dump_MMIX.bin --grep PEQ --values` |
-| `tools/ymdp.py` | Decode meter multicast: `python -I tools/ymdp.py capture/mcast50240.csv --values 12` |
-| `tools/DumpBy.java` | Ghidra headless decompile helper. Arg forms: `s:` string, `b:` raw string bytes, `x:` scalar, `f:` addr, `r:` callers of addr, `g:start:end` range, `m:addr:len` hexdump |
-| `tools/DumpNet.java`, `flatten.py`, `strs.py` | Earlier helpers (winsock decompile, XML flatten, string extract) |
-| `capture/` | `tcp50368.csv`, `s65.txt` (decoded session), `dump_<TAG>.bin` (MMSXLIT per function), `ysdp.csv`, `mcast50240.csv` |
-| `decomp/*.c` | Decompile output: `sync*.c` (client sync thread), `cnp*.c`/`all_cnp.c` (comctrl protocol), `eqtype.c`, `ymdp*.c` |
-| `gproj/` | Analyzed Ghidra project |
-| `params/mms_*.txt` | Flattened editor XML schema (ranges, units, scaling) |
+The reverse-engineering workspace (capture, Ghidra project, decode scripts) is not in
+this repo. The protocol as tf-daemon uses it is in `tf_daemon/console/editor/`:
+`codec.py` (frames, payloads), `dump.py` (MMSXLIT parser, wire paths, scaling),
+`client.py` (session, sync, writes). The simulator side is `tf_daemon/console/sim_editor.py`.
 
-Re-export from a new capture (adjust `CLIENT_IP` in `mpro.py` if the PC differs):
+Re-export from a new capture:
 ```bash
 tshark -r X.pcapng -Y "tcp.port==50368 && tcp.len>0" -T fields -E separator=, \
   -e frame.number -e frame.time_relative -e tcp.stream -e ip.src -e tcp.len -e tcp.payload > tcp50368.csv
 tshark -r X.pcapng -Y "udp.srcport==50240" -T fields -E separator=, \
   -e frame.number -e frame.time_relative -e udp.length -e udp.payload > mcast50240.csv
-```
-
-Run Ghidra scripts against the saved project from **PowerShell**. cmd-from-Git-Bash breaks the quoting.
-```powershell
-& "$env:USERPROFILE\Downloads\ghidra_12.0.4_PUBLIC\support\analyzeHeadless.bat" "C:\Users\soren.zaiser\yamaha-tf-re\gproj" tf `
-  -process tf_editor.exe -noanalysis -readOnly -scriptPath "C:\Users\soren.zaiser\yamaha-tf-re\tools" `
-  -postScript DumpBy.java out.c 0 f:0066fb50
 ```
 
 ---
@@ -203,7 +189,7 @@ This is why the editor pushed 545 `SceneStatus` sets. A custom client must not b
 
 ## 5. MMSXLIT dump → reading EQ [VERIFIED-CAP]
 
-Layout (little-endian) is in `tools/mmsxlit.py`:
+Layout (little-endian) is in `tf_daemon/console/editor/dump.py`:
 - header `0x58`, then the descriptor tree, then the data image
 - `COL0` 48 B = name, paramBytes, childBytes, offset, datasize, arraysize
 - `PR ` 32 B = type, elemsize, arraysize, name; type 0 str, 1 int, 2 uint
@@ -223,7 +209,7 @@ PEQ/Bank/BandH/{Type,LPFOn,Frequency,Gain,Q} [0,7,1,5,0..4]
 Fader/{Level,On}                             [0,19,0..1]
 ```
 
-Scaling (from `params/mms_Mixing.txt`):
+Scaling (from the editor's `Mixing` XML schema):
 - Frequency raw/10 = Hz
 - Gain raw/100 = dB (signed)
 - Q raw/1000
