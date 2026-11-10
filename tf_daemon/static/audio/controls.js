@@ -8,16 +8,32 @@ import { send } from "./socket.js";
 import { renderVocal } from "./vocal.js";
 import { wfReset } from "./waterfall.js";
 
-// The channel bar, like TF StageMix's: a chip per input in order (number, name, the
-// console's colour), swiped or scrolled sideways, with ‹ › to step through them. The
+// The channel bar, like the TF desk and StageMix: banks of BANK inputs (1-8, 9-16, ...);
+// the bank's inputs fill the bar as big tiles (number, name, the console's colour). Any
+// input is two taps away and nothing scrolls; ‹ › step through them one by one. The
 // inputs listed in config.toml are always analyzed; the others while shown.
+const BANK = 8;
+let bank = 0;  // the bank shown (it follows the selected input; a bank tab just shows it)
+
 export function buildChannelPicker() {
-  const nav = $("channels");
+  const nav = $("channels"), banks = $("banks");
   nav.replaceChildren();
-  for (const ch of state.meta.channels) {
+  banks.replaceChildren();
+  const list = state.meta.channels;
+  for (let start = 0; start < list.length; start += BANK) {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = `ch-chip${ch.pinned ? " pinned" : ""}${ch.label === `Ch ${ch.index + 1}` ? " unnamed" : ""}`;
+    const end = Math.min(start + BANK, list.length);
+    b.textContent = `${list[start].index + 1}–${list[end - 1].index + 1}`;
+    b.title = `Inputs ${b.textContent}`;
+    b.dataset.bank = start / BANK;
+    b.onclick = () => showBank(start / BANK);
+    banks.appendChild(b);
+  }
+  for (const ch of list) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `ch-chip${ch.label === `Ch ${ch.index + 1}` ? " unnamed" : ""}`;
     b.textContent = ch.label;
     b.title = `Input ${ch.index + 1}`;
     b.dataset.input = ch.index;
@@ -26,6 +42,16 @@ export function buildChannelPicker() {
     nav.appendChild(b);
   }
   paintChannelColors();
+  showBank(bankOf(state.input));
+}
+
+const bankOf = (input) => Math.max(0, Math.floor((state.meta?.channels || []).findIndex((c) => c.index === input) / BANK));
+
+function showBank(n) {
+  bank = n;
+  const chips = [...$("channels").querySelectorAll(".ch-chip")];
+  chips.forEach((b, i) => { b.hidden = Math.floor(i / BANK) !== n; });
+  for (const b of $("banks").querySelectorAll("button")) b.setAttribute("aria-pressed", String(Number(b.dataset.bank) === n));
 }
 
 // The console's channel colours on the chips (when the TF5 is read; called as they change).
@@ -41,8 +67,8 @@ export function markSelected(index) {
   for (const b of $("channels").querySelectorAll(".ch-chip")) {
     const on = Number(b.dataset.input) === index;
     b.setAttribute("aria-pressed", String(on));
-    if (on) b.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
+  if (bankOf(index) !== bank) showBank(bankOf(index));
 }
 
 function step(by) {

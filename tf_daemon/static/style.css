@@ -56,28 +56,34 @@ nav button, .controls button {
 }
 nav button[aria-pressed="true"] { background: #24435c; border-color: var(--avg); }
 
-/* The channel bar (audio page): a chip per input, scrolled / swiped sideways; ‹ › step. */
+/* The channel bar (audio page): bank tabs, then the bank's inputs as tiles filling the row. */
 .chbar {
   display: flex; align-items: stretch; gap: 6px; padding: 6px 8px;
   background: var(--panel); border-bottom: 1px solid var(--border);
 }
-.chbar nav {
-  flex: 1; flex-wrap: nowrap; overflow-x: auto; scroll-snap-type: x proximity;
-  scrollbar-width: thin; overscroll-behavior-x: contain;
-}
+.chbar #banks { flex: none; flex-wrap: nowrap; gap: 0; }
+.chbar #banks button { min-height: 48px; min-width: 44px; padding: 0 5px; font-size: 13px; border-radius: 0; font-variant-numeric: tabular-nums; }
+.chbar #banks button:first-child { border-radius: 6px 0 0 6px; }
+.chbar #banks button:last-child { border-radius: 0 6px 6px 0; }
+.chbar #banks button + button { margin-left: -1px; }
+.chbar #channels { flex: 1; min-width: 0; flex-wrap: nowrap; }
 .ch-step {
-  flex: none; width: 44px; min-height: 44px; font: inherit; font-size: 22px; line-height: 1;
+  flex: none; width: 48px; min-height: 48px; font: inherit; font-size: 24px; line-height: 1;
   color: var(--text); background: #1e242c; border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
 }
 .ch-step:hover { border-color: var(--muted); }
 nav button.ch-chip {
-  flex: none; scroll-snap-align: start; display: flex; flex-direction: column; align-items: flex-start;
-  justify-content: center; gap: 1px; min-width: 72px; max-width: 128px; min-height: 44px; padding: 3px 10px 4px;
+  flex: 1 1 0; min-width: 0; display: block; text-align: left; min-height: 48px; padding: 4px 6px; font-size: 13px;
   border-top: 4px solid var(--ch, var(--border)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-nav button.ch-chip::before { content: attr(data-num); font-size: 10px; color: var(--muted); line-height: 1; }
+nav button.ch-chip[hidden] { display: none; }
+nav button.ch-chip::before { content: attr(data-num); display: block; margin-bottom: 2px; font-size: 10px; font-weight: 400; color: var(--muted); line-height: 1; }
 nav button.ch-chip.unnamed { color: var(--muted); }
-nav button.ch-chip.pinned { font-weight: 600; }
+@media (max-width: 720px) {
+  .chbar { flex-wrap: wrap; }
+  .chbar #channels { order: 3; flex: 1 0 100%; flex-wrap: wrap; }
+  nav button.ch-chip { flex: 1 0 22%; }
+}
 nav button:hover, .controls button:hover { border-color: var(--muted); }
 
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }

@@ -101,26 +101,35 @@ def test_switching_input_follows_the_buttons(page):
     )
 
 
-def test_channel_bar_lists_every_input_and_steps(page):
+def test_channel_bar_banks_of_big_tiles(page):
     page.set_viewport_size({"width": 1024, "height": 768})
     _open(page, "/")
     page.wait_for_function("document.querySelectorAll('#channels .ch-chip').length >= 34", timeout=8000)
-    bar = page.locator("#channels")
-    assert bar.evaluate("e => e.scrollWidth > e.clientWidth")  # one row that scrolls, not a wall of buttons
-    assert page.locator("#ch-next").bounding_box()["height"] >= 40  # finger-sized
     page.locator("#channels .ch-chip", has_text="Pastor").click()
-    first = int(page.locator("#channels [aria-pressed=true]").get_attribute("data-input"))
-    page.click("#ch-next")
-    page.wait_for_function(f"document.querySelector('#channels [aria-pressed=true]').dataset.input === '{first + 1}'")
+    visible = page.locator("#channels .ch-chip:visible")
+    assert visible.count() == 8  # one bank, filling the bar: nothing to scroll
+    assert page.locator("#channels").evaluate("e => e.scrollWidth <= e.clientWidth")
+    for box in [
+        visible.first.bounding_box(),
+        page.locator("#ch-next").bounding_box(),
+        page.locator("#banks button").first.bounding_box(),
+    ]:
+        assert box["height"] >= 44 and box["width"] >= 44  # finger-sized
+    # Two taps to any input: its bank, then its tile (Main L is input 33, in the last bank).
+    page.locator("#banks button").last.click()
+    page.locator("#channels .ch-chip:visible", has_text="Main L").click()
+    page.wait_for_function("document.querySelector('#channels [aria-pressed=true]').textContent === 'Main L'")
+    # ‹ › step one input, across banks too: back from 33 to 32 shows the 25-32 bank.
     page.click("#ch-prev")
-    page.wait_for_function(f"document.querySelector('#channels [aria-pressed=true]').dataset.input === '{first}'")
-    # The console's colours reach the chips (the demo desk names and colours its channels).
+    page.wait_for_function("document.querySelector('#channels [aria-pressed=true]').dataset.input === '31'")
+    assert page.locator("#channels [aria-pressed=true]").is_visible()
+    assert page.locator("#banks [aria-pressed=true]").inner_text() == "25–32"
+    page.click("#ch-next")
+    page.wait_for_function("document.querySelector('#channels [aria-pressed=true]').dataset.input === '32'")
+    # The console's colours reach the tiles (the demo desk colours its channels).
     page.wait_for_function(
         "[...document.querySelectorAll('#channels .ch-chip')].some(b => b.style.getPropertyValue('--ch'))", timeout=8000
     )
-    last = page.locator("#channels .ch-chip").last
-    last.click()
-    assert last.is_visible() and last.get_attribute("aria-pressed") == "true"
 
 
 def test_waterfall_layout_draws(page):
