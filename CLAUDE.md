@@ -47,22 +47,13 @@ The TF Editor protocol tests are in `tests/editor/` (the `console` / `client_for
 `tests/editor/test_guard.py` pins the write path: a change there needs a deliberate review,
 never a loosened assertion.
 
-## Standards (checked by `tests/test_standards.py`; fix the code, don't loosen the check)
+## Standards
 
-- **Small files.** A Python or JS file stays under 600 lines (a few older ones have a
-  recorded ceiling, which may only go down). Split by concern when one grows.
-- **Docstrings.** Every module starts with a docstring saying what it is for; a module
-  with routes lists them there (the only list of routes).
-- **The map stays true.** Every module is in `docs/architecture.md`'s tree; add a line
-  when you add a file, and update this file's map when an area changes.
-- **One copy of each helper.** Before writing a helper, look in `files.py`, `dsp/db.py`,
-  `console/patch.py`, `modules.py`, `static/common.js`, `tests/helpers.py`,
-  `tests/offline.py`. Test files never import from other test files.
-- **Fast tests.** A test that takes a second or more is `@pytest.mark.slow`; an unmarked
-  test over the limit fails. Wait on conditions (`wait_until`, `wait_settled` in
-  `tests/test_tf5.py`), never a fixed sleep; a sleep that checks that nothing happens
-  carries a comment on its line saying so.
-- **No dead code, no duplicate docs.** Delete what nothing uses; a fact lives in one
-  place and the others point to it.
+`tests/test_standards.py` and the slow-test limit (`tests/conftest.py`) check file size,
+docstrings, the architecture map, test imports and sleeps; when one fails, fix the code,
+don't loosen the check. Mark a test of a second or more `@pytest.mark.slow`. Reuse the
+shared helpers (`files.py`, `dsp/db.py`, `console/patch.py`, `modules.py`,
+`static/common.js`, `tests/helpers.py`, `tests/offline.py`) rather than writing another
+copy; delete what nothing uses; a fact lives in one place and the others point to it.
 
 The host `.venv` may be stale; don't rely on it.
