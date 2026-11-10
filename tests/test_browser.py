@@ -354,6 +354,11 @@ def test_eq_bands_can_be_dragged_and_typed_on_the_spectrum(page):
         page.mouse.down()
         for i in range(1, 6):  # drag up and a little right
             page.mouse.move(x + 4 * i, y - 6 * i)
+        # The dragged band's own curve is drawn under the total.
+        page.wait_for_function("(window.tfEqBandShown() || {}).key === 'HM'", timeout=3000)
+        assert page.evaluate("window.tfEqBandShown().peak") > 0
+        readout = page.evaluate("window.tfEqReadout()")  # its values beside the handle
+        assert "Hz" in readout and "dB" in readout and "Q " in readout
         page.mouse.up()
         page.wait_for_function("1", timeout=1000)
         wait = 0
@@ -374,14 +379,63 @@ def test_eq_bands_can_be_dragged_and_typed_on_the_spectrum(page):
         page.mouse.click(box["x"] + h["x"], box["y"] + h["y"])  # a click: its settings
         pop = page.get_by_role("dialog", name="EQ HM")
         pop.wait_for(timeout=3000)
-        pop.get_by_label("Gain").fill("-2.5")
-        pop.get_by_label("Gain").press("Enter")
+        pop.get_by_label("Gain", exact=True).fill("-2.5")
+        pop.get_by_label("Gain", exact=True).press("Enter")
         page.wait_for_timeout(200)
         for _ in range(50):
             if desk_band("HM")["gain"] == -2.5:
                 break
             page.wait_for_timeout(100)
         assert desk_band("HM")["gain"] == -2.5
+        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
+        page.mouse.click(box["x"] + h["x"], box["y"] + h["y"])  # clicked again: closed
+        pop.wait_for(state="detached", timeout=3000)
+        page.mouse.click(box["x"] + h["x"], box["y"] + h["y"])  # and again: open
+        pop.wait_for(timeout=3000)
+        page.keyboard.press("Escape")  # deselected: only the total curve
+        page.wait_for_function("window.tfEqBandShown() === null", timeout=3000)
+        assert page.evaluate("window.tfEqReadout()") is None  # only while dragging
+
+        # Its lock (beside the label) keeps the frequency: a drag then changes only the gain.
+        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
+        page.mouse.click(box["x"] + h["lock"]["x"], box["y"] + h["lock"]["y"])
+        page.wait_for_function("window.tfEqHandles().find(h => h.key === 'HM').locked", timeout=3000)
+        locked = desk_band("HM")
+        x, y = box["x"] + h["x"], box["y"] + h["y"]
+        page.mouse.move(x, y)
+        page.mouse.down()
+        for i in range(1, 6):  # up and well to the right
+            page.mouse.move(x + 10 * i, y - 6 * i)
+        assert "[locked]" in page.evaluate("window.tfEqReadout()")
+        page.mouse.up()
+        for _ in range(50):
+            if desk_band("HM")["gain"] > locked["gain"]:
+                break
+            page.wait_for_timeout(100)
+        moved = desk_band("HM")
+        assert moved["gain"] > locked["gain"] and moved["freq"] == locked["freq"]
+
+        # The settings: + steps the gain, and the locked frequency can't be typed in.
+        page.wait_for_function(
+            """() => new Promise((ok) => {
+                const at = () => JSON.stringify(window.tfEqHandles().find((h) => h.key === 'HM'));
+                const a = at(); setTimeout(() => ok(at() === a), 400);
+            })""",
+            timeout=8000,
+        )
+        h = page.evaluate("window.tfEqHandles().find(h => h.key === 'HM')")
+        page.mouse.click(box["x"] + h["x"], box["y"] + h["y"])
+        pop.wait_for(timeout=3000)
+        assert pop.get_by_label("Frequency", exact=True).is_disabled()
+        pop.get_by_label("Gain up").click()
+        for _ in range(50):
+            if desk_band("HM")["gain"] == moved["gain"] + 0.5:
+                break
+            page.wait_for_timeout(100)
+        assert desk_band("HM")["gain"] == moved["gain"] + 0.5
+        pop.get_by_label("Lock Frequency").click()  # unlocked again
+        assert not pop.get_by_label("Frequency", exact=True).is_disabled()
+        page.wait_for_function("!window.tfEqHandles().find(h => h.key === 'HM').locked", timeout=3000)
     finally:  # leave the shared demo desk as it was
         band = "PEQ/Bank/Band:1"
         put(

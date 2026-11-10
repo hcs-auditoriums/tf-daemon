@@ -11,7 +11,8 @@ export const color = (name) => css.getPropertyValue(name).trim();
 export const C = {
   grid: color("--grid"), gridStrong: color("--grid-strong"), muted: color("--muted"),
   avg: color("--avg"), avgFill: color("--avg-fill"), peak: color("--peak"), rta: color("--rta"),
-  eq: color("--eq"), eqFill: color("--eq-fill"), vocal: color("--vocal"),
+  panel: color("--panel"), border: color("--border"), text: color("--text"),
+  eq: color("--eq"), eqFill: color("--eq-fill"), eqBand: color("--eq-band"), eqBandFill: color("--eq-band-fill"), vocal: color("--vocal"),
 };
 
 export const state = {
@@ -31,6 +32,9 @@ export const state = {
   lastSeq: 0,
   hover: null, // {x, y} in CSS px
 };
+
+// A frequency for people: "250 Hz", "2.5 kHz".
+export const fmtHz = (f) => (f >= 1000 ? `${+(f / 1000).toFixed(2)} kHz` : `${Math.round(f)} Hz`);
 
 export function loadInt(key, def) {
   try { const v = parseInt(localStorage.getItem(key), 10); return Number.isFinite(v) ? v : def; }

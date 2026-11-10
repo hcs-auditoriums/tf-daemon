@@ -12,6 +12,8 @@
   --rta: #c9d1d9;   /* real-time trace (neutral, so green stays the EQ's) */
   --eq: #3ee66e;    /* console EQ overlay: green, as the TF5 draws it */
   --eq-fill: rgba(62, 230, 110, 0.10);
+  --eq-band: #d2ffe0;  /* the selected EQ band's own curve, under the total */
+  --eq-band-fill: rgba(210, 255, 224, 0.14);
   --vocal: #b48cff;  /* vocal assist: voice vs reference */
   --ok: #4cd07d;
   --bad: #ff5d5d;
@@ -503,8 +505,30 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
   border-radius: 8px; background: var(--panel); box-shadow: 0 6px 20px rgba(0,0,0,.4); font-size: 12px; }
 .eqp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .eqp-x { background: none; border: 0; color: inherit; font-size: 16px; cursor: pointer; }
-.eqp-row { display: grid; grid-template-columns: 70px 1fr 24px; gap: 6px; align-items: center; margin: 4px 0; }
-.eqp-row input[type=number], .eqp-row select { width: 100%; font: inherit; }
+.eqp-row { display: grid; grid-template-columns: 58px auto 20px 22px; gap: 4px; align-items: center; margin: 4px 0; }
+.eqp-row select { width: 100%; font: inherit; grid-column: 2 / span 2; }
+/* − value + : one compact control */
+.eqp-num { display: flex; height: 26px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--bg); }
+.eqp-num input { width: 58px; min-width: 0; border: 0; padding: 0 2px; text-align: center; font: inherit;
+  font-variant-numeric: tabular-nums; background: none; color: inherit; -moz-appearance: textfield; }
+.eqp-num input::-webkit-inner-spin-button, .eqp-num input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.eqp-step { width: 24px; padding: 0; border: 0; background: var(--panel); color: var(--text); font: inherit; font-size: 14px;
+  cursor: pointer; touch-action: manipulation; }
+.eqp-step:hover { background: var(--border); }
+.eqp-num:has(input:disabled) { opacity: .5; }
+.eqp-lock { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px;
+  background: none; color: var(--muted); cursor: pointer; touch-action: manipulation; }
+.eqp-lock[aria-pressed="true"] { color: var(--eq); }
+.eqp-lock:hover { background: var(--border); }
+/* Touch: finger-sized targets, and 16px text so a phone doesn't zoom into the field */
+@media (pointer: coarse) {
+  .eqp-row { grid-template-columns: 58px auto 20px 36px; margin: 6px 0; }
+  .eqp-num { height: 36px; }
+  .eqp-num input { width: 60px; font-size: 16px; }
+  .eqp-step { width: 36px; font-size: 18px; }
+  .eqp-lock { width: 36px; height: 36px; }
+  .eqp-x { min-width: 36px; min-height: 36px; }
+}
 .eqp-row input[type=checkbox] { justify-self: start; }
 .eqp-unit, .eqp-note { color: var(--muted); }
 
