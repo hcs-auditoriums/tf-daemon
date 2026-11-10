@@ -944,7 +944,8 @@ div.help-row { color: var(--muted); }
   .eq-bar { position: static; flex-wrap: wrap; gap: 6px; padding: 8px 12px; background: var(--panel); border-top: 1px solid var(--border); }
   .eq-bar > .eqb-btn { flex: 1 1 0; min-height: 44px; }
   .eqb-menu { flex: 1 0 100%; }
-  .eqb-menu > summary { min-height: 40px; }
+  .eqb-menu > summary { min-height: 40px; font-size: 14px; display: flex; justify-content: center; align-items: center; }
+  .eqb-menu > summary::after { content: "More"; margin-left: 6px; }   /* copy, paste, compare, gain flat */
   .eqb-panel { position: static; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; min-width: 0; margin-top: 6px;
                padding: 0; background: none; border: 0; box-shadow: none; }
   .eqb-panel .eqb-btn { justify-items: center; white-space: normal; min-height: 44px; }
@@ -970,7 +971,8 @@ div.help-row { color: var(--muted); }
     padding: 6px 10px; gap: 0; background: var(--panel); font-size: 13px;
   }
   .rl-toggle { min-height: 40px; font-size: 14px; }
-  .rl-line { min-height: 40px; }
+  .rl-line { min-height: 40px; flex-wrap: wrap; white-space: normal; row-gap: 2px; }   /* nothing clipped: Ignore wraps under */
+  .rl-line > .rl-from { max-width: 100%; }
   .rl-btn { min-height: 34px; padding: 4px 12px; font-size: 13px; }
   .console-btn { width: 40px; height: 40px; top: 4px; right: 6px; }
   /* A swipe over the plot scrolls the page; the EQ takes a touch on a handle (audio/eqedit.js). */
