@@ -5,6 +5,7 @@
 import "./audio/commands.js";
 import { drawEq } from "./audio/eq.js";
 import { syncEqBar } from "./audio/eqbar.js";
+import { syncEqPop } from "./audio/eqedit.js";
 import { drawGrid, drawHover, H, PAD, resize, trace, W } from "./audio/plot.js";
 import { drawRingMarkers, syncRingList } from "./audio/rings.js";
 import { C, ctx, state } from "./audio/shared.js";
@@ -30,6 +31,7 @@ function draw() {
   ctx.restore();
   drawHover();
   syncEqBar();
+  syncEqPop();
   syncRingList();
 }
 

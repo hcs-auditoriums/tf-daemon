@@ -281,7 +281,12 @@ def test_eq_toolbar_double_tap_pinch_and_types(page):
         lm = "PEQ/Bank/Band:0"
         put_eq(1, [[f"{lm}/Gain", -400], [f"{lm}/Q", 2000]])  # a mid band: always a bell
         wait_desk(page, 1, lambda e: band(e, "LM")["gain"] == -4 and band(e, "LM")["q"] == 2, "LM a -4 dB bell")
-        hm_q = band(desk_eq(1), "HM")["q"]
+        hm_q = None  # once the first pinch's last writes have landed: two reads alike
+        for _ in range(20):
+            q, hm_q = hm_q, band(desk_eq(1), "HM")["q"]
+            if q == hm_q:
+                break
+            page.wait_for_timeout(250)
         page.wait_for_timeout(500)
         lmh = page.evaluate("window.tfEqHandles().find(h => h.key === 'LM')")
         page.mouse.click(box["x"] + lmh["x"], box["y"] + lmh["y"])
@@ -308,6 +313,24 @@ def test_eq_toolbar_double_tap_pinch_and_types(page):
         wait_desk(page, 1, lambda e: not e["on"], "the EQ off")
         eq_btn.click()
         wait_desk(page, 1, lambda e: e["on"], "the EQ on")
+
+        # HPF on / off: the toolbar's button and the open settings' Off / On follow each other.
+        hpf_btn = bar.get_by_role("button", name="HPF", exact=True)
+        hpfh = page.evaluate("window.tfEqHandles().find(h => h.key === 'HPF')")
+        page.mouse.click(box["x"] + hpfh["x"], box["y"] + hpfh["y"])
+        pop = page.get_by_role("dialog", name="EQ HPF")
+        pop.wait_for(timeout=3000)
+        was = hpf_btn.get_attribute("aria-pressed") == "true"
+        checked = "document.querySelector('.eq-pop [role=radio][aria-checked=true]')?.textContent === '{}'"
+        hpf_btn.click()
+        wait_desk(page, 1, lambda e: e["hpf"]["on"] != was, "the HPF toggled from the toolbar")
+        page.wait_for_function(checked.format("Off" if was else "On"), timeout=3000)
+        pop.get_by_role("radio", name="On" if was else "Off").click()
+        wait_desk(page, 1, lambda e: e["hpf"]["on"] == was, "the HPF back from its settings")
+        page.wait_for_function(
+            f"document.querySelector('#eq-bar [title^=High-pass]').ariaPressed === '{str(was).lower()}'", timeout=3000
+        )
+        page.keyboard.press("Escape")
 
         # Copy, gain flat, then A/B: the copied EQ (HM +4 dB) and back to flat.
         menu = bar.locator("summary")

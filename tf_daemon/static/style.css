@@ -488,15 +488,13 @@ main.page {
   flex: 1 1 0; min-width: 0; min-height: 32px; padding: 0; font: inherit; font-size: 10px; font-weight: 700; letter-spacing: -0.02em;
   overflow: hidden; text-overflow: clip; white-space: nowrap;
   color: var(--muted); background: #1e242c; border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
-  position: relative;
 }
 .cp-tool[hidden] { display: none; }
 .cp-tool:hover { color: var(--text); }
+/* Selected: the blue fill. On (lit): green text (+48V: red), selected or not. */
+.cp-tool[aria-pressed="true"] { border-color: var(--avg); color: var(--text); background: #24435c; }
 .cp-tool.lit { color: var(--ok); }
 .cp-tool.lit.p48 { color: var(--bad); }
-.cp-tool[aria-pressed="true"] { border-color: var(--avg); color: var(--text); background: #24435c; }
-.cp-tool.lit[aria-pressed="true"]::after { content: ""; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--ok); }
-.cp-tool.p48[aria-pressed="true"]::after { background: var(--bad); }
 .cp-eqrow { display: flex; align-items: center; gap: 6px; }
 .cp-eqrow .cp-eqinfo { flex: 1; min-width: 0; }
 .cp-name { font-size: 15px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -532,15 +530,17 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
 .cp-fader { display: grid; grid-template-columns: 1fr 14px 1fr; flex: 1; min-height: 150px; padding: 16px 0; }
 /* The margin clears the cap, which reaches 19px past the track on each side. */
 .cp-scale { position: relative; width: 30px; justify-self: end; margin-right: 22px; color: var(--muted); font-size: 11px; }
-.cp-scale span { position: absolute; right: 0; transform: translateY(50%); line-height: 1; }
+/* Positions along the fader: --p, 0 (−∞) to 1 (+10), set by audio/console.js on each mark and
+   on the track (the fill and the cap). Upright here; across on a phone (below). */
+.cp-scale span { position: absolute; right: 0; bottom: calc(var(--p) * 100%); transform: translateY(50%); line-height: 1; }
 .cp-scale span.zero { color: var(--text); font-weight: 700; }
-.cp-track { position: relative; width: 14px; border-radius: 7px; background: var(--bg); border: 1px solid var(--border); }
-.cp-track i { position: absolute; left: -9px; right: -9px; height: 1px; background: var(--grid-strong); }
+.cp-track { --p: 0; position: relative; width: 14px; border-radius: 7px; background: var(--bg); border: 1px solid var(--border); }
+.cp-track i { position: absolute; left: -9px; right: -9px; bottom: calc(var(--p) * 100%); height: 1px; background: var(--grid-strong); }
 .cp-track i.minor { left: -4px; right: -4px; background: var(--grid); }
 .cp-track i.zero { left: -12px; right: -12px; background: var(--muted); }
-.cp-fill { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 7px; background: var(--avg-fill); }
+.cp-fill { position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--p) * 100%); border-radius: 7px; background: var(--avg-fill); }
 .cp-cap {
-  position: absolute; left: 50%; width: 52px; height: 30px; transform: translate(-50%, 50%);
+  position: absolute; left: 50%; bottom: calc(var(--p) * 100%); width: 52px; height: 30px; transform: translate(-50%, 50%);
   border-radius: 4px; background: linear-gradient(#e8ecf1, #b9c1cb);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
@@ -563,26 +563,6 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
 .cp-extra { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
 .cp-extra dt { color: var(--muted); }
 .cp-extra dd { margin: 0; text-align: right; }
-
-@media (max-width: 720px) {
-  .workspace { flex-direction: column; }
-  .console-panel { width: 100%; min-width: 0; max-height: 45vh; border-left: 0; border-top: 1px solid var(--border); }
-  .workspace > main { min-height: 260px; }
-  /* A phone: the top bar in two rows at most (no title, the connection as its dot alone). */
-  header { gap: 8px; padding: 6px 8px; }
-  header h1 { display: none; }
-  .conn { font-size: 0; }
-  /* The audio page: tabs, the connection and ☰ on one row; a ring alert on the next; the
-     menus only while ☰ is open. */
-  header:has(#menus-btn) .status { display: contents; }
-  header:has(#menus-btn) .conn { order: 2; margin-left: auto; }
-  .menus-btn { display: block; order: 3; }
-  header:has(#menus-btn) .ring-alert { order: 4; flex: 1 0 100%; }
-  header .menus { order: 5; flex: 1 0 100%; flex-wrap: wrap; display: none; }
-  header.menus-open .menus { display: flex; }
-  .ch-step { min-height: 40px; }
-  nav button.ch-chip { min-height: 48px; }
-}
 
 /* ---------------------------------------------------------------- rings (audio page) */
 
@@ -612,10 +592,6 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
 main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { right: auto; left: 52px; }
 .ring-list[hidden] { display: none; }
 .ring-list.collapsed { width: auto; }
-@media (max-width: 720px) {
-  .ring-list, main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { left: 8px; right: 8px; width: auto; max-width: none; }
-  .ring-list.collapsed { right: auto; }
-}
 .rl-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 0 2px 4px; font-weight: 600; }
 .ring-list.collapsed .rl-head { padding-bottom: 0; }
 .rl-toggle { font: inherit; font-weight: 600; color: var(--text); background: none; border: 0; padding: 4px 2px; min-height: 28px; cursor: pointer; }
@@ -742,7 +718,6 @@ main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { ri
   .eqp-x { min-width: 36px; min-height: 36px; }
   .eqp-seg button { min-height: 40px; }
 }
-.eqp-row input[type=checkbox] { justify-self: start; }
 .eqp-unit, .eqp-note { color: var(--muted); }
 
 /* Ring-out (audio/ringout.js): the setup dialog and the popup that stays up while it runs */
@@ -834,7 +809,6 @@ main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { ri
 .dyn-graph { position: static; display: block; width: 100%; height: 150px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
              touch-action: none; cursor: ew-resize; }
 @media (pointer: coarse) { .sp-toggle { min-height: 40px; } .sp-row input[type="range"] { height: 28px; } }
-@media (max-width: 720px) { .strip-panel { left: 8px; right: 8px; width: auto; max-width: none; top: 8px; } }
 /* A send in two lines: name, ON, PRE; then its level (and pan for a pair) with the value beside it. */
 .sp-send .sp-row { grid-template-columns: 1fr 52px; }
 .sp-send .sp-row .sp-name { display: none; }
@@ -873,3 +847,138 @@ button.help-row { cursor: pointer; }
 button.help-row:hover, button.help-row:focus-visible { background: #24435c; }
 div.help-row { color: var(--muted); }
 .help-keys { display: flex; gap: 4px; flex: none; }
+
+/* ---------------------------------------------------------------- a phone (upright or on its side)
+
+   The page scrolls instead of fitting the screen: the plot gets a fixed height (most of the
+   screen), the ring list follows it, then the console strip at full width with its fader lying across (a vertical swipe over it still scrolls the page) and
+   without the EQ thumbnail (the EQ is on the plot). The strip's settings, the mic check, an
+   EQ band's settings and the rings are sections of the page too, never over anything. */
+@media (max-width: 720px), (max-height: 500px) {
+  html, body { height: auto; min-height: 100%; }
+  /* The plot's height is its panes' (split 3 : 2 when both show); main grows to what follows
+     them in the page (the ring list). */
+  main.split { --plot-h: clamp(280px, 54svh, 560px); flex: none; }
+  main.split > .pane { flex: none; height: var(--plot-h); }
+  main.split:not(:has(> .pane[hidden])) > .pane.spectrum { height: calc(var(--plot-h) * 0.6); }
+  main.split:not(:has(> .pane[hidden])) > .pane.waterfall { height: calc(var(--plot-h) * 0.4); }
+  .workspace { flex: none; flex-direction: column; }
+  /* The top bar in one or two rows (no title, the connection as its dot alone). */
+  header { gap: 8px; padding: 6px 8px; }
+  header h1 { display: none; }
+  .status { flex: 0 1 auto; min-width: 0; }
+  .conn { font-size: 0; }
+  /* The audio page: tabs, the connection and ☰ on one row; a ring alert on the next; the
+     menus only while ☰ is open. */
+  header:has(#menus-btn) .status { display: contents; }
+  header:has(#menus-btn) .conn { order: 2; margin-left: auto; }
+  .menus-btn { display: block; order: 3; min-height: 40px; }
+  header:has(#menus-btn) .ring-alert { order: 4; flex: 1 0 100%; }
+  header .menus { order: 5; flex: 1 0 100%; flex-wrap: wrap; display: none; }
+  header.menus-open .menus { display: flex; }
+  .ch-step { min-height: 40px; }
+  nav button.ch-chip { min-height: 48px; }
+
+  /* The strip, one card: the name (the page has scrolled the tiles away), the fader, ON beside
+     pan, then IN / EQ / GATE / COMP / SEND as a tab bar with one tab always shown under it
+     (audio/strip.js): EQ's summary and Profiles, or the strip settings that follow the card. */
+  .console-panel { display: grid; grid-template-columns: auto 1fr; grid-auto-flow: row dense; align-items: center;
+                   width: 100%; min-width: 0; overflow: visible; gap: 14px 12px; padding: 12px 12px 0; font-size: 13px;
+                   border-left: 0; border-top: 1px solid var(--border); }
+  .console-panel > * { grid-column: 1 / -1; min-width: 0; }
+  .cp-head { order: -1; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; text-align: left; }
+  .cp-fadersec { order: 1; }
+  .console-panel > .cp-on { order: 2; grid-column: 1; min-width: 88px; min-height: 44px; padding: 0 16px; }
+  .cp-panrow { order: 2; grid-column: 2; }
+  .cp-extra { order: 3; }
+  .cp-tools { order: 10; gap: 0; margin: 2px 0 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .cp-tool { min-height: 44px; font-size: 13px; letter-spacing: 0.02em; border: 0; border-left: 1px solid var(--border); border-radius: 0; }
+  .cp-tool:first-child { border-left: 0; }
+  .cp-tool[aria-pressed="true"] { background: #24435c; border-color: var(--border); box-shadow: inset 0 -3px 0 var(--avg); }
+  .cp-eqsec { order: 11; display: none; padding-bottom: 12px; }
+  .console-panel.eq-tab .cp-eqsec { display: flex; }
+  .console-panel .cp-eq { display: none; }
+  .cp-eqinfo { font-size: 12px; }
+  .cp-profmenu > summary { min-height: 40px; padding: 0 14px; }
+  .cp-panrow { grid-template-columns: 36px 1fr 36px; min-height: 40px; }
+  .cp-pan { height: 12px; }
+  .cp-pan span { width: 22px; height: 22px; }
+  .cp-label { font-size: 12px; }
+  /* The fader across, made for a thumb: a wide bar filled to the level (ticks inside it, 0 dB
+     brightest), a narrow ridged cap riding it, the scale under it, the level large above it. */
+  .cp-fadersec { flex: none; gap: 6px; }
+  .cp-fadersec .cp-value { font-size: 24px; }
+  .cp-fader { display: flex; flex-direction: column-reverse; gap: 8px; min-height: 0; padding: 6px 14px 0; }
+  .cp-scale { width: auto; height: 14px; margin: 0; justify-self: auto; font-size: 12px; }
+  .cp-scale span { right: auto; bottom: auto; left: calc(var(--p) * 100%); transform: translateX(-50%); }
+  .cp-track { width: auto; height: 36px; border-radius: 8px; }
+  .cp-track i, .cp-track i.minor, .cp-track i.zero { left: calc(var(--p) * 100%); right: auto; bottom: auto; width: 1px; height: auto; }
+  .cp-track i { top: 9px; bottom: 9px; }
+  .cp-track i.minor { top: 14px; bottom: 14px; }
+  .cp-track i.zero { top: 3px; bottom: 3px; width: 2px; margin-left: -1px; background: var(--text); }
+  .cp-fill { right: auto; top: 0; height: auto; width: calc(var(--p) * 100%); border-radius: 7px 0 0 7px;
+             background: rgba(63, 182, 255, 0.3); box-shadow: inset -2px 0 0 var(--avg); transition-property: width; }
+  .cp-cap { left: calc(var(--p) * 100%); bottom: auto; top: 50%; width: 22px; height: 50px; border-radius: 6px;
+            transform: translate(-50%, -50%); transition-property: left; z-index: 1; }
+  .cp-cap::after { left: 50%; right: auto; top: 12px; bottom: 12px; width: 8px; height: auto; margin: 0 0 0 -4px;
+                   background: repeating-linear-gradient(to right, #1b2028 0 2px, transparent 2px 3px); }
+  .cp-track.writable { cursor: ew-resize; touch-action: pan-y; }
+  .cp-track.writable::before { inset: -10px -14px; }
+
+  /* Nothing floats over the plot: its panels are sections of the page, in this order under it:
+     the EQ toolbar, an EQ band's settings, the mic check, the strip (its tool row last), that
+     row's settings (Input / Gate / Comp / Sends), the rings. main lends its children to the
+     workspace for that; what stays on the plot (the hover readout, the strip toggle) is placed
+     in the workspace, whose top is the plot's. */
+  .workspace { position: relative; }
+  .workspace > main.split { display: contents; }
+  .workspace > main > .pane { order: 0; }
+  .eq-bar { order: 1; }
+  .eq-pop, .vocal-panel { order: 2; }
+  .console-panel { order: 3; }
+  .strip-panel { order: 4; }
+  .ring-list { order: 5; }
+  /* The EQ toolbar: EQ, HPF, undo, redo, A/B across; its menu a row under them, opening in place. */
+  .eq-bar { position: static; flex-wrap: wrap; gap: 6px; padding: 8px 12px; background: var(--panel); border-top: 1px solid var(--border); }
+  .eq-bar > .eqb-btn { flex: 1 1 0; min-height: 44px; }
+  .eqb-menu { flex: 1 0 100%; }
+  .eqb-menu > summary { min-height: 40px; font-size: 14px; display: flex; justify-content: center; align-items: center; }
+  .eqb-menu > summary::after { content: "More"; margin-left: 6px; }   /* copy, paste, compare, gain flat */
+  .eqb-panel { position: static; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; min-width: 0; margin-top: 6px;
+               padding: 0; background: none; border: 0; box-shadow: none; }
+  .eqb-panel .eqb-btn { justify-items: center; white-space: normal; min-height: 44px; }
+  .strip-panel, .vocal-panel, .eq-pop {
+    position: static; z-index: auto; width: auto; max-width: none; max-height: none; overflow: visible;
+    margin: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; box-shadow: none;
+    background: var(--panel); padding: 10px 12px;
+  }
+  .eq-pop { left: auto !important; top: auto !important; padding: 10px 16px; font-size: 14px; }
+  .strip-panel { border-top: 0; padding: 12px; }   /* the card's tab, continued */
+  .strip-panel .sp-head { display: none; }   /* the tab bar right above is its tabs */
+  .cp-profiles { position: static; margin-top: 8px; box-shadow: none; }
+  .cp-profmenu { margin-left: 0; }
+  .cp-eqrow { flex-wrap: wrap; }
+  .cp-profmenu[open] { flex: 1 0 100%; }
+  .eqp-row { grid-template-columns: 84px 1fr 28px 40px; }
+  .eqp-num { width: 100%; }
+  .eqp-num input { flex: 1; width: auto; }
+
+  /* Rings: a list of the page under the plot, not over it. */
+  .ring-list, .ring-list.collapsed, .ring-list.eq-busy, main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list {
+    position: static; width: auto; max-width: none; max-height: none; margin: 8px; overflow: hidden;
+    padding: 6px 10px; gap: 0; background: var(--panel); font-size: 13px;
+  }
+  .rl-toggle { min-height: 40px; font-size: 14px; }
+  .rl-line { min-height: 40px; flex-wrap: wrap; white-space: normal; row-gap: 2px; }   /* nothing clipped: Ignore wraps under */
+  .rl-line > .rl-from { max-width: 100%; }
+  .rl-btn { min-height: 34px; padding: 4px 12px; font-size: 13px; }
+  .console-btn { width: 40px; height: 40px; top: 4px; right: 6px; }
+  /* A swipe over the plot scrolls the page; the EQ takes a touch on a handle (audio/eqedit.js). */
+  #spectrum, #waterfall { touch-action: pan-y; }
+}
+@media (max-height: 500px) {
+  /* On its side: the plot fills the screen once the top bar has scrolled away; one top-bar row
+     (the ring alert beside the tabs). */
+  main.split { --plot-h: max(240px, calc(100svh - 8px)); }
+  header:has(#menus-btn) .ring-alert { order: 1; flex: 1 1 0; }
+}
