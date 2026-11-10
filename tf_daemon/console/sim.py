@@ -48,6 +48,7 @@ class SimConsole:
             mixing[f"InputChannel:{x}/Fader/On"] = int(self.rcp.values.get((inch + "Fader/On", x, 0), "1"))
         self.editor = SimEditor(mixing, host=host, port=eq_port)
         self.editor.on_write = self._editor_wrote
+        self.editor.on_recall = self._editor_recalled
         self.rcp.on_set = self._rcp_set
         self.rcp_port, self.eq_port = self.rcp.port, self.editor.port
         log.info("Simulated TF5 on %s: RCP port %d, TF Editor port %d", host, self.rcp_port, self.eq_port)
@@ -65,6 +66,11 @@ class SimConsole:
             x = int(m.group(1))
             self.rcp.held.add(x)
             self.rcp.store(RCP_PREFIX["InCh"] + f"Fader/{m.group(2)}", x, 0, str(value))
+
+    def _editor_recalled(self, number: str) -> None:
+        """A client recalled a scene over the editor protocol: RCP clients are told, as by the desk
+        (the RCP scene index base is PENDING; the slot number is used as is)."""
+        self.rcp.push(f"NOTIFY sscurrent_ex scene_{number[0].lower()} {int(number[1:])}")
 
     def _rcp_set(self, addr: str, x: int, y: int, value: str) -> None:
         """A fader moved "on the desk": editor-protocol clients see it too (origin: the console)."""

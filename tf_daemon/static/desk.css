@@ -1,0 +1,37 @@
+/* The Desk page (desk.html), on top of style.css's config-page cards. */
+
+main.page.desk { max-width: 1100px; }
+.table-wrap { overflow-x: auto; }
+.desk-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.desk-table th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.desk-table td { padding: 4px 8px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+.desk-table td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.desk-table td.muted { color: var(--muted); }
+.desk-table tr.current td { background: #1a2a38; }
+.desk-table tr.current td:first-child { box-shadow: inset 3px 0 0 var(--avg); }
+.desk-table tr.empty td { color: var(--muted); }
+.desk-table input[type="number"] { width: 7em; }
+.desk button, .desk input[type="number"] {
+  font: inherit; font-size: 13px; color: var(--text); background: #1e242c;
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px;
+}
+.desk button:not(:disabled) { cursor: pointer; }
+.desk button:not(:disabled):hover { border-color: var(--muted); }
+.desk button:disabled, .desk input:disabled { opacity: 0.45; cursor: not-allowed; }
+.desk button.primary { background: #24435c; border-color: var(--avg); }
+.tag { margin-left: 6px; padding: 0 6px; font-size: 11px; color: var(--warn); border: 1px solid var(--warn); border-radius: 8px; }
+
+.confirm { border: 1px solid var(--warn); border-radius: 8px; padding: 10px 12px; background: #221d10; }
+.confirm[hidden] { display: none; }
+.confirm p { margin: 0 0 8px; }
+
+.fx-units { display: flex; flex-direction: column; gap: 10px; }
+.fx-unit { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.fx-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.fx-plugin { color: var(--avg); }
+.fx-unit input[type="number"] { width: 6em; }
+.fx-unit summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.fx-values { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 10px; margin-top: 6px; }
+.fx-values label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.fx-values label span { width: 2.6em; text-align: right; font-variant-numeric: tabular-nums; }
+.fx-values input[type="number"] { flex: 1; min-width: 0; width: auto; }

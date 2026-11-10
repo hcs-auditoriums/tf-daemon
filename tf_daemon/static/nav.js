@@ -1,4 +1,4 @@
-// Shift+Left / Shift+Right: previous / next page tab (Audio, RF, Wireless, Config),
+// Shift+Left / Shift+Right: previous / next page tab (Audio, RF, Wireless, Desk, Config),
 // wrapping around. Shared by every page; the order comes from the tab bar itself.
 //
 // Stays out of the way of other shortcuts: only plain Shift+arrow (no Ctrl / Alt /

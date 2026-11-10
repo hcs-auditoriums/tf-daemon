@@ -57,7 +57,7 @@ def test_every_simulated_device_is_up(status):
     assert m["qlxd"]["receivers"] == m["qlxd"]["online"] == 4
 
 
-@pytest.mark.parametrize("page", ["/", "/rf", "/qlxd", "/config"])
+@pytest.mark.parametrize("page", ["/", "/rf", "/qlxd", "/desk", "/config"])
 def test_pages_load(status, page):
     code, body = get(page)
     assert code == 200 and b"<html" in body.lower()
@@ -112,6 +112,21 @@ def test_any_desk_parameter_is_read(status):
     assert isinstance(scene["value"], str) and scene["spec"]["type"] == "str"
     _, tf5 = get("/api/tf5/status")
     assert tf5["eq"]["scene_recall"] and "phantom" in tf5["eq"]["write_families"]
+
+
+def test_desk_page_reads_scenes_recorder_fx_and_delay(status):
+    """The Desk page's reads on the simulated desk (console/desk.py); read-only here."""
+    scenes = wait_for("/api/tf5/scenes", lambda d: d["synced"])
+    assert {"A01", "B00"} <= {s["number"] for s in scenes["scenes"]} and scenes["recall"]["available"]
+    assert not scenes["store"]["available"] and isinstance(scenes["current"]["number"], str)
+    rec = wait_for("/api/tf5/recorder", lambda d: d["synced"])
+    assert rec["read_only"] and rec["playlist"]["total"] == 3 and not any(c["available"] for c in rec["controls"])
+    _, fx = get("/api/tf5/fx")
+    assert fx["units"][0]["plugin"] == "Echo" and fx["units"][0]["writable"]  # demo: tf5.fx_write on
+    _, delay = get("/api/tf5/delay")
+    assert len(delay["strips"]) == 8 and delay["strips"][4]["writable"]
+    _, sel = get("/api/tf5/selected")
+    assert sel["channel"] == 11 and sel["inferred"]
 
 
 def test_rf_sweeps_the_receiver_range(status):

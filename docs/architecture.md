@@ -48,6 +48,10 @@ tf_daemon/
     rcp.py         TF5Client: names, faders, sends over RCP (TCP 49280)
     meters.py      MeterClient: level meters over RCP (mtrstart, read-only); probe CLI
     module.py      TF5Module: /api/tf5/* routes, console data for the audio page
+    desk.py        the Desk page's reads (/desk, /api/tf5/{scenes,recorder,fx,delay,selected}):
+    scenes.py        scene banks A/B, current scene, recall (store / undo: no known command)
+    recorder.py      USB recorder status, read-only (TRANSPORT_OPS: verified op strings go here)
+    effects.py       FX 1/2, insert FX (raw parameter values), ST IN / matrix delay
     sim.py         simulated TF5 (demo mode, tests): sim_rcp.py + sim_editor.py as one desk
     sim_rcp.py     its RCP side
     sim_editor.py  its TF Editor side: all 10 functions, set-param echo, scene recall
@@ -74,6 +78,8 @@ tf_daemon/
     module.py      /qlxd page, HTTP + WebSocket routes
   static/          rf.html + rf.js (RF), qlxd.html + qlxd.js (wireless),
                    config.html + config.js, nav.js (all pages), style.css;
+                   desk.html + desk.js + desk.css (scenes, recorder, FX, delay)
+                   with desk/: scenes.js, recorder.js, effects.js, ui.js;
                    the page scripts are ES modules (no build step) sharing
                    common.js ($, storage, JSON POST, reconnecting websocket,
                    canvas sizing)
@@ -166,7 +172,7 @@ the reference:
 |---|---|---|
 | Pages, status | `GET /`, `GET /api/status` (per-module counters) | `app.py` |
 | Audio | `/api/audio/*`, `WS /ws/audio` | `audio/module.py`; binary frame format in `audio/engine.py` |
-| TF5 console | `/api/tf5/*` | `console/module.py` |
+| TF5 console | `/api/tf5/*`, `/desk` | `console/module.py`, `console/desk.py` |
 | Vocal assist | `/api/vocal/*` | `vocal/module.py` |
 | RF | `/rf`, `/api/rf/*`, `WS /ws/rf` | `rf/module.py`; state format in `rf/engine.py` |
 | Wireless (QLX-D) | `/qlxd`, `/api/qlxd/*`, `WS /ws/qlxd` | `qlxd/module.py`; state format in `qlxd/engine.py` |

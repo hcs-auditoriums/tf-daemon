@@ -51,8 +51,8 @@ The table is generated from `tf_daemon/console/coverage.py` (also served at
 | GEQ (AUX 1-8, stereo): 31 bands, 12 adjustable, +-15 dB | GEQ | no | no | no | no | Ring detection names the nearest GEQ band |
 | Gate: on, threshold, range, attack, hold, decay | Gate | no | no | app | edit | Simulated by the app until the Gate names are recorded; CH 1-32; ranges in console/strip.py SPECS: Yamaha's shared ones, to confirm on the TF5 |
 | Compressor: on, 1-knob, threshold, ratio, attack, release, gain, knee | Comp | no | no | app | edit | Simulated by the app until the Comp names are recorded; 1-knob amount only; ranges in console/strip.py SPECS: Yamaha's shared ones, to confirm on the TF5 |
-| Scene list, recall, store | Scene | no | no | no | no | A recall is noticed (RCP sscurrent) and everything re-read; RecallScene is refused by the guard |
-| FX 1/2, insert FX, delay | FX, Delay | no | no | no | no |  |
-| USB recorder transport | Recorder | no | no | no | no |  |
+| Scene list, recall, store | Scene | Editor | Editor event (tf5.scene_recall): recall only | yes | edit | Desk page: both banks, current / edited, recall after a confirmation step (console/scenes.py); store and recall undo have no known command (shown unavailable); the desk's onRecalledScene STATUS token and DataType's meaning (stored / empty) are unverified; RCP sscurrent still re-reads everything |
+| FX 1/2, insert FX, delay | FX, Delay | Editor | Editor (FX: tf5.fx_write; delay: tf5.processing_write) | yes | edit | Desk page (console/effects.py): bypass, mix balance, plugin / library name, the 64 parameter values raw (meanings per plugin unknown); FX return names; ST IN / matrix delay in ms; writes unverified on a desk |
+| USB recorder transport | Recorder | Editor | no | yes | view | Desk page (console/recorder.py): transport state (raw, enums unknown), now playing, playlist, levels; transport commands unverified (OPERATE strings unknown, recorder.TRANSPORT_OPS empty) |
 | Copy / paste / compare / default per screen | Every screen's menu | - | - | - | edit | EQ: copy, paste, A/B, gain flat, undo (page side) |
 <!-- coverage:end -->

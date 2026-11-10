@@ -228,6 +228,9 @@ def default_mixing_values() -> dict[str, int | str]:
     v["Stereo:1/PEQ/Bank/Band:1/Gain"] = -300
     for x in range(8):
         v[f"DCA:{x}/Label/Name"] = f"DCA {x + 1}"
+    for x in range(4):  # FX 1 / 2 return on FX RTN 1L/1R, 2L/2R
+        v[f"FxRtnChannel:{x}/Label/Name"] = f"FX{x // 2 + 1} {'LR'[x % 2]}"
+    v.update({"Matrix:0/Label/Name": "Lobby", "Matrix:0/Delay/On": 1, "Matrix:0/Delay/Time": 12500})  # 12.5 ms
     return v
 
 
@@ -247,14 +250,71 @@ def default_values(func: str) -> dict[str, int | str]:
         names = ["INPUT", "FX", "MUTE 3", "MUTE 4", "MUTE 5", "MUTE 6"]
         v: dict[str, int | str] = {f"MuteMaster:{i}/Name": n for i, n in enumerate(names)}
         v.update({"Scene/LastScene": "A00", "CommSession/MobileMix/Password": MOBILE_PASSWORD})
+        v["Recorder/Record/Format"] = "WAV"  # the schema's default (string defaults aren't seeded)
         return v
     if func == "Processing":
         return {f"BuiltIn/InputPort:{p}/HeadAmp/Gain": g for p, g in enumerate((4500, 4000, 4200))}
     if func == "FX":
-        return {"FX:0/Param/PluginName": "Echo", "FX:1/Param/PluginName": "MonoDelay"}
+        return demo_fx_values()
     if func == "SceneStatus":
-        return {"Bank:0/Info:0/Title": "Default", "Bank:0/Info:1/Title": "Sunday"}
+        return demo_scene_values()
+    if func == "SceneList":
+        return {f"Bank:{b}/Info:{i}/FileName": f"SCENE_{'AB'[b]}{i:02d}.tfs" for b, i, *_ in DEMO_SCENES}
+    if func == "Status":
+        return demo_recorder_values()
+    if func == "ConsoleSetup":
+        return {"Common/SelectedCH": 0x0CA316C9, "Scene/SelectedScene": "A00"}  # CH 11, as read on the desk
     return {}
+
+
+# Demo scenes: (bank, slot, title, comment, fade time s x 10, protect)
+DEMO_SCENES = [
+    (0, 0, "Default", "", 0, 1),
+    (0, 1, "Sunday", "Morning service", 0, 0),
+    (0, 2, "Sunday PM", "Evening, band", 25, 0),
+    (0, 5, "Concert", "", 0, 0),
+    (1, 0, "Rehearsal", "Choir rehearsal", 0, 0),
+]
+
+
+def demo_scene_values() -> dict[str, int | str]:
+    v: dict[str, int | str] = {}
+    for b, i, title, comment, fade, protect in DEMO_SCENES:
+        base = f"Bank:{b}/Info:{i}"
+        stamp = {"Year": 2026, "Month": 11, "Day": 1 + i, "Hour": 9 + b, "Minute": 30, "Second": 0}
+        v.update({f"{base}/TimeStamp/{k}": n for k, n in stamp.items()})
+        v.update({f"{base}/DataType": 1, f"{base}/Title": title, f"{base}/Comment": comment})
+        v.update({f"{base}/Protect": protect, f"{base}/Fading/FadeTime": fade, f"{base}/Fading/On": int(fade > 0)})
+    return v
+
+
+def demo_fx_values() -> dict[str, int | str]:
+    """FX 1 / 2 and two inserts with the plugin names seen in the auditorium desk's dump; the
+    library names and raw parameter values are made up."""
+    v: dict[str, int | str] = {"FX:0/Param/PluginName": "Echo", "FX:1/Param/PluginName": "MonoDelay"}
+    v.update({"FX:0/Param/LibraryName": "Echo Hall", "FX:1/Param/LibraryName": "Mono Delay"})
+    v.update({"InsFX:0/Param/PluginName": "ReverbStage", "InsFX:1/Param/PluginName": "StereoDelay"})
+    v.update({f"FX:0/Param/Bank/Value:{i}": n for i, n in enumerate((2600, 120, 45, 0, 8000))})
+    v.update({f"FX:1/Param/Bank/Value:{i}": n for i, n in enumerate((350000, 30, -12))})
+    return v
+
+
+def demo_recorder_values() -> dict[str, int | str]:
+    """A USB stick with three songs, the second one loaded."""
+    songs = [("Prelude.wav", "Organ", 184), ("Walk-in.mp3", "Band", 242), ("Postlude.wav", "Organ", 201)]
+    v: dict[str, int | str] = {
+        "Recorder/PlayList/DeviceKind": 1,
+        "Recorder/PlayList/DirPath": "/YPE/SONGS",
+        "Recorder/PlayList/TotalSongs": len(songs),
+        "Recorder/PlayList/Current/SongNo": 1,
+        "Recorder/PlayList/Current/FileName": songs[1][0],
+        "Recorder/PlayList/Current/PlayTime": songs[1][2],
+        "Recorder/PlayList/Current/PlayPosition": 37,
+    }
+    for i, (name, artist, secs) in enumerate(songs):
+        base = f"Recorder/PlayList/Song:{i}"
+        v.update({f"{base}/FileName": name, f"{base}/ArtistName": artist, f"{base}/PlayTime": secs})
+    return v
 
 
 # ---------------------------------------------------------------------- console -> client messages

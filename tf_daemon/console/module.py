@@ -11,7 +11,7 @@ from flask_sock import Sock
 
 from ..config import TF5Config
 from ..dsp.eq import CURVE_FREQS, eq_curve
-from . import coverage
+from . import coverage, desk
 from .editor import tree
 from .editor.client import Changes, TFEditorClient
 from .editor.guard import FAMILIES, WRITABLE, WRITE_LIMITS, WriteNotAllowed, writable
@@ -71,6 +71,7 @@ class TF5Module:
                               covers a path; else {"ok", "results": [{path, value, confirmed, actual}]}
       POST /api/tf5/event/recall_scene  {"number": "A05", "confirm": true}: RECALL a scene (needs
                               tf5.scene_recall); {"ok", "number", "confirmed", "status"}
+      GET /desk, GET /api/tf5/{scenes,recorder,fx,delay,selected}: the Desk page and its reads (desk.py)
     """
 
     name = "tf5"
@@ -387,6 +388,7 @@ class TF5Module:
             log.info("%s set from the page on USB %d: %s", body.get("section"), usb + 1, done)
             return jsonify({"ok": True, "applied": done})
 
+        desk.register(app, bp, lambda: self.eq_client)  # /desk and its reads (scenes, recorder, FX, delay)
         app.register_blueprint(bp)
 
     @staticmethod

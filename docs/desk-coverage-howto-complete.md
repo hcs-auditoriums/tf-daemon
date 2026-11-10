@@ -455,6 +455,8 @@ A13) is [PENDING]: read `ssnum_ex` / `sscurrent_ex` once and compare with `Setup
 `guard.py` allows `RecallScene` only with `tf5.scene_recall` on, only during a person's request
 (`POST /api/tf5/event/recall_scene`); the simulator answers `STATUS:OK`, the real desk's STATUS
 token is [PENDING].
+tf-daemon reads this on the Desk page (`console/scenes.py`). `DataType` is u8 0–1, default 0; it is
+taken to mean "slot stored" [INFERRED], with a title, comment or time stamp also counting.
 
 ### 3.7 FX, insert FX, delay
 
@@ -488,7 +490,9 @@ the V4.55 tree. The display unit is `ConsoleSetup/Preference/Delay/{Scale,Frame}
 
 The `<op>` values come from the recorder view's `reqTransportCommand(int, QString, int)`; the
 user-defined-key list next to them names `Play/Pause, Stop, Next, Previous, Rec, Auto Rec,
-Rec & Start`. Capture TF Editor pressing each button once to get the exact strings.
+Rec & Start`. Capture TF Editor pressing each button once to get the exact strings. Put them in
+`console/recorder.py` `TRANSPORT_OPS`; sending them also needs a guard change (the guard refuses
+the `Transport` event today, `tests/test_desk.py`).
 
 ### 3.9 Other desk state a remote can use
 

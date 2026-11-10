@@ -241,14 +241,36 @@ FEATURES: list[Feature] = [
         "scenes",
         "Scene list, recall, store",
         "Scene",
-        "no",
-        "no",
-        "no",
-        "no",
-        "A recall is noticed (RCP sscurrent) and everything re-read; RecallScene is refused by the guard",
+        "Editor",
+        "Editor event (tf5.scene_recall): recall only",
+        "yes",
+        "edit",
+        "Desk page: both banks, current / edited, recall after a confirmation step (console/scenes.py); "
+        "store and recall undo have no known command (shown unavailable); the desk's onRecalledScene STATUS "
+        "token and DataType's meaning (stored / empty) are unverified; RCP sscurrent still re-reads everything",
     ),
-    Feature("fx", "FX 1/2, insert FX, delay", "FX, Delay", "no", "no", "no", "no"),
-    Feature("recorder", "USB recorder transport", "Recorder", "no", "no", "no", "no"),
+    Feature(
+        "fx",
+        "FX 1/2, insert FX, delay",
+        "FX, Delay",
+        "Editor",
+        "Editor (FX: tf5.fx_write; delay: tf5.processing_write)",
+        "yes",
+        "edit",
+        "Desk page (console/effects.py): bypass, mix balance, plugin / library name, the 64 parameter values raw "
+        "(meanings per plugin unknown); FX return names; ST IN / matrix delay in ms; writes unverified on a desk",
+    ),
+    Feature(
+        "recorder",
+        "USB recorder transport",
+        "Recorder",
+        "Editor",
+        "no",
+        "yes",
+        "view",
+        "Desk page (console/recorder.py): transport state (raw, enums unknown), now playing, playlist, levels; "
+        "transport commands unverified (OPERATE strings unknown, recorder.TRANSPORT_OPS empty)",
+    ),
     Feature(
         "copy_paste",
         "Copy / paste / compare / default per screen",

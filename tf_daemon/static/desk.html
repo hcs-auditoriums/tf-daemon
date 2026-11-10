@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tf-daemon · Desk</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/desk.css">
+</head>
+<body class="scroll">
+  <header>
+    <h1>tf-daemon</h1>
+    <nav class="tabs" aria-label="Pages"><a href="/">Audio</a><a href="/rf">RF</a><a href="/qlxd">Wireless</a><a href="/desk" aria-current="page">Desk</a><a href="/config">Config</a></nav>
+    <div class="status">
+      <span id="desk-error" class="error"></span>
+      <div id="conn" class="conn" title="Connection">connecting…</div>
+    </div>
+  </header>
+  <main class="page desk">
+    <section class="cfg-card" id="scenes" aria-labelledby="scenes-h">
+      <h2 id="scenes-h">Scenes</h2>
+      <dl class="facts">
+        <dt>Current</dt><dd id="scene-current">–</dd>
+        <dt>Selected on the desk</dt><dd id="scene-selected">–</dd>
+        <dt>Last recall</dt><dd id="scene-last">–</dd>
+        <dt>Selected channel</dt><dd id="selected-ch">–</dd>
+      </dl>
+      <div class="controls">
+        <label><input type="checkbox" id="scene-empty"> Show empty slots</label>
+        <button id="scene-store" type="button" disabled>Store…</button>
+        <button id="scene-undo" type="button" disabled>Undo recall</button>
+        <span id="scene-count" class="muted"></span>
+      </div>
+      <p class="muted" id="scene-unavailable"></p>
+      <p class="muted error" id="scene-recall-off"></p>
+      <div id="scene-confirm" class="confirm" role="alertdialog" aria-labelledby="scene-confirm-text" hidden>
+        <p id="scene-confirm-text"></p>
+        <div class="controls">
+          <button id="scene-confirm-btn" type="button" class="primary">Recall</button>
+          <button id="scene-cancel" type="button">Cancel</button>
+        </div>
+      </div>
+      <p class="muted" id="scene-msg"></p>
+      <div class="table-wrap">
+        <table class="desk-table" aria-label="Scenes">
+          <thead><tr><th>No.</th><th>Title</th><th>Comment</th><th>Fade</th><th>Stored</th><th></th></tr></thead>
+          <tbody id="scene-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="cfg-card" id="recorder" aria-labelledby="rec-h">
+      <h2 id="rec-h">USB recorder</h2>
+      <p class="muted" id="rec-note"></p>
+      <dl class="facts" id="rec-facts"></dl>
+      <div class="controls" id="rec-controls" aria-label="Transport (unavailable)"></div>
+      <div class="table-wrap">
+        <table class="desk-table" aria-label="Playlist">
+          <thead><tr><th>#</th><th>File</th><th>Artist</th><th>Length</th><th>Mark</th></tr></thead>
+          <tbody id="rec-songs"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="cfg-card" id="fx" aria-labelledby="fx-h">
+      <h2 id="fx-h">FX and insert FX</h2>
+      <p class="muted" id="fx-note"></p>
+      <div id="fx-units" class="fx-units"></div>
+    </section>
+
+    <section class="cfg-card" id="delay" aria-labelledby="delay-h">
+      <h2 id="delay-h">Delay</h2>
+      <p class="muted">ST IN channels and matrices (the only strips with a delay on the TF5). Time and offset in ms; a typed change waits for Apply.</p>
+      <div class="table-wrap">
+        <table class="desk-table" aria-label="Delay">
+          <thead><tr><th>Strip</th><th>Name</th><th>On</th><th>Time (ms)</th><th>Offset (ms)</th><th>L/R</th><th></th></tr></thead>
+          <tbody id="delay-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <footer id="info">TF Editor protocol (TCP 50368) · changes only on your click, within the tf5.* write switches</footer>
+  <script src="/static/nav.js"></script>
+  <script type="module" src="/static/desk.js"></script>
+</body>
+</html>

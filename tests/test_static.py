@@ -106,7 +106,9 @@ SCRIPTS = [
     "qlxd.js",
     "config.js",
     "nav.js",
+    "desk.js",
     *sorted(f"audio/{p.name}" for p in (STATIC / "audio").glob("*.js")),
+    *sorted(f"desk/{p.name}" for p in (STATIC / "desk").glob("*.js")),
 ]
 
 
@@ -153,16 +155,21 @@ def test_page_imports_resolve():
                 exports[dest] = _exports(sources[dest])
             missing = {n.strip() for n in names.split(",")} - exports[dest]
             assert not missing, f"{name} imports {sorted(missing)} that {target} doesn't export"
-    assert reached == {"common.js", *(p.name for p in (STATIC / "audio").glob("*.js"))}
+    assert reached == {
+        "common.js",
+        *(p.name for p in [*(STATIC / "audio").glob("*.js"), *(STATIC / "desk").glob("*.js")]),
+    }
 
 
-@pytest.mark.parametrize(("page", "script"), [("index", "app"), ("rf", "rf"), ("qlxd", "qlxd"), ("config", "config")])
+@pytest.mark.parametrize(
+    ("page", "script"), [("index", "app"), ("rf", "rf"), ("qlxd", "qlxd"), ("desk", "desk"), ("config", "config")]
+)
 def test_pages_load_as_modules(page, script):
     html = (STATIC / f"{page}.html").read_text(encoding="utf-8")
     assert f'<script type="module" src="/static/{script}.js"></script>' in html
 
 
-@pytest.mark.parametrize("page", ["index.html", "rf.html", "qlxd.html", "config.html"])
+@pytest.mark.parametrize("page", ["index.html", "rf.html", "qlxd.html", "desk.html", "config.html"])
 def test_every_page_has_tab_shortcuts(page):
     html = (STATIC / page).read_text(encoding="utf-8")
     assert '<script src="/static/nav.js"></script>' in html and 'class="tabs"' in html

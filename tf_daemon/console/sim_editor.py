@@ -3,7 +3,8 @@ recorded from TF Editor (guides/tf5_api.md, section 6), serving all 10 functions
 tree on their own frame tags (subscribe, hash compare, dump, set-param echo, pushes), with
 dumps built by sim_tree.py from the real tree so real wire addresses resolve. It applies and
 echoes set-params like the TF5, so writes work against it, answers ``RecallScene`` with
-``onRecalledScene`` (and updates ``Setup/Scene/LastScene``), and records every frame the client
+``onRecalledScene`` (and updates ``Setup/Scene/LastScene``; a Mixing write sets
+``Scene/EditFlag``), and records every frame the client
 sends so tests can check that nothing but read-only handshake traffic left the client.
 """
 
@@ -113,6 +114,7 @@ class SimEditor:
         self.all_writes: list[tuple[str, str, int | str]] = []  # (function, name path, value), every function
         self.recalls: list[str] = []  # RecallScene NUMBERs the client sent
         self.on_write: Callable[[str, int], None] | None = None  # after a client's Mixing set-param is applied
+        self.on_recall: Callable[[str], None] | None = None  # after a client's recall, with its NUMBER ("A05")
         self.raw: list[tuple[str, bytes]] = []
         self.srv = socket.create_server((host, port))
         self.port = self.srv.getsockname()[1]
@@ -201,6 +203,8 @@ class SimEditor:
             self.on_write(name, value)
         if self.echo_writes:
             self._send(conn, TAGS[func], set_param(func, e[4].value, e[5].value, value, origin=0xA0, vtype=e[7].type))
+        if func == "Mixing" and "Setup" in self.dumps and self.dumps["Setup"].get("Scene/EditFlag") == 0:
+            self.push_change("Scene/EditFlag", 1, func="Setup")  # the scene is now edited [INFERRED]
 
     def _recall(self, conn: socket.socket, args: str) -> None:
         """Like the TF5: recall, report the scene now loaded, and announce it."""
@@ -212,6 +216,8 @@ class SimEditor:
             self.push_change("Scene/LastScene", number, func="Setup")
             self.push_change("Scene/EditFlag", 0, func="Setup")
         self._send(conn, "EEVT", event("onRecalledScene", f"STATUS:{RECALL_STATUS if ok else 'Error'} NUMBER:{number}"))
+        if ok and self.on_recall is not None:
+            self.on_recall(number)
 
     # -------------------------------------------------- test controls
 

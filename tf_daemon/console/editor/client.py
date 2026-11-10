@@ -110,6 +110,7 @@ class TFEditorClient:
         self._authorized: dict[tuple[tuple[int, ...], tuple[int, ...]], tuple[int, int | str]] = {}  # addr -> value
         self._recall: str | None = None  # the RecallScene args of the recall_scene() in progress
         self._recalled: str | None = None  # its onRecalledScene STATUS, once it came
+        self.last_recalled: dict[str, Any] | None = None  # the desk's last onRecalledScene: number, status, at
         self._echo = threading.Condition()
         self._awaiting: dict[tuple[tuple[int, ...], tuple[int, ...]], int | str | None] = {}  # addr -> echoed value
         self.on_change = on_change
@@ -502,6 +503,7 @@ class TFEditorClient:
         elif name == "onRecalledScene":
             tokens = dict(t.partition(":")[::2] for t in args.split())
             log.info("TF5 editor protocol: scene %s recalled (%s)", tokens.get("NUMBER"), tokens.get("STATUS"))
+            self.last_recalled = {"number": tokens.get("NUMBER"), "status": tokens.get("STATUS"), "at": time.time()}
             with self._echo:
                 if self._recall is not None and tokens.get("NUMBER") == self._recall[7:]:
                     self._recalled = tokens.get("STATUS", "")
