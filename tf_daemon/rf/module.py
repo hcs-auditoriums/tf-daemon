@@ -4,7 +4,7 @@ Routes:
   GET  /rf                     RF spectrum page
   GET  /api/rf/status          connection / sweep counters
   GET  /api/rf/state           full state snapshot (same as a /ws/rf message)
-  POST /api/rf/connect         open the device
+  POST /api/rf/connect         open the device (503 with ``error`` if it isn't found)
   POST /api/rf/disconnect      stop sweeping and close the device
   POST /api/rf/scan/start      body: any of {start_hz, stop_hz, points, rbw, interval_s}
   POST /api/rf/scan/stop

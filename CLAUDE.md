@@ -26,10 +26,10 @@ Test doubles live in `tf_daemon/console/sim.py` (TF5 RCP + TF Editor), `tf_daemo
 the RF demo device in `tf_daemon/rf/devices.py` and the synth source in
 `tf_daemon/audio/sources.py`. Reuse and extend those, don't make new ones. Tests use
 ephemeral ports and `tmp_path`, so they are safe in parallel. Keep it that way.
-The TF Editor protocol tests are in `tests/editor/` (fixtures in its `conftest.py`, shared
-doubles and `assert_read_only` in `tests/editor_fakes.py`). `tests/editor/test_guard.py` pins
+The TF Editor protocol tests are in `tests/editor/` (the `console` / `client_for` fixtures in
+`tests/conftest.py`, shared doubles and `assert_read_only` in `tests/editor_fakes.py`). `tests/editor/test_guard.py` pins
 the write path: a change there needs a deliberate review, never a loosened assertion.
-When a test waits on a simulated device, wait for the condition (`wait_until`,
-`wait_settled` in `tests/test_tf5.py`), never a fixed sleep.
+When a test waits on a simulated device, wait for the condition (`wait_until` in
+`tests/helpers.py`, `wait_settled` in `tests/test_tf5.py`), never a fixed sleep.
 
 The host `.venv` may be stale; don't rely on it.

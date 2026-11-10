@@ -6,7 +6,9 @@ tf_daemon/
   wsgi.py          gunicorn entry point (env-var configured)
   app.py           Flask app factory; the one place modules are built and wired
   config.py        typed, validated, immutable Config (one dataclass per section)
-  modules.py       Module protocol: register(app, sock) / start / stop / status
+  modules.py       Module protocol: register(app, sock) / start / stop / status;
+                   EngineModule, the base of the RF and QLX-D modules
+  files.py         write_atomic: state and config files are replaced, never half-written
   hub.py           FrameHub: latest-value broadcast shared by the modules
   system.py        /config page: config.toml editing, restart, self-update
   vocal/           ── vocal EQ assist (everything it does lives here) ──
@@ -26,6 +28,7 @@ tf_daemon/
     spectrum.py    windowed FFT, averaging, peak hold, log display bins
     ring.py        ring / feedback detection and attribution
     eq.py          the console EQ's response curve (TF Editor's maths)
+    db.py          dB conversions
   console/         ── the Yamaha TF5 over the network ──
     patch.py       which console source each USB capture channel carries
     rcp.py         TF5Client: names, faders, sends over RCP (TCP 49280)
@@ -50,7 +53,10 @@ tf_daemon/
     sim.py         simulated QLXD4 receivers (demo mode, tests)
     module.py      /qlxd page, HTTP + WebSocket routes
   static/          rf.html + rf.js (RF), qlxd.html + qlxd.js (wireless),
-                   config.html + config.js, nav.js (all pages), style.css
+                   config.html + config.js, nav.js (all pages), style.css;
+                   the page scripts are ES modules (no build step) sharing
+                   common.js ($, storage, JSON POST, reconnecting websocket,
+                   canvas sizing)
     index.html     the audio page; app.js draws it and starts everything
     audio/         its ES modules (no build step): shared.js (canvas, state),
                    plot.js (geometry, grid, traces, hover), socket.js (/ws/audio),
@@ -130,45 +136,15 @@ are gone for good can be dropped with `POST /api/qlxd/known/forget`.
 
 ## HTTP / WebSocket API
 
-| | |
-|---|---|
-| `GET /` | web UI |
-| `GET /api/status` | per-module status counters |
-| `GET /api/audio/meta` | channel labels, display bin frequencies, DSP params |
-| `POST /api/audio/reset-peak` | body `{"channel": <input index>}`, or `{}` for all |
-| `WS /ws/audio` | one JSON `meta` text message, then binary frames |
+Each module's docstring lists its routes, request bodies and messages; that list is
+the reference:
 
-Binary frame (little-endian): `"TFS3"`, `uint32 seq`, `uint16 records`,
-`uint16 bins`, then per analyzed input: `uint16 input index`, `uint16 0`,
-`int16[3][bins]` in centi-dBFS (`[0]` average, `[1]` peak hold, `[2]` real-time:
-this hop's spectrum, unaveraged). Clients send
-`{"cmd": "view", "channel": n}` to have input `n` analyzed while they stay
-connected, and `{"cmd": "reset_peak", "channel": n|null}`.
-
-RF:
-
-| | |
-|---|---|
-| `GET /rf` | RF web UI |
-| `GET /api/rf/status` | connection / sweep counters |
-| `GET /api/rf/state` | full state snapshot (same as a `/ws/rf` message) |
-| `POST /api/rf/connect` | open the tinySA (503 with `error` if not found) |
-| `POST /api/rf/disconnect` | stop sweeping and close it |
-| `POST /api/rf/scan/start` | body: any of `start_hz`, `stop_hz`, `points`, `rbw`, `interval_s` |
-| `POST /api/rf/scan/stop` | |
-| `POST /api/rf/reset-peak` | |
-| `WS /ws/rf` | JSON state snapshots (format in `rf/engine.py`) |
-
-Wireless (QLX-D):
-
-| | |
-|---|---|
-| `GET /qlxd` | wireless web UI |
-| `GET /api/qlxd/status` | interface, receiver / online counts |
-| `GET /api/qlxd/state` | full state snapshot (same as a `/ws/qlxd` message) |
-| `GET /api/qlxd/interfaces` | network interfaces with their IPv4 addresses |
-| `POST /api/qlxd/settings` | `{"interface": "eth1" \| "", "hosts": ["169.254.10.21", ...]}`; saved |
-| `POST /api/qlxd/rescan` | forget found receivers and rediscover |
-| `GET /api/qlxd/frequencies` | known receivers: `key` (MAC), `name`, `device_id`, `frequency_mhz`, `online` |
-| `POST /api/qlxd/known/forget` | `{"key": "<mac>"}`, or `{}` for all: drop from the known list |
-| `WS /ws/qlxd` | JSON state snapshots (format in `qlxd/engine.py`) |
+| Area | Routes | Where |
+|---|---|---|
+| Pages, status | `GET /`, `GET /api/status` (per-module counters) | `app.py` |
+| Audio | `/api/audio/*`, `WS /ws/audio` | `audio/module.py`; binary frame format in `audio/engine.py` |
+| TF5 console | `/api/tf5/*` | `console/module.py` |
+| Vocal assist | `/api/vocal/*` | `vocal/module.py` |
+| RF | `/rf`, `/api/rf/*`, `WS /ws/rf` | `rf/module.py`; state format in `rf/engine.py` |
+| Wireless (QLX-D) | `/qlxd`, `/api/qlxd/*`, `WS /ws/qlxd` | `qlxd/module.py`; state format in `qlxd/engine.py` |
+| Config, update | `/config`, `/api/system/*` | `system.py` |

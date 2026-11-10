@@ -7,8 +7,8 @@ Routes:
   GET  /api/qlxd/interfaces     network interfaces to choose from
   POST /api/qlxd/settings       {"interface": "<name>" | "", "hosts": ["ip[:port]", ...]}; persisted
   POST /api/qlxd/rescan         forget found receivers and rediscover
-  GET  /api/qlxd/frequencies    known receivers' name / device ID / frequency, for other
-                                pages (the /rf graph); includes offline ones
+  GET  /api/qlxd/frequencies    known receivers (key = MAC, name, device_id, frequency_mhz,
+                                online), for other pages (the /rf graph); includes offline ones
   POST /api/qlxd/known/forget   {"key": "<mac or host:port>"} or {} for all: drop from that list
   WS   /ws/qlxd                 JSON state snapshots (see engine.py)
 """
