@@ -2,6 +2,7 @@
 // Protocol: see tf_daemon/qlxd/engine.py (JSON state snapshots over /ws/qlxd) and module.py.
 
 import { $, connectWs, loadItem, postJson, save } from "./common.js";
+import { addCommands } from "./keys.js";
 
 // Battery runtime thresholds (minutes) for the warning colors.
 const RUN_WARN_MIN = 60;
@@ -218,3 +219,11 @@ setInterval(() => { if (state.snap) renderCards(); }, 5000);  // refresh "seen â
 
 renderStatus();
 connect();
+
+// The command palette (keys.js).
+addCommands(() => [
+  { title: "Network settings", group: "Wireless", run: () => $("toggle-net").click() },
+  { title: "Rescan for receivers", group: "Wireless", when: () => !$("rescan").disabled, run: () => $("rescan").click() },
+  ...[...$("sort").options].map((o) => ({ title: `Sort by ${o.textContent}`, group: "Wireless",
+    run: () => { $("sort").value = o.value; $("sort").dispatchEvent(new Event("change")); } })),
+]);

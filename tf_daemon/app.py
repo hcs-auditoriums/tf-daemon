@@ -118,7 +118,7 @@ def build_modules(cfg: Config) -> list[Module]:
 def _rf_module(cfg: Config, qlxd: QLXDEngine | None) -> RFModule | None:
     if cfg.rf.source == "off":
         return None
-    device: RFDevice = TinySADevice() if cfg.rf.source == "device" else SimTinySA()
+    device: RFDevice = TinySADevice() if cfg.rf.source == "device" else SimTinySA(carriers=demo_carriers(qlxd))
     return RFModule(RFEngine(cfg.rf, device, range_hint=receiver_range(qlxd)))
 
 
@@ -139,6 +139,17 @@ def _tf5_module(
         cfg.tf5, host=sim.host, port=sim.rcp_port, eq_port=sim.eq_port, eq=True, eq_write=True, fader_write=True
     )
     return TF5Module(demo, on_names, on_gains, simulator=sim)
+
+
+def demo_carriers(qlxd: QLXDEngine | None) -> Callable[[], list[tuple[float, float]]] | None:
+    """Integration: the demo RF spectrum shows a carrier for each wireless transmitter that is on."""
+    if qlxd is None:
+        return None
+    return lambda: [
+        (r["frequency_mhz"] * 1e6, r["rf_dbm"])
+        for r in qlxd.frequencies()
+        if r["rf_dbm"] is not None and r["rf_dbm"] > -100
+    ]
 
 
 def receiver_range(qlxd: QLXDEngine | None) -> RangeHint | None:

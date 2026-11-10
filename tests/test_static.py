@@ -104,7 +104,7 @@ SCRIPTS = [
     "rf.js",
     "qlxd.js",
     "config.js",
-    "nav.js",
+    "keys.js",
     *sorted(f"audio/{p.name}" for p in (STATIC / "audio").glob("*.js")),
 ]
 
@@ -139,7 +139,7 @@ def test_page_imports_resolve():
     """Every name a module imports is exported by the module it names (a typo there is
     a SyntaxError that stops the whole page), and every shared module is reachable."""
     reached = set()
-    for name in [s for s in SCRIPTS if s != "nav.js"]:
+    for name in SCRIPTS:
         path = STATIC / name
         src = path.read_text(encoding="utf-8")
         for names, target in re.findall(r"\bimport\s*\{([^}]*)\}\s*from\s*\"([^\"]+)\"", src):
@@ -148,7 +148,11 @@ def test_page_imports_resolve():
             reached.add(dest.name)
             missing = {n.strip() for n in names.split(",")} - _exports(dest.read_text(encoding="utf-8"))
             assert not missing, f"{name} imports {sorted(missing)} that {target} doesn't export"
-    assert reached == {"common.js", *(p.name for p in (STATIC / "audio").glob("*.js"))}
+        for target in re.findall(r"^import\s*\"([^\"]+)\"", src, re.M):  # for its side effects only
+            dest = (path.parent / target).resolve()
+            assert dest.exists(), f"{name} imports missing {target}"
+            reached.add(dest.name)
+    assert reached == {"common.js", "keys.js", *(p.name for p in (STATIC / "audio").glob("*.js"))}
 
 
 @pytest.mark.parametrize(("page", "script"), [("index", "app"), ("rf", "rf"), ("qlxd", "qlxd"), ("config", "config")])
@@ -160,5 +164,5 @@ def test_pages_load_as_modules(page, script):
 @pytest.mark.parametrize("page", ["index.html", "rf.html", "qlxd.html", "config.html"])
 def test_every_page_has_tab_shortcuts(page):
     html = (STATIC / page).read_text(encoding="utf-8")
-    assert '<script src="/static/nav.js"></script>' in html and 'class="tabs"' in html
+    assert '<script type="module" src="/static/keys.js"></script>' in html and 'class="tabs"' in html
     assert html.count('aria-current="page"') == 1

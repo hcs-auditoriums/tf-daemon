@@ -31,6 +31,16 @@
       <pre id="update-log" class="log" hidden></pre>
     </section>
 
+    <section class="cfg-card" id="switches-card" hidden>
+      <h2>Switches</h2>
+      <p class="muted">Written to config.toml straight away; they apply after a restart.</p>
+      <div id="switches" class="switches"></div>
+      <div class="controls">
+        <button id="restart" type="button">Restart now</button>
+        <span id="switch-msg" class="muted"></span>
+      </div>
+    </section>
+
     <section class="cfg-card grow">
       <h2>config.toml</h2>
       <p class="muted" id="config-path"></p>
@@ -43,7 +53,7 @@
       </div>
     </section>
   </main>
-  <script src="/static/nav.js"></script>
+  <script type="module" src="/static/keys.js"></script>
   <script type="module" src="/static/config.js"></script>
 </body>
 </html>

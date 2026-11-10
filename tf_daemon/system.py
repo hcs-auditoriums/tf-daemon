@@ -6,8 +6,9 @@ Routes:
   POST /api/system/check        compare the running revision with the remote branch
   POST /api/system/update       start deploy/update.sh (pull, reinstall, restart, roll back on failure)
   GET  /api/system/update       update progress: {state, message, from, to, running, log}
-  GET  /api/system/config       config.toml text
+  GET  /api/system/config       config.toml text, and the SWITCHES as the file sets them
   PUT  /api/system/config       body: {text}; validated before it is written
+  PUT  /api/system/switch       body: {key, on}: one of the SWITCHES set in the file (comments kept)
   POST /api/system/restart      restart the systemd service
 
 The update runs as the service user, preferably in its own systemd unit
@@ -23,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import threading
@@ -33,7 +35,7 @@ from typing import Any
 from flask import Blueprint, Flask, jsonify, request
 
 from . import __version__
-from .config import UpdateConfig, load_config
+from .config import Config, UpdateConfig, load_config
 from .files import write_atomic
 
 log = logging.getLogger(__name__)
@@ -177,15 +179,56 @@ class Updater:
         return st
 
 
-def _validate_toml(text: str) -> None:
-    """Raise ValueError (TOML syntax or ConfigError) if ``text`` isn't a usable config."""
+def _validate_toml(text: str) -> Config:
+    """The config ``text`` sets; ValueError (TOML syntax or ConfigError) if it isn't usable."""
     fd, tmp = tempfile.mkstemp(suffix=".toml")
     try:
         with os.fdopen(fd, "w") as f:
             f.write(text)
-        load_config(tmp)
+        return load_config(tmp)
     finally:
         os.unlink(tmp)
+
+
+# The on / off settings people change most, offered as switches on the /config page:
+# "table.key" -> what it does (the defaults and the rest are in config.py).
+SWITCHES = {
+    "tf5.eq_write": "Edit the desk's EQ from the pages",
+    "tf5.fader_write": "Faders and ON from the pages, and ring-out (needs EQ editing)",
+    "vocal.auto_allowed": "Offer auto EQ (still off until turned on per channel)",
+    "rf.auto_connect": "Keep the tinySA connected and sweeping",
+}
+
+
+def switch_values(cfg: Config) -> dict[str, bool]:
+    return {key: bool(getattr(getattr(cfg, key.split(".")[0]), key.split(".")[1])) for key in SWITCHES}
+
+
+def set_switch(text: str, key: str, on: bool) -> str:
+    """``text`` with ``key = true / false`` in its table: the line changed in place (its comment
+    kept), else added under the table's header, else the table added at the end."""
+    table, name = key.split(".")
+    value = "true" if on else "false"
+    lines = text.splitlines(keepends=True)
+    start = end = None
+    for i, line in enumerate(lines):
+        header = re.match(r"\s*\[([^\[\]]+)\]\s*(#.*)?$", line)
+        if header and start is not None:
+            end = i
+            break
+        if header and header.group(1).strip() == table:
+            start = i
+    if start is None:
+        sep = "" if not text or text.endswith("\n\n") else "\n" if text.endswith("\n") else "\n\n"
+        return f"{text}{sep}[{table}]\n{name} = {value}\n"
+    end = len(lines) if end is None else end
+    pattern = re.compile(rf"^(\s*{re.escape(name)}\s*=\s*)(true|false)\b")
+    for i in range(start + 1, end):
+        if pattern.match(lines[i]):
+            lines[i] = pattern.sub(rf"\g<1>{value}", lines[i])
+            return "".join(lines)
+    lines.insert(start + 1, f"{name} = {value}\n")
+    return "".join(lines)
 
 
 def _restart_now() -> None:
@@ -248,7 +291,11 @@ def register_system(app: Flask, cfg: UpdateConfig, config_path: str | Path | Non
         if cfg_file is None:
             return jsonify({"ok": False, "error": "no config file in use"}), 404
         text = cfg_file.read_text() if cfg_file.exists() else ""
-        return jsonify({"ok": True, "path": str(cfg_file), "text": text})
+        try:
+            switches = switch_values(_validate_toml(text))
+        except ValueError:
+            switches = None  # the file doesn't load: edit it as text
+        return jsonify({"ok": True, "path": str(cfg_file), "text": text, "switches": switches, "labels": SWITCHES})
 
     @bp.put("/config")
     def put_config():
@@ -264,6 +311,25 @@ def register_system(app: Flask, cfg: UpdateConfig, config_path: str | Path | Non
         write_atomic(cfg_file, text, keep_mode=True)
         log.info("Config written to %s", cfg_file)
         return jsonify({"ok": True})
+
+    @bp.put("/switch")
+    def put_switch():
+        if cfg_file is None:
+            return jsonify({"ok": False, "error": "no config file in use"}), 404
+        body = request.get_json(silent=True) or {}
+        key, on = body.get("key"), body.get("on")
+        if key not in SWITCHES or not isinstance(on, bool):
+            return jsonify(
+                {"ok": False, "error": f'body must be {{"key": one of {sorted(SWITCHES)}, "on": true / false}}'}
+            ), 400
+        text = set_switch(cfg_file.read_text() if cfg_file.exists() else "", key, on)
+        try:
+            switches = switch_values(_validate_toml(text))
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+        write_atomic(cfg_file, text, keep_mode=True)
+        log.info("Config: %s = %s", key, on)
+        return jsonify({"ok": True, "text": text, "switches": switches})
 
     @bp.post("/restart")
     def restart():

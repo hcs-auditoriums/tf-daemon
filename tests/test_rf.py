@@ -60,12 +60,16 @@ def test_rf_module_end_to_end_with_demo():
         assert client.post("/api/rf/connect").get_json()["ok"]
         assert client.post("/api/rf/scan/start", json={"points": 2000}).status_code == 400
 
+        assert client.get("/api/rf/history").get_json() == {"rows": []}  # nothing swept yet
         r = client.post("/api/rf/scan/start", json={"start_hz": 400_000_000, "stop_hz": 500_000_000, "points": 101})
         assert r.get_json()["settings"]["points"] == 101
         s = _wait_state(engine, lambda s: s["sweeps"] >= 3)
         assert s["scanning"] and s["sweep"]["start_hz"] == 400_000_000
         assert len(s["sweep"]["live"]) == len(s["sweep"]["peak"]) == 101
         assert all(p >= v for p, v in zip(s["sweep"]["peak"], s["sweep"]["live"], strict=True))
+
+        h = client.get("/api/rf/history").get_json()  # the waterfall a page opens with
+        assert h["start_hz"] == 400_000_000 and len(h["rows"]) >= 3 and all(len(r) == 101 for r in h["rows"])
 
         assert client.post("/api/rf/reset-peak").get_json()["ok"]
         assert client.get("/api/status").get_json()["modules"]["rf"]["sweeps"] >= 3
@@ -91,6 +95,15 @@ def test_points_limited_to_device_maximum():
         engine.start_scan({"points": 290})
     finally:
         engine.stop()
+
+
+def test_demo_carriers_sit_on_the_transmitters():
+    dev = SimTinySA(seed=1, carriers=lambda: [(584.125e6, -40.0)])
+    levels = dev.sweep(576_000_000, 599_000_000, 461)  # 50 kHz steps
+    freqs = np.linspace(576e6, 599e6, 461)
+    assert abs(freqs[int(np.argmax(levels))] - 584.125e6) <= 50e3
+    stray = 576e6 + 23e6 * SimTinySA.STRAY[0]  # and one carrier that belongs to no receiver
+    assert levels[int(np.argmin(abs(freqs - stray)))] > -72
 
 
 def test_parse_scan_none_is_empty():

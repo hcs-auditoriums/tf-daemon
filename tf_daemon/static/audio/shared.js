@@ -3,7 +3,7 @@
 
 import { $ } from "../common.js";
 
-export { $, save } from "../common.js";
+export { $, el, save } from "../common.js";
 export const canvas = $("spectrum");
 export const ctx = canvas.getContext("2d");
 const css = getComputedStyle(document.documentElement);
@@ -90,9 +90,3 @@ export function quietReset(node) {
   if (q) { q.key = null; q.pending = null; }
 }
 
-export function el(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined) e.textContent = text;
-  return e;
-}

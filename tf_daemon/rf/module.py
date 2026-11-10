@@ -4,6 +4,7 @@ Routes:
   GET  /rf                     RF spectrum page
   GET  /api/rf/status          connection / sweep counters
   GET  /api/rf/state           full state snapshot (same as a /ws/rf message)
+  GET  /api/rf/history         the recent sweeps (``rows``, oldest first), for the waterfall
   POST /api/rf/connect         open the device (503 with ``error`` if it isn't found)
   POST /api/rf/disconnect      stop sweeping and close the device
   POST /api/rf/scan/start      body: any of {start_hz, stop_hz, points, rbw, interval_s}
@@ -59,6 +60,10 @@ class RFModule(EngineModule):
         def scan_stop():
             engine.stop_scan(by_user=True)
             return jsonify({"ok": True})
+
+        @bp.get("/history")
+        def history():
+            return jsonify(engine.history() or {"rows": []})
 
         @bp.post("/reset-peak")
         def reset_peak():

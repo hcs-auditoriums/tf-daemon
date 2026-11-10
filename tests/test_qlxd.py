@@ -53,6 +53,18 @@ def _demo(cfg):
     return replace(cfg, qlxd=replace(cfg.qlxd, source="demo"))
 
 
+def test_sim_battery_is_swapped_once_flat_and_aa_reports_bars_only():
+    sim = SimReceiver("Pastor", 590600, run_min=25, seed=3)
+    sim._t0 -= 25 + 30  # half a minute after it went flat: still flat
+    assert sim.values()["BATT_RUN_TIME"] == "00000" and sim.values()["BATT_BARS"] == "000"
+    sim._t0 -= 30 + 10  # swapped for a fresh pack, ten minutes used
+    assert SimReceiver.FRESH_MIN - 12 <= int(sim.values()["BATT_RUN_TIME"]) <= SimReceiver.FRESH_MIN - 10
+    sim._t0 -= SimReceiver.FRESH_MIN + SimReceiver.SWAP_S  # and again, a whole cycle later
+    assert SimReceiver.FRESH_MIN - 12 <= int(sim.values()["BATT_RUN_TIME"]) <= SimReceiver.FRESH_MIN - 10
+    aa = SimReceiver("Spare", 596875, batt_type="ALKA", run_min=200, seed=4)
+    assert aa.values()["BATT_RUN_TIME"] == "65535" and aa.values()["BATT_BARS"] == "002"
+
+
 def test_manual_host_monitoring_persistence_and_offline(cfg):
     sim = SimReceiver("Lead Vox", 578350, "1,2", run_min=185, seed=1)
     sim.start()
@@ -146,12 +158,14 @@ def test_known_receivers_persist_for_the_rf_page(cfg, monkeypatch):
             "frequency_mhz": 492.025,
             "online": True,
             "last_seen": f["last_seen"],
+            "rf_dbm": f["rf_dbm"],  # the transmitter's level (the demo RF spectrum draws its carrier)
         }
         wait_until(lambda: "00:0E:DD:00:00:BB" in json.loads(open(cfg.qlxd.state_file).read())["known_receivers"])
 
         sim.stop()
         wait_until(lambda: not eng.frequencies()[0]["online"])  # offline, but still known
         assert eng.frequencies()[0]["frequency_mhz"] == 492.025
+        assert eng.frequencies()[0]["rf_dbm"] is None  # nothing heard from it now
     finally:
         eng.stop()
         sim.stop()

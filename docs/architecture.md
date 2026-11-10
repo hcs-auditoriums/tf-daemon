@@ -69,7 +69,7 @@ tf_daemon/
     sim.py         simulated QLXD4 receivers (demo mode, tests)
     module.py      /qlxd page, HTTP + WebSocket routes
   static/          rf.html + rf.js (RF), qlxd.html + qlxd.js (wireless),
-                   config.html + config.js, nav.js (all pages), style.css;
+                   config.html + config.js, keys.js (all pages: shortcuts, the / command palette), style.css;
                    the page scripts are ES modules (no build step) sharing
                    common.js ($, storage, JSON POST, reconnecting websocket,
                    canvas sizing)
@@ -80,7 +80,8 @@ tf_daemon/
                    range.js, rings.js, vocal.js, waterfall.js, eqedit.js (EQ
                    editing on the spectrum), eqbar.js (EQ toolbar), strip.js +
                    dyngraph.js (gain / gate / comp / sends panel), profiles.js (EQ profiles),
-                   ringout.js (ring-out dialog)
+                   ringout.js (ring-out dialog), commands.js (its shortcuts and
+                   palette commands)
 ```
 
 Data flow:

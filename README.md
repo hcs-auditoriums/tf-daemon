@@ -22,6 +22,7 @@ Or with Python 3.11+: `pip install -e '.[dev]'` and
 ## Documentation
 
 - [Features](docs/features.md): the pages, ring / feedback detection, the vocal EQ assist
+- [Keyboard](docs/keyboard.md): shortcuts and the / command palette
 - [Development](docs/development.md): running it locally, the dev container, tests, CI
 - [Server install](docs/install.md): Raspberry Pi OS or Ubuntu, systemd, updates
 - [Configuration](docs/configuration.md): `config.toml`

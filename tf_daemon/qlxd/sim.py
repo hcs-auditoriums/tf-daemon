@@ -1,7 +1,7 @@
 """Simulated QLXD4 receivers (demo mode and tests).
 
 Each SimReceiver is a TCP server on 127.0.0.1 that answers GET requests the
-way a QLXD4 does, with a draining battery and a wandering RF level. It also
+way a QLXD4 does, with a draining battery (swapped for a fresh one once flat) and a wandering RF level. It also
 pushes an unsolicited REP when the battery changes, like real hardware.
 """
 
@@ -47,9 +47,17 @@ class SimReceiver:
 
     # ------------------------------------------------------------------ values
 
+    FRESH_MIN = 600.0  # a fresh pack's runtime (minutes)
+    SWAP_S = 60.0  # how long a flat battery stays flat before someone swaps it
+
     def _runtime(self) -> int:
-        # Drains at 60x real time so the demo visibly changes.
-        return max(0, int(self.run_min - (time.monotonic() - self._t0)))
+        """Minutes left. Drains at 60x real time so the demo visibly changes; a flat battery
+        is swapped for a fresh one a minute later, so a demo left running keeps cycling."""
+        t = time.monotonic() - self._t0
+        if t < self.run_min + self.SWAP_S:
+            return max(0, int(self.run_min - t))
+        t = (t - self.run_min - self.SWAP_S) % (self.FRESH_MIN + self.SWAP_S)
+        return max(0, int(self.FRESH_MIN - t))
 
     def values(self) -> dict[str, str]:
         has_tx = self.tx is not None
@@ -74,7 +82,8 @@ class SimReceiver:
             "BATT_TYPE": self.batt_type if has_tx else "UNKN",
             "BATT_BARS": f"{min(5, math.ceil(charge / 20)):03d}" if has_tx else "255",
             "BATT_CHARGE": f"{charge:03d}" if has_tx and self.batt_type == "LION" else "255",
-            "BATT_RUN_TIME": f"{run:05d}" if has_tx else "65535",
+            # Runtime only from a Shure rechargeable: AA cells report bars alone, as on a real QLXD4.
+            "BATT_RUN_TIME": f"{run:05d}" if has_tx and self.batt_type == "LION" else "65535",
             "RX_RF_LVL": f"{max(0, min(115, round(rf + p.RF_OFFSET_DB))):03d}" if has_tx else "000",
             "RF_ANTENNA": ("AX" if math.sin(t / 3) > 0 else "XB") if has_tx else "XX",
             "AUDIO_LVL": f"{max(0, min(50, round(audio + p.AUDIO_OFFSET_DB))):03d}" if has_tx else "000",

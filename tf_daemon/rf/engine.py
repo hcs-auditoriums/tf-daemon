@@ -18,7 +18,8 @@ Every published message is a full JSON state snapshot (sent as text over
      "device": "tinysa"|"demo", "info": str, "settings": {...}, "sweeps": int,
      "sweep": null | {"start_hz", "stop_hz", "points", "live": [dBm...], "peak": [dBm...]}}
 
-Sweep frequencies are ``linspace(start_hz, stop_hz, points)``.
+Sweep frequencies are ``linspace(start_hz, stop_hz, points)``. The last ``HISTORY`` sweeps
+of the current geometry are kept (history()) so a page that opens fills its waterfall at once.
 
 Auto range: a ``range_hint`` callable (wired in app.py to the QLX-D receivers'
 frequencies) supplies the default Start/Stop. While the current range came from
@@ -33,6 +34,7 @@ import logging
 import math
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import asdict
 from typing import Any
@@ -67,6 +69,8 @@ def fit_span(freqs_mhz: Iterable[float]) -> tuple[int, int] | None:
 
 
 class RFEngine:
+    HISTORY = 200  # sweeps kept for a page's waterfall (static/rf.js WF_ROWS)
+
     def __init__(self, cfg: RFConfig, device: RFDevice, range_hint: RangeHint | None = None) -> None:
         self.device = device
         self.settings = cfg.sweep
@@ -87,6 +91,7 @@ class RFEngine:
         self._sweep: dict[str, Any] | None = None  # current sweep geometry
         self._live: np.ndarray | None = None
         self._peak: np.ndarray | None = None
+        self._history: deque[np.ndarray] = deque(maxlen=self.HISTORY)  # newest last, current geometry only
 
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -232,6 +237,17 @@ class RFEngine:
                 "paused": self._paused,
             }
 
+    def history(self) -> dict[str, Any] | None:
+        """The kept sweeps (whole dBm, oldest first) with their geometry; None before the first."""
+        with self._lock:
+            if self._sweep is None or not self._history:
+                return None
+            return {
+                **self._sweep,
+                "sweeps": self._sweeps,
+                "rows": [np.round(r).astype(int).tolist() for r in self._history],
+            }
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             sweep = None
@@ -290,7 +306,11 @@ class RFEngine:
                     np.maximum(self._peak, levels, out=self._peak)
                 self._live = levels
                 # The device may return a different point count than requested.
-                self._sweep = {"start_hz": s.start_hz, "stop_hz": s.stop_hz, "points": int(levels.size)}
+                sweep = {"start_hz": s.start_hz, "stop_hz": s.stop_hz, "points": int(levels.size)}
+                if sweep != self._sweep:
+                    self._history.clear()
+                self._history.append(levels)
+                self._sweep = sweep
                 self._sweeps += 1
                 self._sweep_ms_ewma += 0.2 * (dt * 1000 - self._sweep_ms_ewma)
             self._publish()
