@@ -12,7 +12,7 @@ from flask_sock import Sock
 from ..config import TF5Config
 from ..dsp.eq import CURVE_FREQS, eq_curve
 from .editor.client import TFEditorClient
-from .editor.guard import WRITABLE
+from .editor.guard import WRITABLE, WRITE_LIMITS
 from .patch import patch_from, source_label
 from .rcp import TF5Client
 
@@ -20,6 +20,15 @@ if TYPE_CHECKING:
     from .sim import SimConsole
 
 log = logging.getLogger(__name__)
+
+# The desk's EQ ranges in Hz, dB and Q, for the page's editing to stay within: guard.WRITE_LIMITS
+# (raw Hz x 10, dB x 100, Q x 1000), which refuses a write outside them.
+EQ_LIMITS = {
+    "hpf_freq": [v / 10 for v in WRITE_LIMITS["HPF/Frequency"]],
+    "freq": [v / 10 for v in WRITE_LIMITS["Frequency"]],
+    "gain": [v / 100 for v in WRITE_LIMITS["Gain"]],
+    "q": [v / 1000 for v in WRITE_LIMITS["Q"]],
+}
 
 
 class TF5Module:
@@ -167,6 +176,7 @@ class TF5Module:
             "synced": ec.synced,
             "writable": ec.writes and src is not None and src[0] == "InCh",  # the page may offer editing
             "fader_writable": ec.fader_writes and src is not None and src[0] == "InCh",
+            "limits": EQ_LIMITS,
             "eq": settings,
             "freqs": [round(float(f), 2) for f in CURVE_FREQS] if settings else [],
             "curve": [round(float(v), 2) for v in eq_curve(settings)] if settings else [],

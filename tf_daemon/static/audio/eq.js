@@ -70,22 +70,25 @@ export const eqHalf = () => (state.dbMax - state.dbMin) / 2;     // EQ dB shown 
 export const eqY = (db) => (PAD.t + H - PAD.b) / 2 - db / eqHalf() * (H - PAD.b - PAD.t) / 2;
 
 // Where the handles are: a band at its own frequency and gain (bells, shelves: what you grab
-// to move it), the HPF and filter bands on the curve at their frequency. ``key`` names the
-// band for editing ("HPF", "L", "LM", "HM", "H").
+// to move it), the HPF and filter bands on the 0 dB line at their frequency (they have no gain,
+// so a drag moves them only sideways; on the curve they would ride up and down with it).
+// ``key`` names the band for editing ("HPF", "L", "LM", "HM", "H").
 export function eqHandles() {
   const d = state.eq, eq = d && d.eq;
   if (!eq || !d.freqs || !d.freqs.length) return [];
   const yEq = (db) => eqY(Math.max(-eqHalf(), Math.min(eqHalf(), db)));
+  // A band set beyond the plot's span (the desk goes 20 Hz - 20 kHz) sits at its edge.
+  const xAt = (f) => Math.max(PAD.l, Math.min(W - PAD.r, xOf(f)));
   const out = [];
   if (eq.hpf) {
-    out.push({ key: "HPF", label: "HPF", kind: "hpf", f: eq.hpf.freq, x: xOf(eq.hpf.freq), y: yEq(eqAt(eq.hpf.freq) ?? 0),
+    out.push({ key: "HPF", label: "HPF", kind: "hpf", f: eq.hpf.freq, x: xAt(eq.hpf.freq), y: eqY(0),
                active: eq.hpf.on });
   }
   for (const b of eq.bands) {
     const filter = b.type === "hpf" || b.type === "lpf";
-    const y = filter ? yEq(eqAt(b.freq) ?? 0) : yEq(b.gain);
+    const y = filter ? eqY(0) : yEq(b.gain);
     out.push({ key: b.label, label: filter ? b.type.toUpperCase() : b.label, kind: filter ? "filter" : b.type,
-               f: b.freq, x: xOf(b.freq), y, active: filter ? b.on !== false : b.gain !== 0 });
+               f: b.freq, x: xAt(b.freq), y, active: filter ? b.on !== false : b.gain !== 0 });
   }
   return out;
 }

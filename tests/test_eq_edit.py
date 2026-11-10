@@ -26,6 +26,16 @@ def rig():
         a.extensions["tf_stop"]()
 
 
+def test_the_page_gets_the_desks_eq_ranges(rig):
+    c, _ = rig()  # the TF5's: HPF 20-600 Hz, bands 20 Hz - 20 kHz, +-18 dB, Q 0.1-10
+    assert c.get("/api/tf5/eq/0").get_json()["limits"] == {
+        "hpf_freq": [20, 600],
+        "freq": [20, 20000],
+        "gain": [-18, 18],
+        "q": [0.1, 10],
+    }
+
+
 def test_a_person_edit_reaches_the_desk(rig):
     c, tf5 = rig()
     assert c.get("/api/tf5/eq/0").get_json()["writable"] is True

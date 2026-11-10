@@ -14,7 +14,7 @@
 // throttled to one in flight, always the latest position.
 
 import { eqHalf, eqHandles, eqLocked, eqLocks, eqY, lockSpot } from "./eq.js";
-import { fOfX } from "./plot.js";
+import { fOfX, PAD, W } from "./plot.js";
 import { $, canvas, el, state } from "./shared.js";
 
 const PATH = { L: "PEQ/Bank/BandL", LM: "PEQ/Bank/Band:0", HM: "PEQ/Bank/Band:1", H: "PEQ/Bank/BandH" };
@@ -113,19 +113,30 @@ function settled() {
   }, SETTLE_MS);
 }
 
-// The desk changes for a band's new settings (raw values: Hz x10, dB x100, Q x1000).
+// The desk's ranges (Hz, dB, Q), sent with the EQ (console/module.py EQ_LIMITS, from the
+// write guard's limits). Every change is held to them, the preview here as well as the write.
+const lim = (name) => state.eq?.limits?.[name] ?? [-Infinity, Infinity];
+function limited(key, s) {
+  const out = { ...s };
+  if (out.freq !== undefined) out.freq = clamp(out.freq, ...lim(key === "HPF" ? "hpf_freq" : "freq"));
+  if (out.gain !== undefined) out.gain = clamp(out.gain, ...lim("gain"));
+  if (out.q !== undefined) out.q = clamp(out.q, ...lim("q"));
+  return out;
+}
+
+// The desk changes for a band's new settings (raw values: Hz x10, dB x100, Q x1000), already limited.
 function rawFor(key, s) {
   if (key === "HPF") {
     const out = {};
-    if (s.freq !== undefined) out["PEQ/Bank/HPF/Frequency"] = Math.round(clamp(s.freq, 20, 600) * 10);
+    if (s.freq !== undefined) out["PEQ/Bank/HPF/Frequency"] = Math.round(s.freq * 10);
     if (s.on !== undefined) out["PEQ/Bank/HPF/On"] = s.on ? 1 : 0;
     return out;
   }
   const p = PATH[key], out = {};
   if (!p) return out;
-  if (s.freq !== undefined) out[`${p}/Frequency`] = Math.round(clamp(s.freq, 20, 20000) * 10);
-  if (s.gain !== undefined) out[`${p}/Gain`] = Math.round(clamp(s.gain, -18, 18) * 10) * 10;
-  if (s.q !== undefined) out[`${p}/Q`] = Math.round(clamp(s.q, 0.1, 10) * 1000);
+  if (s.freq !== undefined) out[`${p}/Frequency`] = Math.round(s.freq * 10);
+  if (s.gain !== undefined) out[`${p}/Gain`] = Math.round(s.gain * 10) * 10;
+  if (s.q !== undefined) out[`${p}/Q`] = Math.round(s.q * 1000);
   if (s.type !== undefined) out[`${p}/Type`] = s.type === "bell" ? 0 : 1;
   return out;
 }
@@ -134,6 +145,7 @@ function rawFor(key, s) {
 function edit(key, s) {
   const d = state.eq, eq = d && d.eq;
   if (!eq) return;
+  s = limited(key, s);
   if (key === "HPF") Object.assign(eq.hpf, s);
   else {
     const b = eq.bands.find((x) => x.label === key);
@@ -207,7 +219,7 @@ canvas.addEventListener("pointermove", (e) => {
   }
   if (!drag.moved && Math.hypot(x - drag.x0, y - drag.y0) < 3) return;
   const axes = dragAxes(drag.key, drag.kind), s = {};
-  if (axes.freq) s.freq = Math.round(fOfX(x) * 10) / 10;
+  if (axes.freq) s.freq = Math.round(fOfX(clamp(x, PAD.l, W - PAD.r)) * 10) / 10;  // not off the plot
   if (axes.gain) s.gain = Math.round(gainAt(y) * 10) / 10;
   if (!Object.keys(s).length) return;   // all locked: nothing to drag
   drag.moved = true;
@@ -238,7 +250,7 @@ canvas.addEventListener("wheel", (e) => {
   if (!b || h.kind !== "bell") return;
   e.preventDefault();
   if (eqLocks(h.key).q) return;
-  edit(h.key, { q: Math.round(clamp(b.q * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 0.1, 10) * 100) / 100 });
+  edit(h.key, { q: Math.round(b.q * (e.deltaY < 0 ? 1.12 : 1 / 1.12) * 100) / 100 });
   if (pop) showPop(h.key);
 }, { passive: false });
 
