@@ -256,7 +256,7 @@ Ring the mics out where they are used: on the actor, including downstage near th
 speakers. Mute other open mics first. Notches typically buy 3–6 dB; distance to the
 speakers and the number of open mics matter more.
 
-**EQ profiles** (in the console sidebar's EQ section): **Save as…** stores the
+**EQ profiles** (the **Profiles** button in the console sidebar's EQ section): **Save as…** stores the
 shown channel's whole EQ (EQ on, the high-pass, every band's type, frequency, gain
 and Q) under a name, e.g. the actor's; pick a profile and **Recall** to put it on
 the channel you're looking at, on any channel; **Copy from…** copies another

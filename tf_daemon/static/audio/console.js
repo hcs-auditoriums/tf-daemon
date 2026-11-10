@@ -291,13 +291,11 @@ export function renderPanel() {
     items.push(el("p", "cp-note", `USB ${state.input + 1} is not on the console patch (tf5.usb_patch)`));
   } else {
     const p = ch.params, v = (k) => p[k]?.value;
+    // A channel strip like TF StageMix's, top to bottom: EQ, pan, sends, ON, fader, and the
+    // name in the channel's colour at the foot (the desk's scribble strip).
     const head = el("div", "cp-head");
-    const sw = el("span", "cp-swatch");
-    sw.style.background = TF_COLORS[String(v("Label/Color") || "").toLowerCase()] || "var(--border)";
-    const title = el("div");
-    title.append(el("div", "cp-name", v("Label/Name") || ch.source), el("div", "cp-src", `${ch.source} · USB ${ch.index + 1}`));
-    head.append(sw, title);
-    items.push(head);
+    head.style.setProperty("--ch", TF_COLORS[String(v("Label/Color") || "").toLowerCase()] || "var(--border)");
+    head.append(el("div", "cp-name", v("Label/Name") || ch.source), el("div", "cp-src", `${ch.source} · USB ${ch.index + 1}`));
 
     const writable = faderWritable();
     refs.onWritable = writable;
@@ -307,7 +305,6 @@ export function renderPanel() {
       refs.on.title = "Turn the channel on / off on the desk";
       wireOn(ch, refs.on);
     }
-    items.push(refs.on);
 
     const section = (title) => {
       const sec = el("div", "cp-section");
@@ -318,17 +315,27 @@ export function renderPanel() {
       return [sec, value];
     };
 
-    // EQ (only with tf5.eq): the console's curve for this channel, like the TF5's
-    // channel screen; redrawn whenever the desk pushes a change.
+    // EQ (only with tf5.eq): the console's curve for this channel as a thumbnail, redrawn
+    // whenever the desk pushes a change. A tap shows / hides it on the spectrum, full size.
     if (eqAvailable) {
       const [eqSec, eqVal] = section("EQ");
       refs.eqVal = eqVal;
       refs.eqCanvas = el("canvas", "cp-eq");
-      refs.eqCanvas.setAttribute("aria-label", "Console EQ curve");
+      refs.eqCanvas.setAttribute("role", "button");
+      refs.eqCanvas.setAttribute("aria-label", "Show the EQ on the spectrum");
+      refs.eqCanvas.tabIndex = 0;
+      const toggleEq = () => { const cb = $("show-eq"); cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); };
+      refs.eqCanvas.onclick = toggleEq;
+      refs.eqCanvas.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleEq(); } };
       refs.eqInfo = el("div", "cp-eqinfo");
-      eqSec.append(refs.eqCanvas, refs.eqInfo, profileBar());
+      const prof = el("details", "cp-profmenu");
+      prof.append(el("summary", "", "Profiles"), profileBar());
+      eqSec.firstChild.append(prof);  // in the EQ heading, opening over the strip
+      eqSec.append(refs.eqCanvas, refs.eqInfo);
       items.push(eqSec);
     }
+
+    const sendsAndPan = [];
 
     // Fader: heading with the level, then a tall fader (scale, track, cap).
     const [faderSec, levelEl] = section("Fader");
@@ -360,20 +367,19 @@ export function renderPanel() {
       refs.faderErr.hidden = true;
       faderSec.append(refs.faderErr);
     }
-    items.push(faderSec);
+    faderSec.classList.add("cp-fadersec");
 
-    // Pan (balance for ST) below the fader: a full-width, centre-detented bar.
+    // Pan (balance for ST): a full-width, centre-detented bar.
     const panKey = p["ToStereo/Pan"] ? "ToStereo/Pan" : "Out/Balance";
     if (p[panKey]) {
-      const [panSec, panVal] = section(panKey === "Out/Balance" ? "Balance" : "Pan");
+      const panSec = el("div", "cp-panrow");
       const bar = el("div", "cp-pan");
       const dot = el("span");
       bar.append(dot);
+      const panVal = el("span", "cp-value");
       Object.assign(refs, { panKey, panVal, panDot: dot });
-      const marks = el("div", "cp-panmarks");
-      marks.append(el("span", "", "L"), el("span", "", "C"), el("span", "", "R"));
-      panSec.append(bar, marks);
-      items.push(panSec);
+      panSec.append(el("span", "cp-label", panKey === "Out/Balance" ? "Bal" : "Pan"), bar, panVal);
+      sendsAndPan.push(panSec);
     }
 
     // Sends: by default only those that are on and above -inf.
@@ -399,8 +405,9 @@ export function renderPanel() {
         refs.sends.set(r.name, { row, fill: f, val });
         sends.append(row);
       }
-      items.push(sends);
+      sendsAndPan.push(sends);
     }
+    items.push(...sendsAndPan, refs.on, faderSec);
     // Anything else the console offers (gain, EQ, ... if its firmware lists them).
     const known = new Set(["Label/Name", "Label/Color", "Fader/Level", "Fader/On", "ToStereo/Pan", "Out/Balance",
                            "ToMix/Level", "ToMix/On", "ToFx/Level", "ToFx/On", "ToMono/Level", "ToMono/On"]);
@@ -412,8 +419,9 @@ export function renderPanel() {
         refs.extra.set(k, dd);
         dl.append(el("dt", "", k), dd);
       }
-      items.push(dl);
+      items.splice(items.indexOf(refs.on), 0, dl);  // with the other readings, above ON
     }
+    items.push(head);
   }
   panel.replaceChildren(...items);
   if (refs.on) updatePanel(ch);

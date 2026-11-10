@@ -48,9 +48,12 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   Direct Outs are tapped before the fader; see Ring detection). With a host set, the server reads the TF5's
   channel names over Yamaha's remote control protocol and uses them as input
   labels (an explicit `[[channels]]` label still wins). The audio page also shows
-  a **Console** sidebar (toggle in the **View** menu; stacks under the spectrum on
-  narrow screens) for the shown input: name and colour, on/off, a fader with its
-  level, pan, and the channel's sends to the mixes (by mix name; stereo pairs
+  a **Console** sidebar (toggle with the icon at the top right of the plot or in the
+  **View** menu; stacks under the spectrum on narrow screens) for the shown input: a
+  skinny channel strip laid out like TF StageMix's, top to bottom EQ, pan, sends, ON,
+  the fader with its level, and the name in the channel's colour at the foot. It fits
+  a tablet screen without scrolling and its controls are finger-sized. The sends are
+  the channel's sends to the mixes (by mix name; stereo pairs
   shown once), FX 1/2 and mono. Only active sends are listed unless **all** is
   ticked. With `tf5.fader_write` on, an input channel's **ON** button and **fader** work
   from the page: click ON to switch the channel, drag the fader (it moves with the
@@ -75,8 +78,8 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   `guides/tf5_api.md`) and offer an **EQ** toggle that overlays the console's EQ
   curve on the spectrum (at the spectrum's dB scale from the View range, 0 dB at
   mid-height; band handles sit on the curve). The **Console** sidebar also gets an
-  **EQ** section: on/off, a small curve graph (same scale as on the spectrum),
-  and the HPF / low / high band shapes, live with every change on the desk. The curve
+  **EQ** section: on/off, a small curve graph (same scale as on the spectrum; tap
+  it to show / hide the EQ on the spectrum), and the HPF / low / high band shapes, live with every change on the desk. The curve
   is computed with TF Editor's own filter maths (decompiled; see the guide's EQ
   curve section). The client is **read-only** by default: it joins as a
   StageMix client with `SYNCDIR:2` (console → client), and a guard refuses to
