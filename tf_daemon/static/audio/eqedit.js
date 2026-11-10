@@ -271,16 +271,20 @@ const gainAt = (y) => { const mid = eqY(0), unit = eqY(1) - mid; return clamp((y
 
 let drag = null;   // {key, kind, moved, x0, y0}
 
-// Pinch (two fingers): the Q of the band being dragged or selected when it's a bell, else of the
-// bell nearest the fingers; fingers apart widen it (lower Q), together narrow it.
+// Pinch (two fingers): the Q of the selected band (tapped, its settings open, or the one a
+// finger is on); only with none selected, the bell nearest the fingers. A selected band
+// without a Q (a shelf, the HPF) is left alone rather than another band changed. Fingers
+// apart widen it (lower Q), together narrow it.
 const touches = new Map();   // pointerId -> [x, y]
 let pinch = null;            // {key, d0, q0}
 const spread = () => { const [a, b] = [...touches.values()]; return Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; };
 function startPinch() {
   const bands = state.eq.eq.bands, bell = (k) => bands.find((b) => b.label === k && b.type === "bell");
   const mid = fOfX(([...touches.values()].reduce((s, t) => s + t[0], 0)) / 2);
-  const b = bell(drag && drag.key) || bell(state.eqSelected)
-    || bands.filter((x) => x.type === "bell").sort((x, y) => Math.abs(Math.log(x.freq / mid)) - Math.abs(Math.log(y.freq / mid)))[0];
+  tapOff = null;   // a pinch, not a tap off the handles: the selection stays
+  const chosen = state.eqSelected || (drag && drag.key);
+  const b = chosen ? bell(chosen)
+    : bands.filter((x) => x.type === "bell").sort((x, y) => Math.abs(Math.log(x.freq / mid)) - Math.abs(Math.log(y.freq / mid)))[0];
   if (!b || eqLocks(b.label).q) return;
   if (!drag || !drag.moved) remember();
   drag = null;
@@ -294,6 +298,10 @@ function endPinch() {
   state.eqEditing = false;
   settle();
 }
+
+// A touch off the handles deselects (closes the settings) only once it lifts as a tap: the
+// first finger of a pinch must not drop the band the pinch is for.
+let tapOff = null;   // pointerId of such a touch
 
 // Double-tap a handle: its gain back to 0 dB (bells and shelves; not when the gain is locked).
 let lastTap = null;   // {key, t}
@@ -313,7 +321,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (touches.size > 2) return;
   const [x, y] = local(e);
   const h = hit(x, y);
-  if (!h) { closePop(); return; }
+  if (!h) { if (e.pointerType === "touch") tapOff = e.pointerId; else closePop(); return; }
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
   drag = { key: h.key, kind: h.kind, moved: false, x0: x, y0: y };
@@ -353,6 +361,7 @@ canvas.addEventListener("pointermove", (e) => {
 
 function endDrag(e) {
   touches.delete(e.pointerId);
+  if (tapOff === e.pointerId) { tapOff = null; if (e.type === "pointerup") closePop(); }
   if (pinch) { if (touches.size < 2) endPinch(); return; }
   if (!drag) return;
   const { key, moved } = drag;

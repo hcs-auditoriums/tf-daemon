@@ -276,6 +276,32 @@ def test_eq_toolbar_double_tap_pinch_and_types(page):
         )
         wait_desk(page, 1, lambda e: band(e, "HM")["q"] < 1, "a lower HM Q after the pinch")
 
+        # With a band selected (its settings open), a pinch is for it, wherever the fingers are:
+        # here right over HM, while LM is the one selected.
+        lm = "PEQ/Bank/Band:0"
+        put_eq(1, [[f"{lm}/Gain", -400], [f"{lm}/Q", 2000]])  # a mid band: always a bell
+        wait_desk(page, 1, lambda e: band(e, "LM")["gain"] == -4 and band(e, "LM")["q"] == 2, "LM a -4 dB bell")
+        hm_q = band(desk_eq(1), "HM")["q"]
+        page.wait_for_timeout(500)
+        lmh = page.evaluate("window.tfEqHandles().find(h => h.key === 'LM')")
+        page.mouse.click(box["x"] + lmh["x"], box["y"] + lmh["y"])
+        page.get_by_role("dialog", name="EQ LM").wait_for(timeout=3000)
+        page.evaluate(
+            """([x, y]) => {
+                const c = document.getElementById('spectrum'), r = c.getBoundingClientRect();
+                const ev = (type, id, dx) => c.dispatchEvent(new PointerEvent(type, {pointerId: id, pointerType: 'touch',
+                    clientX: r.left + x + dx, clientY: r.top + y, bubbles: true, isPrimary: id === 31}));
+                ev('pointerdown', 31, -20); ev('pointerdown', 32, 20);
+                for (const d of [30, 45, 60]) { ev('pointermove', 31, -d); ev('pointermove', 32, d); }
+                ev('pointerup', 32, 60); ev('pointerup', 31, -60);
+            }""",
+            [x, y],
+        )
+        wait_desk(page, 1, lambda e: band(e, "LM")["q"] < 1, "a lower LM Q after the pinch")
+        assert band(desk_eq(1), "HM")["q"] == hm_q  # the band under the fingers is untouched
+        page.get_by_role("dialog", name="EQ LM").wait_for(timeout=1000)  # still selected, settings open
+        page.keyboard.press("Escape")
+
         # EQ on / off from the toolbar.
         eq_btn = bar.get_by_role("button", name="EQ", exact=True)
         eq_btn.click()

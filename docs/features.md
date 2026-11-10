@@ -12,7 +12,7 @@ On the waterfall, speech shows as gliding harmonics and a ring as a straight
 vertical line; hovering shows frequency, how long ago, and level.
 
 **Editing the console, as on TF StageMix.** With the EQ shown on the spectrum (and
-`tf5.eq_write` on), drag a band's handle (frequency and gain), pinch for a bell's Q,
+`tf5.eq_write` on), drag a band's handle (frequency and gain), pinch for the Q of the selected bell (the one whose settings are open; with none selected, the bell nearest your fingers),
 double-tap a handle to put its gain back to 0 dB, or click it for its settings (type:
 bell / shelf, and LPF on the high band; values to type; locks, after which the band shows a padlock). The toolbar at the top
 left switches the EQ and HPF on and off, undoes and redoes, and compares (A/B) with a
