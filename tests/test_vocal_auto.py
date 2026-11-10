@@ -7,8 +7,6 @@ from tf_daemon.audio.stage import FlatDesk, StageSettings, StageSource
 from tf_daemon.vocal.auto import PATHS, STEP_DB, AutoEQ
 from tf_daemon.vocal.session import MicChecks
 
-TYPES = {0: "bell", 1: "shelf", 2: "filter"}
-
 
 class RawDesk(FlatDesk):
     """Channel 0's EQ as the TF5 holds it (raw values); readable and writable like

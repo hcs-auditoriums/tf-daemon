@@ -43,11 +43,8 @@ class VoiceCollector:
         self._lag0, self._lag1 = int(samplerate / 400), int(samplerate / 70)
         self.ltas = np.zeros(len(self.freqs))
         self.weight = 0.0  # sum of the frames' weights in ltas (= active frames without memory)
-        self.active_frames = 0
-        self.voiced_frames = 0
         self._active_w = 0.0
         self._voiced_w = 0.0
-        self.total_frames = 0
         keep = None if memory_s is None else max(50, int(memory_s * 20))  # ~20 hops / s
         self.f0s: deque[float] = deque(maxlen=keep)
         self._floor: float | None = None
@@ -65,7 +62,6 @@ class VoiceCollector:
         x = np.asarray(frame[-self.N :], dtype=np.float64)
         if len(x) < self.N:
             return False
-        self.total_frames += 1
         spec = np.fft.rfft(x * self.window)
         p = np.abs(spec) ** 2
         level = self._db(float(np.sum(p[self._k0 : self._k1])))
@@ -79,12 +75,10 @@ class VoiceCollector:
         self.weight = self.weight * a + 1.0
         self._active_w = self._active_w * a + 1.0
         self._voiced_w *= a
-        self.active_frames += 1
         self.speech_s += dt
         self._speech_levels.append(level)
         f0, strength = self._pitch(x)
         if strength >= self.VOICED:
-            self.voiced_frames += 1
             self._voiced_w += 1.0
             self.f0s.append(f0)
         return True

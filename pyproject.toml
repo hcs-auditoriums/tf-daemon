@@ -28,7 +28,7 @@ tf-daemon = "tf_daemon.__main__:main"
 include = ["tf_daemon*"]
 
 [tool.setuptools.package-data]
-tf_daemon = ["static/*"]
+tf_daemon = ["static/*", "static/audio/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
