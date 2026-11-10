@@ -320,7 +320,11 @@ main.page {
 .console-panel[hidden] { display: none; }
 .cp-note { color: var(--muted); margin: 0; }
 /* The name at the foot of the strip, in the channel's colour (StageMix / the desk's scribble strip). */
-.cp-head { padding: 6px 8px; border-radius: 6px; border-top: 5px solid var(--ch); background: var(--bg); text-align: center; }
+.cp-head { padding: 6px 8px; border-radius: 6px; border: 0; border-top: 5px solid var(--ch); background: var(--bg); text-align: center;
+           font: inherit; color: inherit; width: 100%; cursor: pointer; }
+.cp-head > span { display: block; }
+.cp-head:hover, .cp-head:focus-visible { background: #1e242c; outline: none; }
+.cp-head .cp-name::after, .cp-sendtitle::after { content: " ›"; color: var(--muted); font-weight: 400; }
 .cp-name { font-size: 15px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-src { color: var(--muted); font-size: 11px; }
 .cp-on {
@@ -379,7 +383,9 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
 .cp-sends { display: flex; flex-direction: column; gap: 5px; flex: 0 1 auto; min-height: 64px; overflow-y: auto; }
 .cp-sendhdr { position: sticky; top: 0; background: var(--panel); }
 .cp-sendhdr { display: flex; justify-content: space-between; align-items: center; }
-.cp-sendhdr h3 { margin: 0; font-size: 11px; font-weight: 400; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.cp-sendtitle { margin: 0; padding: 0; border: 0; background: none; cursor: pointer; min-height: 32px;
+                font: inherit; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.cp-sendtitle:hover { color: var(--text); }
 .cp-sendhdr label { display: flex; align-items: center; gap: 4px; color: var(--muted); min-height: 32px; padding-left: 8px; }
 .cp-send { display: grid; grid-template-columns: 1fr 38px; grid-template-rows: auto 4px; column-gap: 6px; align-items: center; }
 .cp-send .cp-sendbar { grid-column: 1 / -1; grid-row: 2; height: 4px; }
@@ -433,11 +439,11 @@ button.cp-on:focus-visible, .cp-track.writable:focus-visible { outline: 2px soli
   background: rgba(13, 16, 20, 0.88); border: 1px solid var(--border); border-radius: 6px;
   font-size: 12px; font-variant-numeric: tabular-nums;
 }
-main:has(.vocal-panel:not([hidden])) .ring-list { right: auto; left: 52px; }
+main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { right: auto; left: 52px; }
 .ring-list[hidden] { display: none; }
 .ring-list.collapsed { width: auto; }
 @media (max-width: 720px) {
-  .ring-list, main:has(.vocal-panel:not([hidden])) .ring-list { left: 8px; right: 8px; width: auto; max-width: none; }
+  .ring-list, main:has(.vocal-panel:not([hidden]), .strip-panel:not([hidden])) .ring-list { left: 8px; right: 8px; width: auto; max-width: none; }
   .ring-list.collapsed { right: auto; }
 }
 .rl-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 0 2px 4px; font-weight: 600; }
@@ -603,3 +609,50 @@ main:has(.vocal-panel:not([hidden])) .ring-list { right: auto; left: 52px; }
 }
 .eqb-panel .eqb-btn { justify-items: start; color: var(--text); font-weight: 400; }
 @media (pointer: coarse) { .eqb-btn { min-width: 44px; min-height: 40px; font-size: 14px; } }
+
+/* A channel's gain / gate / comp / sends (audio/strip.js): one panel over the plot's right side,
+   a tab per StageMix screen. Opened from the sidebar's name and Sends heading. */
+.strip-panel {
+  position: absolute; top: 44px; right: 16px; z-index: 11; width: 340px; max-width: calc(100% - 32px);
+  max-height: calc(100% - 60px); overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px;
+  background: rgba(22, 26, 32, 0.97); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.strip-panel[hidden] { display: none; }
+.sp-head { display: flex; align-items: center; gap: 6px; }
+.sp-tabs { display: flex; flex: 1; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.sp-tab { flex: 1; font: inherit; font-size: 12px; color: var(--muted); background: none; border: 0; border-left: 1px solid var(--border);
+          min-height: 32px; cursor: pointer; }
+.sp-tab:first-child { border-left: 0; }
+.sp-tab[aria-selected="true"] { color: var(--text); background: #24435c; font-weight: 600; }
+.sp-x { font: inherit; font-size: 18px; color: var(--muted); background: none; border: 0; cursor: pointer; min-width: 32px; min-height: 32px; }
+.sp-body { display: flex; flex-direction: column; gap: 10px; }
+.sp-note { margin: 0; color: var(--muted); }
+.sp-foot { font-size: 11px; border-top: 1px solid var(--border); padding-top: 6px; }
+.sp-error { margin: 0; color: var(--bad); }
+.sp-error[hidden], .sp-foot[hidden] { display: none; }
+.sp-switches { display: flex; gap: 6px; }
+.sp-toggle { font: inherit; font-weight: 600; color: var(--muted); background: #1e242c; border: 1px solid var(--border);
+             border-radius: 6px; min-height: 32px; min-width: 44px; padding: 0 10px; cursor: pointer; }
+.sp-toggle[aria-pressed="true"] { color: #06131d; background: var(--ok); border-color: var(--ok); }
+.sp-toggle.danger[aria-pressed="true"] { color: #fff; background: var(--bad); border-color: var(--bad); }
+.sp-toggle:disabled, .sp-row input:disabled { opacity: 0.45; cursor: default; }
+.sp-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; }
+.sp-name { color: var(--muted); }
+.sp-val { text-align: right; color: var(--text); font-weight: 600; }
+.sp-row input[type="range"] { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: var(--avg); }
+.sp-seg { display: flex; gap: 4px; }
+.sp-seg .sp-toggle { min-width: 0; text-transform: capitalize; font-weight: 400; }
+.sp-send { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-top: 1px solid var(--border); }
+.sp-sendhead { display: flex; gap: 6px; align-items: center; }
+.sp-sendhead .sp-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-sendhead .sp-toggle { min-height: 28px; min-width: 40px; font-size: 11px; }
+.dyn-graph { position: static; display: block; width: 100%; height: 150px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+             touch-action: none; cursor: ew-resize; }
+@media (pointer: coarse) { .sp-toggle { min-height: 40px; } .sp-row input[type="range"] { height: 28px; } }
+@media (max-width: 720px) { .strip-panel { left: 8px; right: 8px; width: auto; max-width: none; top: 8px; } }
+/* A send in two lines: name, ON, PRE; then its level (and pan for a pair) with the value beside it. */
+.sp-send .sp-row { grid-template-columns: 1fr 52px; }
+.sp-send .sp-row .sp-name { display: none; }
+.sp-send .sp-row input[type="range"] { grid-column: 1; grid-row: 1; }
+.sp-send .sp-row .sp-val { grid-column: 2; grid-row: 1; }

@@ -11,6 +11,19 @@ average), and the Rings / Console overlays. Choices are remembered per browser.
 On the waterfall, speech shows as gliding harmonics and a ring as a straight
 vertical line; hovering shows frequency, how long ago, and level.
 
+**Editing the console, as on TF StageMix.** With the EQ shown on the spectrum (and
+`tf5.eq_write` on), drag a band's handle (frequency and gain), pinch for a bell's Q,
+double-tap a handle to put its gain back to 0 dB, or click it for its settings (type:
+bell / shelf, and LPF on the high band; values to type; locks). The toolbar at the top
+left switches the EQ and HPF on and off, undoes and redoes, and compares (A/B) with a
+copied EQ; its menu has Gain flat, Copy, Paste and Compare with before. Every value is
+held to the TF5's ranges. Tap the channel's name at the foot of the console sidebar
+(or its **Sends** heading) for its **Input**, **Gate**, **Comp** and **Sends**: gain,
++48V (asks first), phase; the gate's and compressor's curves with a draggable threshold
+(and ratio); each AUX send's level, ON, pre and pan. Which of these the real desk
+can be read and written for yet, and which are only simulated in demo mode, is in
+[Desk coverage](desk-coverage.md).
+
 **Shift+← / Shift+→** switches between the pages (Audio, RF, Wireless, Config),
 except while typing or choosing in a field. The Config page checks for updates by
 itself when it opens.

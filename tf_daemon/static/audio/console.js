@@ -3,6 +3,7 @@
 import { eqAt, eqAvailable, eqHalf } from "./eq.js";
 import { paintChannelColors } from "./controls.js";
 import { profileBar } from "./profiles.js";
+import { openStrip } from "./strip.js";
 import { $, C, el, loadInt, save, state } from "./shared.js";
 
 // Sidebar with the TF5 channel feeding the shown input: name, on, fader,
@@ -317,9 +318,13 @@ export function renderPanel() {
     const p = ch.params, v = (k) => p[k]?.value;
     // A channel strip like TF StageMix's, top to bottom: EQ, pan, sends, ON, fader, and the
     // name in the channel's colour at the foot (the desk's scribble strip).
-    const head = el("div", "cp-head");
+    // The name at the foot opens the channel's gain / gate / comp / sends (strip.js).
+    const head = el("button", "cp-head");
+    head.type = "button";
+    head.title = "Gain, gate, comp and sends";
+    head.onclick = () => openStrip("input");
     head.style.setProperty("--ch", TF_COLORS[String(v("Label/Color") || "").toLowerCase()] || "var(--border)");
-    head.append(el("div", "cp-name", v("Label/Name") || ch.source), el("div", "cp-src", `${ch.source} · USB ${ch.index + 1}`));
+    head.append(el("span", "cp-name", v("Label/Name") || ch.source), el("span", "cp-src", `${ch.source} · USB ${ch.index + 1}`));
 
     const writable = faderWritable();
     refs.onWritable = writable;
@@ -419,7 +424,11 @@ export function renderPanel() {
       const cb = el("input"); cb.type = "checkbox"; cb.checked = state.allSends;
       cb.onchange = () => { state.allSends = cb.checked; save("tf.allSends", cb.checked ? 1 : 0); panelSig = null; renderPanel(); };
       lbl.append(cb, " all");
-      hdr.append(el("h3", "", "Sends"), lbl);
+      const title = el("button", "cp-sendtitle", "Sends");
+      title.type = "button";
+      title.title = "Edit the sends";
+      title.onclick = () => openStrip("sends");
+      hdr.append(title, lbl);
       sends.append(hdr);
       if (!shown.length) sends.append(el("p", "cp-note", "No active sends"));
       for (const r of shown) {

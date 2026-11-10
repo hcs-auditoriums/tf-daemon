@@ -5,6 +5,7 @@ import { eqEditReset } from "./eqedit.js";
 import { autoReset } from "./range.js";
 import { $, save, state } from "./shared.js";
 import { send } from "./socket.js";
+import { stripInputChanged } from "./strip.js";
 import { renderVocal } from "./vocal.js";
 import { wfReset } from "./waterfall.js";
 
@@ -96,6 +97,7 @@ export function selectInput(index) {
   markSelected(index);
   send({ cmd: "view", channel: index });
   renderPanel();
+  stripInputChanged();
   state.dirty = true;
 }
 
