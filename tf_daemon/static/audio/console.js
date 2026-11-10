@@ -2,6 +2,7 @@
 
 import { eqAt, eqAvailable, eqHalf, smoothCurve } from "./eq.js";
 import { paintChannelColors } from "./controls.js";
+import { meterBar } from "./meters.js";
 import { profileBar } from "./profiles.js";
 import { paintTools, stripTools } from "./strip.js";
 import { $, C, el, loadInt, save, state } from "./shared.js";
@@ -359,7 +360,7 @@ export function renderPanel() {
     refs.fill = el("div", "cp-fill");
     refs.cap = el("div", "cp-cap");
     track.append(refs.fill, refs.cap);
-    fader.append(scale, track);
+    fader.append(scale, track, meterBar());  // the desk's level beside the fader (meters.js)
     faderSec.append(fader);
     scaleFit.disconnect();
     scaleFit.observe(track);

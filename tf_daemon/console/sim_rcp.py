@@ -1,13 +1,18 @@
 """Simulated TF5, the RCP side (console/rcp.py): answers ``prminfo`` / ``get`` with a
 plausible service's channel list and pushes ``NOTIFY set`` when a fader moves "on the desk".
+It also answers the meter commands (console/meters.py: ``mtrnum`` / ``mtrinfo`` /
+``mtrstart`` / ``mtrstop``) in the grammar meters.py assumes, streaming ``NOTIFY mtr``
+levels in dB x 100 that follow the demo desk's faders and ON switches.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import random
 import socket
 import threading
+import time
 from collections import deque
 from collections.abc import Callable
 
@@ -54,6 +59,20 @@ DEMO_INPUTS = [
     ("Video L", "SkyBlue", None, 0, -63),
     ("Video R", "SkyBlue", None, 0, 63),
 ]
+# The meters the simulated desk lists (mtrinfo): (kind, channels, points).
+_IN_POINTS, _OUT_POINTS = ("PreHPF", "PreEQ", "PreFader", "PostOn"), ("PreEQ", "PreFader", "PostOn")
+SIM_METERS = [
+    ("InCh", 40, _IN_POINTS),
+    ("StInCh", 4, _IN_POINTS),
+    ("FxRtnCh", 4, _IN_POINTS),
+    ("Mix", 20, _OUT_POINTS),
+    ("Mtrx", 4, _OUT_POINTS),
+    ("St", 2, _OUT_POINTS),
+    ("Mono", 1, _OUT_POINTS),
+]
+METER_ADDRESSES = [(f"MIXER:Current/{k}/{p}", n) for k, n, points in SIM_METERS for p in points]
+METER_FLOOR = -13800  # dB x 100 the simulated meters read for no signal
+
 DEMO_MIXES = ["Wedge DS", "Wedge SR", "Drum IEM", "Vox IEM", "Keys IEM", "Gtr IEM", "Bass IEM", "Lobby"]
 
 
@@ -121,6 +140,9 @@ class SimRCP:
         self.received: deque[str] = deque(maxlen=100_000)
         self.on_set: Callable[[str, int, int, str], None] | None = None  # a change "on the desk"
         self.held: set[int] = set()  # input channels a client set the fader of: the drift leaves them
+        self.meter_subs: dict[socket.socket, dict[str, list[float]]] = {}  # conn -> address -> [interval, due]
+        self._meter_thread: threading.Thread | None = None
+        self._wlock = threading.Lock()  # one writer at a time: replies, pushes, meter lines don't interleave
         self._rng = random.Random(seed)
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -146,20 +168,26 @@ class SimRCP:
             while chunk := conn.recv(65536):
                 buf += chunk
                 *lines, buf = buf.split(b"\n")
-                out = [self.reply(raw.decode(errors="replace").strip()) for raw in lines]
-                conn.sendall("".join(o + "\n" for o in out if o).encode())
+                out = [self.reply(raw.decode(errors="replace").strip(), conn) for raw in lines]
+                with self._wlock:
+                    conn.sendall("".join(o + "\n" for o in out if o).encode())
         except OSError:
             pass
         finally:
             if conn in self.conns:
                 self.conns.remove(conn)
+            with self._lock:
+                self.meter_subs.pop(conn, None)
 
-    def reply(self, line: str) -> str:
+    def reply(self, line: str, conn: socket.socket | None = None) -> str:
+        """The console's answer to one line (``conn``: the client, for meters it starts)."""
         parts = line.split()
         if not parts:
             return ""
         self.requests += 1
         self.received.append(line)
+        if parts[0].startswith("mtr"):
+            return self._meter_reply(parts, conn)
         if parts[0] == "prminfo" and len(parts) == 2 and parts[1].isdigit():
             i = int(parts[1])
             return f"OK prminfo {i} {self.prminfo[i]}" if i < len(self.prminfo) else f"ERROR prminfo {i} UnknownIndex"
@@ -170,6 +198,74 @@ class SimRCP:
                 return f"ERROR get {parts[1]} InvalidArgument"
             return f"OK get {parts[1]} {parts[2]} {parts[3]} {value}"
         return f"ERROR {parts[0]} UnknownCommand"  # tf-daemon never sends set; refuse anything else
+
+    # ------------------------------------------------------------------ meters
+
+    def _meter_reply(self, parts: list[str], conn: socket.socket | None) -> str:
+        cmd, addrs = parts[0], dict(METER_ADDRESSES)
+        if cmd == "mtrnum" and len(parts) == 1:
+            return f"OK mtrnum {len(METER_ADDRESSES)}"
+        if cmd == "mtrinfo" and len(parts) == 2 and parts[1].isdigit():
+            i = int(parts[1])
+            if i >= len(METER_ADDRESSES):
+                return f"ERROR mtrinfo {i} UnknownIndex"
+            addr, n = METER_ADDRESSES[i]
+            return f'OK mtrinfo {i} "{addr}" {n} 0 {METER_FLOOR} 0 "dB" 100'
+        if cmd == "mtrstart" and len(parts) == 3 and parts[1] in addrs and parts[2].isdigit():
+            if conn is not None:
+                with self._lock:
+                    self.meter_subs.setdefault(conn, {})[parts[1]] = [max(20, int(parts[2])) / 1000, 0.0]
+                if self._meter_thread is None:
+                    self._meter_thread = threading.Thread(target=self._stream_meters, name="sim-rcp-mtr", daemon=True)
+                    self._meter_thread.start()
+            return f"OK mtrstart {parts[1]} {parts[2]}"
+        if cmd == "mtrstop" and len(parts) == 2:
+            with self._lock:
+                if conn is not None:
+                    self.meter_subs.get(conn, {}).pop(parts[1], None)
+            return f"OK mtrstop {parts[1]}"
+        return f"ERROR {cmd} InvalidArgument"
+
+    def meter_levels(self, address: str, t: float) -> list[int]:
+        """Plausible levels (dB x 100) for a meter at time ``t``: the named demo inputs talk and
+        play around -20 dBFS; post-on meters follow the faders and ON switches; the stereo bus
+        sums the inputs; everything else idles."""
+        kind, point = address.split("/")[-2:]
+        n = dict(METER_ADDRESSES)[address]
+        if kind == "InCh":
+            return [self._input_level(x, point, t) for x in range(n)]
+        if kind == "St":
+            power = sum(10 ** (self._input_level(x, "PostOn", t) / 1000) for x in range(len(DEMO_INPUTS)))
+            bus = 10 * math.log10(power) - 3 if power > 0 else METER_FLOOR / 100
+            return [self._clip(bus + self._fader_db("St", s) + 0.5 * s) for s in range(n)]
+        return [self._clip(-40 + 4 * math.sin(0.5 * t + x)) for x in range(n)]
+
+    def _input_level(self, x: int, point: str, t: float) -> int:
+        if x >= len(DEMO_INPUTS):
+            return METER_FLOOR
+        db = (
+            -20 + 5 * math.sin(0.7 * t + x) + 3 * math.sin(3.1 * t + 2 * x) + (1 if point in ("PreHPF", "PreEQ") else 0)
+        )
+        return self._clip(db + self._fader_db("InCh", x)) if point == "PostOn" else self._clip(db)
+
+    def _fader_db(self, kind: str, x: int) -> float:
+        with self._lock:
+            on = self.values.get((RCP_PREFIX[kind] + "Fader/On", x, 0), "1")
+            level = int(self.values.get((RCP_PREFIX[kind] + "Fader/Level", x, 0), "0"))
+        return -1000.0 if on == "0" or level <= -32768 else level / 100
+
+    @staticmethod
+    def _clip(db: float) -> int:
+        return METER_FLOOR if db <= METER_FLOOR / 100 else min(0, round(db * 100))
+
+    def _stream_meters(self) -> None:
+        while not self._stop.wait(0.02):
+            now = time.monotonic()
+            with self._lock:
+                due = [(c, a, sub) for c, subs in self.meter_subs.items() for a, sub in subs.items() if now >= sub[1]]
+            for c, a, sub in due:
+                sub[1] = now + sub[0]
+                self._write(c, f"NOTIFY mtr {a} " + " ".join(map(str, self.meter_levels(a, now))))
 
     def set(self, addr: str, x: int, y: int, value: str) -> None:
         """Change a value "on the desk": stored and pushed to every client (both protocols)."""
@@ -185,10 +281,14 @@ class SimRCP:
 
     def push(self, line: str) -> None:
         for c in list(self.conns):
-            try:
-                c.sendall((line + "\n").encode())
-            except OSError:
-                pass
+            self._write(c, line)
+
+    def _write(self, conn: socket.socket, line: str) -> None:
+        try:
+            with self._wlock:
+                conn.sendall((line + "\n").encode())
+        except OSError:
+            pass
 
     def _drift(self, period: float) -> None:
         addr = RCP_PREFIX["InCh"] + "Fader/Level"

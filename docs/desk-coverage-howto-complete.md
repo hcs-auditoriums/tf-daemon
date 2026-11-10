@@ -245,7 +245,7 @@ index mapping is [INFERRED]; verify by toggling one assignment on the desk and w
 Related: `Setup/MuteSafe/<Ch>[N]/On`, `Volatile/MuteTemporaryOff/<Ch>[N]/On`. RCP:
 `MIXER:Current/MuteMaster/On` x 0–5 rw, `MuteMaster/Label/Name` read-only [EXTERNAL].
 
-**Level meters.** Three routes, none finished:
+**Level meters.** Three routes; the second is implemented but unverified on a TF5:
 
 1. YMDP multicast `239.192.0.164:50240`: framing known, block ids grouped by strip type
    (guide section 8); the block → meter-point map and the 1-byte scale are [PENDING]. To finish:
@@ -255,6 +255,17 @@ Related: `Setup/MuteSafe/<Ch>[N]/On`, `Volatile/MuteTemporaryOff/<Ch>[N]/On`. RC
    meter addresses that are in the binary: `MIXER:Current/<InCh|StInCh|FxRtnCh|Mix|Mtrx|St|Mono>/
    {PreHPF,PreEQ,PreFader,PostOn}` [VERIFIED-CODE strings; TF5 support PENDING]. This is the
    cheapest thing to try: `mtrnum`, then `mtrinfo 0..n`, then `mtrstart` one address.
+   tf-daemon implements this route (`console/meters.py`, `tf5.meters`; simulated in
+   `console/sim_rcp.py`, shown on the audio page) against an assumed grammar: `OK mtrnum <n>`,
+   `OK mtrinfo <i> "<address>" <x> <y> <min> <max> ...` (like `prminfo`), and
+   `NOTIFY mtr <address> [<type>] <v0> <v1> ...` with one value per channel (decimal dB × 100,
+   or raw steps / hex bytes, which it reports as raw). To verify on the desk, one read-only
+   command prints every reply line:
+   `python -m tf_daemon.console.meters --host <desk> --seconds 5` (add
+   `--address MIXER:Current/InCh/PostOn` to try another meter). Check: does `mtrnum` answer;
+   are the addresses spelled as above; is the interval in ms; what the data line's action word
+   and value format are; whether min / max say dB × 100; whether a stream stops by itself
+   (the client re-sends `mtrstart` after 5 s of silence).
 3. Gain reduction is probably YMDP element type `0x02` (guide 8) [INFERRED].
 
 Meter points on the desk: `Setup/Meter/{Input,Output}/Point` u8 0–2, `Setup/Meter/PeakHold/On`.
@@ -567,7 +578,8 @@ of constructing them.
 
 ## 5. Remaining unknowns, cheapest first
 
-1. RCP meters: `mtrnum`, `mtrinfo`, `mtrstart` against the TF5 (one `nc` session).
+1. RCP meters: `mtrnum`, `mtrinfo`, `mtrstart` against the TF5 (one `nc` session, or
+   `python -m tf_daemon.console.meters --host <desk>`, read-only; what to look for: 3.1).
 2. Set-param acceptance outside Mixing for `TYPE:StageMix`: one HA-gain write (Processing) and one
    mute-master write (Setup) on a quiet desk.
 3. One TF Editor capture pressing each recorder button, storing a scene, changing gate/comp type,

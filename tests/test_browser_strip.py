@@ -1,6 +1,7 @@
 """A channel's gain / gate / comp / sends panel (audio/strip.js) in a real (headless) browser,
 against the demo server: opened from the sidebar's tool row (IN, EQ, GATE, COMP, SEND, lit when
-that part is on), each tab changes what it shows. Uses its own input and puts it back.
+that part is on), each tab changes what it shows. Uses its own input and puts it back. Also the
+desk's level meters on the channel tiles and beside the fader (audio/meters.js).
 Fixtures in conftest.py, like tests/test_browser.py.
 """
 
@@ -85,3 +86,25 @@ def test_strip_panel_tabs_change_the_channel(page):
         put("gate", {"on": before["gate"]["values"]["on"]})
         put("comp", {"knee": before["comp"]["values"]["knee"]})
         put("sends", {"level": send["level"]}, mix=send["mix"])
+
+
+def test_desk_meters_show_on_the_tiles_and_beside_the_fader(page):
+    """The desk's level meters (audio/meters.js): a bar on each tile, one beside the sidebar fader."""
+    open_page(page, "/")
+    page.wait_for_function("document.querySelectorAll('#channels .ch-chip').length >= 4", timeout=8000)
+    page.locator("#channels .ch-chip", has_text="Lead Vox").click()
+    page.wait_for_function(  # a talking channel's tile bar moves; an unused one stays empty
+        """(() => {
+          const chip = (i) => document.querySelector(`#channels .ch-chip[data-input='${i}']`);
+          return chip(1).classList.contains('metered') && Number(chip(1).style.getPropertyValue('--lvl')) > 0
+            && Number(chip(20).style.getPropertyValue('--lvl')) === 0;
+        })()""",
+        timeout=8000,
+    )
+    meter = page.locator("#console-panel .cp-meter")
+    meter.wait_for(timeout=8000)
+    page.wait_for_function(
+        "parseFloat(document.querySelector('#console-panel .cp-meter-fill').style.height) > 0", timeout=4000
+    )
+    assert "dBFS" in meter.get_attribute("aria-valuetext")
+    assert meter.bounding_box()["height"] > 100  # as tall as the fader

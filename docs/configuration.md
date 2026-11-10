@@ -102,5 +102,19 @@ Everything lives in `config.toml`; any missing key falls back to the defaults in
   cancel mute them); never the stereo bus, mixes, sends or DCAs. One-off read-only
   probe from a shell:
   `python -m tf_daemon.console.editor <console-ip> --channels 1-8 [--watch]`.
+- `tf5.meters` (default `true`), `tf5.meter_interval_ms` (100, 20–2000) and
+  `tf5.meter_point` (`PreFader`; `PreHPF`, `PreEQ`, `PreFader` or `PostOn`): read the
+  desk's level meters over RCP (`tf_daemon/console/meters.py`, its own connection to
+  `tf5.port`) and show them as a bar along the foot of each channel tile and beside
+  the **Console** sidebar's fader (green, amber from −18 dBFS, red from −6 dBFS). Input
+  channels are metered at `meter_point`, the stereo bus post-ON. The client sends only
+  `mtrnum`, `mtrinfo`, `mtrstart` and `mtrstop`, which change nothing on the desk.
+  The reply grammar is **unverified on a real TF5**: values the console sends as dB × 100
+  show in dBFS; if it sends raw meter steps instead, the bars show the fraction of full
+  scale and their readout says "raw". A console that refuses the commands just shows no
+  meters (`GET /api/tf5/status` → `meters`). Values: `GET /api/tf5/meters`; pages get
+  `{"type": "tf5-meters"}` over `/ws/audio` at most 10 times a second. One-off
+  read-only probe that prints the console's meter list and a few seconds of data:
+  `python -m tf_daemon.console.meters --host <console-ip> [--seconds 5] [--address ADDR]`.
 
 Levels are dBFS with AES17 convention: a full-scale sine reads 0 dBFS.

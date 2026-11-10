@@ -81,6 +81,12 @@ def test_console_eq_is_read(status):
     assert eq["connected"] and eq["eq"]["hpf"]["freq"] > 0 and len(eq["curve"]) > 0
 
 
+def test_desk_meters_are_read(status):
+    m = wait_for("/api/tf5/meters", lambda m: m["scale"] == "dB" and m["levels"][1] is not None)
+    assert len(m["levels"]) == 34 and -60 < m["levels"][1] <= 0  # "Lead Vox" on the simulated desk
+    assert m["status"]["meters"]["MIXER:Current/InCh/PreFader"]["state"] == "started"
+
+
 def test_vocal_assist_can_write_to_the_simulated_desk(status):
     _, s = get("/api/vocal/status")
     assert s["enabled"] and s["can_write"]
@@ -110,20 +116,20 @@ def test_rf_sweeps_the_receiver_range(status):
     assert rf["scanning"] and len(rf["sweep"]["live"]) == rf["settings"]["points"]
 
 
-def test_audio_websocket_streams_metadata_console_and_spectra(status):
+def test_audio_websocket_streams_metadata_console_meters_and_spectra(status):
     from simple_websocket import Client
 
     ws = Client.connect(URL.replace("http", "ws", 1) + "/ws/audio")
     try:
         kinds, binary = set(), 0
         deadline = time.time() + 5
-        while time.time() < deadline and not ({"tf5", "rings"} <= kinds and binary >= 3):
+        while time.time() < deadline and not ({"tf5", "rings", "tf5-meters"} <= kinds and binary >= 3):
             m = ws.receive(timeout=0.5)
             if isinstance(m, str):
                 kinds.add(json.loads(m).get("type"))
             elif m is not None:
                 binary += 1
-        assert {"tf5", "rings"} <= kinds, kinds
+        assert {"tf5", "rings", "tf5-meters"} <= kinds, kinds
         assert binary >= 3  # spectrum frames at ~20/s
     finally:
         ws.close()

@@ -17,7 +17,9 @@ Routes:
                                messages whenever they change. With a TF5, the
                                desk's state arrives as {"type": "tf5"} (on connect),
                                then {"type": "tf5-changes"} as values change on the
-                               desk, and {"type": "tf5-eq"} for the viewed input's EQ.
+                               desk, and {"type": "tf5-eq"} for the viewed input's EQ;
+                               with tf5.meters, {"type": "tf5-meters"} level meters
+                               (console/meters.py) at most every 0.1 s.
 """
 
 from __future__ import annotations
@@ -49,6 +51,8 @@ class ConsoleFeed(Protocol):
     def changes_since(self, seq: int) -> tuple[int, dict[str, Any] | None]: ...
 
     def eq(self, usb: int) -> dict[str, Any]: ...
+
+    def meters_since(self, version: int) -> tuple[int, dict[str, Any] | None]: ...
 
 
 class AudioModule:
@@ -122,7 +126,7 @@ class AudioModule:
             if console is not None:
                 tf5_seq, snap = console.snapshot()
                 ws.send(json.dumps(snap))
-            seq = 0
+            seq, meter_version, meter_sent = 0, 0, 0.0
             view: list[int] = []  # the input this client views, if any (a list so the handler can swap it)
             try:
                 while True:
@@ -137,6 +141,11 @@ class AudioModule:
                         ws.send(json.dumps(engine.rings.snapshot()))
                     if console is not None:
                         tf5_seq, eq_sent = _send_console(ws, console, tf5_seq, view, eq_sent)
+                        if now - meter_sent >= 0.1:  # level meters: at most 10 a second
+                            meter_version, levels = console.meters_since(meter_version)
+                            if levels:
+                                ws.send(json.dumps(levels, separators=(",", ":")))
+                                meter_sent = now
                     # Short wait: desk changes go out promptly even when no audio arrives.
                     seq, payload = engine.hub.wait(seq, timeout=0.1)
                     if payload is not None:

@@ -1,5 +1,6 @@
 """Cheap checks on the page scripts (there is no browser in the test run)."""
 
+import posixpath
 import re
 from pathlib import Path
 
@@ -138,15 +139,19 @@ def _exports(js: str) -> set[str]:
 def test_page_imports_resolve():
     """Every name a module imports is exported by the module it names (a typo there is
     a SyntaxError that stops the whole page), and every shared module is reachable."""
+    # Each script read and parsed once, paths joined as strings: file system calls are slow
+    # on a mounted source tree.
+    sources = {posixpath.normpath(name): (STATIC / name).read_text(encoding="utf-8") for name in SCRIPTS}
+    exports: dict[str, set[str]] = {}
     reached = set()
     for name in [s for s in SCRIPTS if s != "nav.js"]:
-        path = STATIC / name
-        src = path.read_text(encoding="utf-8")
-        for names, target in re.findall(r"\bimport\s*\{([^}]*)\}\s*from\s*\"([^\"]+)\"", src):
-            dest = (path.parent / target).resolve()
-            assert dest.exists(), f"{name} imports missing {target}"
-            reached.add(dest.name)
-            missing = {n.strip() for n in names.split(",")} - _exports(dest.read_text(encoding="utf-8"))
+        for names, target in re.findall(r"\bimport\s*\{([^}]*)\}\s*from\s*\"([^\"]+)\"", sources[name]):
+            dest = posixpath.normpath(posixpath.join(posixpath.dirname(name), target))
+            assert dest in sources, f"{name} imports missing {target}"
+            reached.add(posixpath.basename(dest))
+            if dest not in exports:
+                exports[dest] = _exports(sources[dest])
+            missing = {n.strip() for n in names.split(",")} - exports[dest]
             assert not missing, f"{name} imports {sorted(missing)} that {target} doesn't export"
     assert reached == {"common.js", *(p.name for p in (STATIC / "audio").glob("*.js"))}
 
