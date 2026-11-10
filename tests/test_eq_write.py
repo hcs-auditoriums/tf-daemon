@@ -25,26 +25,15 @@ FREQ_2 = "InputChannel:3/PEQ/Bank/Band:1/Frequency"
 
 
 @pytest.fixture
-def console():
-    fake = SimEditor()
-    yield fake
-    fake.close()
-
-
-@pytest.fixture
-def client_for():
-    clients = []
+def client_for(client_for):
+    """The shared fixture (conftest.py), but each client has synced before it is used."""
 
     def make(fake, **kw):
-        c = TFEditorClient("127.0.0.1", fake.port, **kw)
-        clients.append(c)
-        c.start()
+        c = client_for(fake, **kw)
         assert wait_until(lambda: c.synced)
         return c
 
-    yield make
-    for c in clients:
-        c.stop()
+    return make
 
 
 def sent_sets(fake):

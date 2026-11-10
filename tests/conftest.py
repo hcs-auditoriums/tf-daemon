@@ -5,6 +5,9 @@ they share it) on a free port, with throwaway state files, and only when the run
 includes those tests. So editing a file doesn't restart it mid-test (the dev
 container's server reloads on save) and tests can't change the dev demo's state.
 Set TF_DAEMON_URL to point the tests at a server you started yourself instead.
+
+Also the fixtures several test files share: ``console`` (a simulated TF Editor
+endpoint) and ``client_for`` (TF Editor clients on it, stopped after the test).
 """
 
 from __future__ import annotations
@@ -17,6 +20,11 @@ import tempfile
 import time
 import urllib.request
 from pathlib import Path
+
+import pytest
+from editor_fakes import SimEditor
+
+from tf_daemon.console.editor.client import TFEditorClient
 
 ROOT = Path(__file__).resolve().parent.parent
 LIVE_TESTS = ("test_live", "test_browser")
@@ -87,3 +95,25 @@ def pytest_unconfigure(config):
         except subprocess.TimeoutExpired:
             _server.kill()
         _server = None
+
+
+@pytest.fixture
+def console():
+    fake = SimEditor()
+    yield fake
+    fake.close()
+
+
+@pytest.fixture
+def client_for():
+    clients = []
+
+    def make(fake, **kw):
+        c = TFEditorClient("127.0.0.1", fake.port, **kw)
+        clients.append(c)
+        c.start()
+        return c
+
+    yield make
+    for c in clients:
+        c.stop()

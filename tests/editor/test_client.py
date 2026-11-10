@@ -3,6 +3,7 @@
 import json
 import logging
 import socket
+import time
 
 import pytest
 from editor_fakes import (
@@ -311,9 +312,7 @@ def test_a_bug_that_tries_to_write_stops_the_client(console, client_for, monkeyp
     assert not any(t == "MMIX" for t, _ in console.sent_by_client())
     assert "refused" in caplog.text
     n = client.connects
-    import time
-
-    time.sleep(0.5)
+    time.sleep(0.5)  # a retry would have come by now
     assert client.connects == n  # no retry
 
 

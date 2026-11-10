@@ -1,7 +1,7 @@
 import time
 
 import pytest
-from helpers import make_config
+from helpers import make_config, wait_until
 
 from tf_daemon import system
 from tf_daemon.app import build_modules, create_app
@@ -70,10 +70,9 @@ def update_files(tmp_path, monkeypatch):
 
 
 def _wait_final(client, timeout=5.0):
-    deadline = time.time() + timeout
-    while (s := client.get("/api/system/update").get_json())["running"] and time.time() < deadline:
-        time.sleep(0.1)
-    return s
+    state = lambda: client.get("/api/system/update").get_json()  # noqa: E731
+    wait_until(lambda: not state()["running"], timeout=timeout)
+    return state()
 
 
 def test_update_runs_one_at_a_time_and_reports_state(client_for, update_files, monkeypatch):

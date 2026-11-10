@@ -98,10 +98,8 @@ def test_audio_device_unplug_and_replug(fast):
     engine = AudioEngine(cfg, src)  # no device yet: the engine still builds and starts
     engine.start()
     try:
-        time.sleep(0.3)
-        st = src.stats()
-        assert not st["connected"] and "no input device matching 'TF'" in st["error"]
-        assert sd.rescans >= 1  # looks again for newly plugged devices
+        wait_until(lambda: "no input device matching 'TF'" in (src.stats()["error"] or "") and sd.rescans >= 1)
+        assert not src.stats()["connected"]  # and looks again for newly plugged devices
 
         sd.plugged = True
         wait_until(lambda: src.stats()["connected"])
@@ -140,8 +138,8 @@ def test_device_that_rejects_the_format_is_retried(fast):
     src = DeviceSource("TF", BLOCK, sd_module=sd)
     src.start(lambda b: None)
     try:
-        time.sleep(0.3)
-        assert not src.stats()["connected"] and "Invalid sample rate" in src.stats()["error"]
+        wait_until(lambda: "Invalid sample rate" in (src.stats()["error"] or ""))
+        assert not src.stats()["connected"]
         sd.rate_ok = True  # e.g. the console was switched back to 48 kHz
         wait_until(lambda: src.stats()["connected"])
     finally:
