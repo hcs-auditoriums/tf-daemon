@@ -28,6 +28,7 @@ Or with Python 3.11+: `pip install -e '.[dev]'` and
 - [Configuration](docs/configuration.md): `config.toml`
 - [Architecture](docs/architecture.md): modules, data flow, HTTP / WebSocket API
 - [Desk coverage](docs/desk-coverage.md): what is read / written on the TF5, against TF StageMix
+- [Todo](docs/todo.md): ideas we plan to implement
 - [TF5 protocol notes](guides/tf5_api.md)
 
 ## Roadmap
