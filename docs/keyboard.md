@@ -47,7 +47,7 @@ Commands with a shortcut show it on the right.
 | Shortcut | Command | Does |
 |---|---|---|
 | **[** / **]** | Previous channel / Next channel | hold to keep stepping |
-| **1** … **8** | Tile *n* of this bank | the bank shown in the channel bar |
+| **1** … **8** | Tile *n* of those in view | the tiles shown in the channel bar |
 | | *number* · *name* | any input: type its number or name |
 | **E** | Show / hide the desk EQ | on the spectrum (when the TF5's EQ is read) |
 | **Ctrl+Z** | EQ · Undo | while the EQ is shown and editable |

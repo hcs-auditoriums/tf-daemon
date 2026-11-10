@@ -1,5 +1,6 @@
 // Ring / feedback events: the header alert, the list, and markers on the plot.
 
+import { channelTile } from "./console.js";
 import { paintChannelTiles, selectInput } from "./controls.js";
 import { H, PAD, W, xOf } from "./plot.js";
 import { $, ctx, el, fmtHz, loadInt, save, state } from "./shared.js";
@@ -32,14 +33,28 @@ export function onRings(msg) {
   state.dirty = true;
 }
 
-// The inputs live rings come from (input -> worst severity), for the dots on the channel tiles:
-// the strongest source of a ring on the mains, or the input a ring was heard on if not a bus.
+// The input a ring comes from, where its fader and EQ are: the strongest source of a ring on
+// the mains, or the input it was heard on if not a bus (null: a bus ring with no known source).
+// Never a channel that is off on the desk: it feeds nothing to the PA, so it can't be the
+// cause, though its mic still hears the ring in the room (the USB feeds are pre-fader).
+const isOff = (ch) => channelTile(ch).on === false;
+function feedingInput(e) {
+  if (e.sources && e.sources.length) return e.sources.find((s) => !isOff(s.channel))?.channel ?? null;
+  return isBus(e.channel) || isOff(e.channel) ? null : e.channel;
+}
+const showFeeding = (e) => { const ch = feedingInput(e) ?? e.channel; if (ch !== state.input) selectInput(ch); };
+const feedingLabel = (e) => {
+  const ch = feedingInput(e);
+  return ch === null ? e.label : e.sources?.find((s) => s.channel === ch)?.label ?? e.label;
+};
+
+// The inputs live rings come from (input -> worst severity), for the dots on the channel tiles.
 function ringingInputs(events) {
   const out = new Map();
   for (const e of events) {
     const sev = severity(e);
     if (!e.active || sev === "possible") continue;
-    const ch = e.sources && e.sources.length ? e.sources[0].channel : isBus(e.channel) ? null : e.channel;
+    const ch = feedingInput(e);
     if (ch !== null && (!out.has(ch) || SEV[sev].rank > SEV[out.get(ch)].rank)) out.set(ch, sev);
   }
   return out;
@@ -59,11 +74,11 @@ function renderRings() {
   if (live.length) {
     const e = live[0], sev = severity(e);
     alert.className = `ring-alert ${sev}`;
-    const src = e.sources && e.sources[0] ? ` ← ${e.sources[0].label}` : "";
+    const src = feedingInput(e) !== null && feedingInput(e) !== e.channel ? ` ← ${feedingLabel(e)}` : "";
     alert.textContent = `${SEV[sev].label} ${fmtHz(e.freq)} · ${e.label}${src}` + (live.length > 1 ? ` +${live.length - 1}` : "");
-    alert.title = `Show ${e.label}`;
+    alert.title = `Show ${feedingLabel(e)}`;
     alert.onclick = () => {
-      if (e.channel !== state.input) selectInput(e.channel);
+      showFeeding(e);
       if (!state.showRingList) setShowRingList(true);
       if (!ringsOpen) setRingsOpen(true);
     };
@@ -130,8 +145,9 @@ function ringRow(g) {
   dot.title = SEV[sev].label;
   const freq = el("button", "rl-freq", fmtHz(e.freq));
   freq.type = "button";
-  freq.title = `Show ${e.label}`;
-  freq.onclick = (ev) => { ev.stopPropagation(); if (e.channel !== state.input) selectInput(e.channel); };
+  const fedBy = g.events.find((x) => x.sources && x.sources.length) || g.events.find((x) => !isBus(x.channel)) || e;
+  freq.title = `Show ${feedingLabel(fedBy)}`;
+  freq.onclick = (ev) => { ev.stopPropagation(); showFeeding(fedBy); };
   line.append(dot, freq);
   if (sev === "feedback") line.append(el("span", "rl-sev", "FEEDBACK"));
   const count = Math.max(...g.events.map((x) => x.count));
@@ -199,12 +215,15 @@ export function syncRingList() {
   $("ring-list").classList.toggle("eq-busy", !!state.eqEditing || !!document.querySelector(".eq-pop"));
 }
 
-// Markers on the spectrum for the input being shown: live rings solid, recent dashed.
+// Markers on the spectrum for the input being shown (rings heard on it, or on the mains it
+// feeds): live rings solid, recent dashed.
 // Labels that would overlap share one ("3 rings 275–353 Hz", in the worst one's colour).
 const LABEL_RESERVE_R = 32;  // the console button's corner
 function shownRings() {   // this input's live rings and those of the last five minutes
   const now = Date.now() / 1000;
-  return state.rings.filter((e) => e.channel === state.input && (e.active || now - e.last_seen <= 300));
+  const mine = state.rings.filter((e) => (e.channel === state.input || feedingInput(e) === state.input)
+    && (e.active || now - e.last_seen <= 300));
+  return groupRings(mine).map((g) => g.top);   // one marker per ring, not one per input that heard it
 }
 export function drawRingMarkers() {
   if (!state.showRings) return;

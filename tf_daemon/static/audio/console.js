@@ -25,7 +25,7 @@ export function onConsoleSnapshot(msg) {
 // it is on and where its fader sits (0..1); each null when unknown (no TF5, nothing patched).
 export function channelTile(usb) {
   const ch = tf5?.connected ? tf5.channels?.find((c) => c.index === usb) : null;
-  if (!ch) return { color: null, on: null, pos: null };
+  if (!ch) return { color: null, on: null, pos: null, db: null };
   const p = ch.params, l = localFor(usb);
   const on = l && "on" in l ? l.on : p["Fader/On"]?.value;
   const level = l && "level" in l ? l.level : p["Fader/Level"]?.value;
@@ -33,6 +33,7 @@ export function channelTile(usb) {
     color: TF_COLORS[String(p["Label/Color"]?.value || "").toLowerCase()] || null,
     on: on === undefined ? null : on !== 0,
     pos: "Fader/Level" in p || (l && "level" in l) ? faderPos(level) : null,
+    db: level ?? null,   // the fader in dB (null: −∞)
   };
 }
 
@@ -90,7 +91,7 @@ function posToDb(pos) {  // the inverse: null below the bottom
   }
   return null;
 }
-const fmtDb = (db) => (db === null || db === undefined ? "−∞" : `${db > 0 ? "+" : ""}${db.toFixed(1)}`);
+export const fmtDb = (db) => (db === null || db === undefined ? "−∞" : `${db > 0 ? "+" : ""}${db.toFixed(1)}`);
 const fmtPan = (v) => (v === 0 ? "C" : v < 0 ? `L${-v}` : `R${v}`);
 
 

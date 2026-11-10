@@ -1,7 +1,8 @@
 // The input picker, the header menus (open / close) and the spectrum traces with Reset.
 
-import { channelTile, renderPanel } from "./console.js";
+import { channelTile, fmtDb, renderPanel } from "./console.js";
 import { eqEditReset } from "./eqedit.js";
+import { buildMinimap, paintMinimap, revealTile } from "./minimap.js";
 import { autoReset } from "./range.js";
 import { $, loadInt, save, state } from "./shared.js";
 import { send } from "./socket.js";
@@ -9,55 +10,39 @@ import { stripInputChanged } from "./strip.js";
 import { renderVocal } from "./vocal.js";
 import { wfReset } from "./waterfall.js";
 
-// The channel bar, like the TF desk and StageMix: banks of BANK inputs (1-8, 9-16, ...);
-// the bank's inputs fill the bar as big tiles (number, name, the console's colour). Any
-// input is two taps away and nothing scrolls; ‹ › step through them one by one. The
-// inputs listed in config.toml are always analyzed; the others while shown.
-const BANK = 8;
-let bank = 0;  // the bank shown (it follows the selected input; a bank tab just shows it)
-
+// The channel bar, like the TF desk and StageMix: every input as a big tile (number, name,
+// fader, the console's colour) in one row that scrolls sideways, eight across where they fit,
+// with the minimap beside it (minimap.js: the whole desk in small, to jump anywhere); ‹ › step
+// through the inputs one by one. The inputs listed in config.toml are always analyzed; the
+// others while shown.
 export function buildChannelPicker() {
-  const nav = $("channels"), banks = $("banks");
+  const nav = $("channels");
   nav.replaceChildren();
-  banks.replaceChildren();
   const list = state.meta.channels;
-  for (let start = 0; start < list.length; start += BANK) {
-    const b = document.createElement("button");
-    b.type = "button";
-    const end = Math.min(start + BANK, list.length);
-    b.textContent = `${list[start].index + 1}–${list[end - 1].index + 1}`;
-    b.title = `Inputs ${b.textContent}`;
-    b.dataset.bank = start / BANK;
-    b.onclick = () => showBank(start / BANK);
-    banks.appendChild(b);
-  }
   for (const ch of list) {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = `ch-chip${ch.label === `Ch ${ch.index + 1}` ? " unnamed" : ""}`;
-    b.textContent = ch.label;
+    b.className = `ch-chip${ch.label.toLowerCase() === `ch ${ch.index + 1}` ? " unnamed" : ""}`;
+    const title = span("ch-title"), info = span("ch-info");
+    title.append(span("ch-num", ch.index + 1), span("ch-name", ch.label));
+    info.append(span("ch-db"), span("ch-ring"));
+    b.append(title, info);
     b.title = `Input ${ch.index + 1}`;
     b.dataset.input = ch.index;
-    b.dataset.num = ch.index + 1;
     b.onclick = () => selectInput(ch.index);
     nav.appendChild(b);
   }
+  buildMinimap(list);
   paintChannelTiles();
-  showBank(bankOf(state.input));
+  requestAnimationFrame(() => revealTile(state.input));
 }
 
-const bankOf = (input) => Math.max(0, Math.floor((state.meta?.channels || []).findIndex((c) => c.index === input) / BANK));
+const span = (cls, text = "") => Object.assign(document.createElement("span"), { className: cls, textContent: text });
 
-function showBank(n) {
-  bank = n;
-  const chips = [...$("channels").querySelectorAll(".ch-chip")];
-  chips.forEach((b, i) => { b.hidden = Math.floor(i / BANK) !== n; });
-  for (const b of $("banks").querySelectorAll("button")) b.setAttribute("aria-pressed", String(Number(b.dataset.bank) === n));
-}
-
-// What the desk says about each tile's channel: its colour (the top edge), on or off (an off
-// channel is dimmed), its fader (a bar along the bottom), and a dot while a ring comes from it
-// (state.ringingInputs, from rings.js). Once a frame at most: a moving fader sends many changes.
+// What the desk says about each tile's channel: its colour (the top edge), its fader (in dB, and
+// an upright meter at the right like the desk's), OFF (dimmed) and RING / FEEDBACK while a ring
+// comes from it (state.ringingInputs, from rings.js).
+// Once a frame at most: a moving fader sends many changes.
 let tilesQueued = false;
 export function paintChannelTiles() {
   if (tilesQueued) return;
@@ -65,14 +50,22 @@ export function paintChannelTiles() {
   requestAnimationFrame(() => {
     tilesQueued = false;
     for (const b of $("channels").querySelectorAll(".ch-chip")) {
-      const usb = Number(b.dataset.input), t = channelTile(usb), ring = state.ringingInputs?.get(usb);
+      const usb = Number(b.dataset.input), t = channelTile(usb);
+      const ring = t.on === false ? undefined : state.ringingInputs?.get(usb);   // off: it can't be feeding a ring
       if (t.color) b.style.setProperty("--ch", t.color); else b.style.removeProperty("--ch");
       if (t.pos === null) b.style.removeProperty("--fader"); else b.style.setProperty("--fader", `${(t.pos * 100).toFixed(1)}%`);
       b.classList.toggle("off", t.on === false);
       if (ring) b.dataset.ring = ring; else delete b.dataset.ring;
+      const db = b.querySelector(".ch-db");
+      if (t.on === false || t.pos === null) db.textContent = t.on === false ? "OFF" : "";
+      else db.replaceChildren(fmtDb(t.db), span("ch-unit", " dB"));
+      const tag = b.querySelector(".ch-ring");
+      tag.textContent = ring ? (ring === "feedback" ? "FEEDBACK" : "RING") : "";
+      tag.dataset.short = ring === "feedback" ? "FDBK" : "RING";   // a narrow tile's (style.css)
       const name = state.meta.channels.find((c) => c.index === usb)?.label ?? "";
-      b.title = `Input ${usb + 1}${t.on === false ? " · off" : ""}${ring ? ` · ${ring === "feedback" ? "feedback" : "ring"} from ${name}` : ""}`;
+      b.title = `Input ${usb + 1}${t.pos === null ? "" : ` · fader ${fmtDb(t.db)} dB`}${t.on === false ? " · off" : ""}${ring ? ` · ${ring === "feedback" ? "feedback" : "ring"} from ${name}` : ""}`;
     }
+    paintMinimap();
   });
 }
 
@@ -81,7 +74,8 @@ export function markSelected(index) {
     const on = Number(b.dataset.input) === index;
     b.setAttribute("aria-pressed", String(on));
   }
-  if (bankOf(index) !== bank) showBank(bankOf(index));
+  paintMinimap();
+  revealTile(index);
 }
 
 function step(by) {

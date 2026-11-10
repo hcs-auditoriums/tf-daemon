@@ -69,6 +69,7 @@ def rig(pa_leak_db=-12.0, tone_db=-120.0, tone_hz=2500.0, level=-1000, colour=()
         turn_s=(600.0, 600.0),
         tone_db=tone_db,
         tone_hz=tone_hz,
+        tone_fed=False,  # a steady tone on stage (an instrument): the fader doesn't change it
         speech_db=-30.0,
         colours=[list(colour)],
     )

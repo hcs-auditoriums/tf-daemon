@@ -25,9 +25,13 @@ StageMix's; each lit when that part is on, IN red with +48V) opens the channel's
 can be read and written for yet, and which are only simulated in demo mode, is in
 [Desk coverage](desk-coverage.md).
 
-**The channel bar** shows banks of 8 inputs as tiles: number, name and the console's colour,
-and from the desk a bar for the fader, `OFF` (dimmed) for a channel that is off, and a dot
-while a ring comes from it. On a phone the View / Traces / Show menus sit behind **☰**.
+**The channel bar** shows every input as a tile in one row that scrolls sideways (swipe, the
+wheel, or a mouse drag; eight across where they fit): number, name and the console's colour,
+and from the desk the fader in dB with an upright meter, `OFF` for a channel that is off, and
+`RING` / `FEEDBACK` while a ring comes from it (never on a channel that is off: it can't be
+feeding one). Beside it a minimap shows the whole desk in small (a bar per input at its fader
+height, ringing ones blinking, a window over the tiles in view): tap or drag it to jump there.
+On a phone the View / Traces / Show menus sit behind **☰**.
 
 **Keyboard.** **/** opens a command palette on every page: type to find a command or a
 channel, Tab to move, Enter to run. Shortcuts include **Shift+← / Shift+→** (pages),

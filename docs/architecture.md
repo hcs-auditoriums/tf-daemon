@@ -76,7 +76,8 @@ tf_daemon/
     index.html     the audio page; app.js draws it and starts everything
     audio/         its ES modules (no build step): shared.js (canvas, state),
                    plot.js (geometry, grid, traces, hover), socket.js (/ws/audio),
-                   controls.js, console.js (sidebar), eq.js (EQ overlay),
+                   controls.js (channel tiles), minimap.js (their scrolling
+                   row and minimap), console.js (sidebar), eq.js (EQ overlay),
                    range.js, rings.js, vocal.js, waterfall.js, eqedit.js (EQ
                    editing on the spectrum), eqbar.js (EQ toolbar), strip.js +
                    dyngraph.js (gain / gate / comp / sends panel), profiles.js (EQ profiles),

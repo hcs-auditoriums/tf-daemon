@@ -18,7 +18,7 @@ import { el } from "./common.js";
 // A command: {title, run, keys?: [...], when?: () => bool, group?: "EQ", help?: false}. A provider
 // is a function returning commands, called each time the palette opens (e.g. one per channel).
 // help: false leaves a command out of the ? list (one per channel would bury the rest); a
-// command without `run` is only a line in the ? list ("1–8: tile of this bank").
+// command without `run` is only a line in the ? list ("1–8: a tile of those in view").
 const providers = [];
 export function addCommands(provider) { providers.push(typeof provider === "function" ? provider : () => provider); }
 
